@@ -38,6 +38,9 @@ rules:
   documentation:
     - Sibling library files must use explicit type hints for all function signatures.
     - Use clear, descriptive variable names for intermediate transformation steps (e.g., `filtered_df` instead of `df2`).
+    - Maintain a `RESEARCH_LOG.md` at the root. 
+    - Every time a new `.py` file is created, add an entry with the hypothesis and the primary Polars transformations used.
+    - Docstrings: Use the `numpydoc` style to ensure compatibility with scientific documentation tools.
     
   visualizations:
     - When using Lets-plot, prioritize the "Grammar of Graphics" approach (e.g., `ggplot(df) + geom_point()`).
@@ -48,7 +51,3 @@ rules:
     - Imports: Logic in `research/` files should prioritize imports from their local `_*-lib.py` first, then the global `common/` directory.
     - Naming: Sibling files must always start with an underscore to visually distinguish them from the primary Jupytext scripts.
   
-  documentation:
-    - Maintain a `RESEARCH_LOG.md` at the root. 
-    - Every time a new `.py` file is created, add an entry with the hypothesis and the primary Polars transformations used.
-    - Docstrings: Use the `numpydoc` style to ensure compatibility with scientific documentation tools.
