@@ -4,6 +4,7 @@ from payroll_anomaly_ranking.evaluation import evaluate_scores
 from payroll_anomaly_ranking.explainability import build_review_queue
 from payroll_anomaly_ranking.features import build_features
 from payroll_anomaly_ranking.models import score_payroll
+from payroll_anomaly_ranking.pipeline import run_pipeline
 from payroll_anomaly_ranking.rules import add_rule_flags
 from payroll_anomaly_ranking.validation import validate_payroll
 
@@ -28,3 +29,25 @@ def test_end_to_end_smoke() -> None:
     assert category.height > 0
     assert queue.height > 0
     assert not {"name", "email", "bank_account", "ssn"} & set(payroll.columns)
+
+
+def test_pipeline_writes_outputs_only_when_requested(tmp_path) -> None:
+    config = PayrollConfig(
+        employee_count=80,
+        pay_periods=10,
+        review_budgets=(5, 10),
+        data_dir=tmp_path / "data",
+        output_dir=tmp_path / "outputs",
+    )
+
+    run_pipeline(config)
+
+    assert not config.data_dir.exists()
+    assert not config.output_dir.exists()
+
+    run_pipeline(config, write_outputs=True)
+
+    assert (config.data_dir / "synthetic_payroll.csv").exists()
+    assert (config.data_dir / "synthetic_payroll_labels.csv").exists()
+    assert (config.output_dir / "evaluation" / "category_error_analysis.csv").exists()
+    assert (config.output_dir / "evaluation" / "review_queue.csv").exists()
