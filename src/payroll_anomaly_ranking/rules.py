@@ -19,6 +19,7 @@ def add_rule_flags(payroll: pl.DataFrame) -> pl.DataFrame:
             (pl.col(PayrollCol.OVERTIME_HOURS) > 30).cast(pl.Int64).alias(RuleCol.EXTREME_OVERTIME),
             (pl.col(PayrollCol.MANUAL_ADJUSTMENT).abs() > pl.col(PayrollCol.GROSS_PAY).abs() * 0.25).cast(pl.Int64).alias(RuleCol.LARGE_MANUAL_ADJUSTMENT),
             (pl.col(PayrollCol.PAY_RATE).pct_change().over(PayrollCol.EMPLOYEE_ID).abs() > 0.25).fill_null(False).cast(pl.Int64).alias(RuleCol.PAY_RATE_CHANGE),
+            ((pl.col(PayrollCol.GROSS_PAY) > 0) & (pl.col(PayrollCol.DEDUCTIONS).fill_null(0) <= 0)).cast(pl.Int64).alias(RuleCol.MISSING_DEDUCTION),
         )
         .with_columns(
             (
@@ -30,6 +31,7 @@ def add_rule_flags(payroll: pl.DataFrame) -> pl.DataFrame:
                 + pl.col(RuleCol.EXTREME_OVERTIME) * 14
                 + pl.col(RuleCol.LARGE_MANUAL_ADJUSTMENT) * 10
                 + pl.col(RuleCol.PAY_RATE_CHANGE) * 12
+                + pl.col(RuleCol.MISSING_DEDUCTION) * 18
             ).alias(RuleCol.SEVERITY_SCORE)
         )
     )

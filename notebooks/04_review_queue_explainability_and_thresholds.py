@@ -16,7 +16,7 @@
 # %% [markdown]
 # # 04 Review Queue, Explainability, And Thresholds
 #
-# **Executive takeaway:** The review queue turns model outputs into analyst-readable triage: risk category, reason codes, expected versus actual pay context, dollars at risk, and review-safe explanations for synthetic payroll records.
+# **Executive takeaway:** The analyst-safe review queue turns model outputs into triage: risk category, reason codes, expected versus actual pay context, estimated dollars at risk, and review-safe explanations without synthetic evaluation labels.
 
 # %%
 import polars as pl
@@ -30,13 +30,14 @@ from payroll_anomaly_ranking.presentation import compact_case_cards
 # %%
 config = PayrollConfig(employee_count=650, pay_periods=26, review_budgets=(10, 25, 50))
 results = run_pipeline(config)
-queue = results["review_queue"]
+queue = results["analyst_review_queue"]
+evaluation_queue = results["evaluation_labeled_review_queue"]
 scored = results["scored"]
 
 # %% [markdown]
 # ## Review-Safe Language
 #
-# Queue records are prioritized for payroll review because they differ from expected history, peer context, deterministic payroll rules, or dollar-impact signals. They are not confirmed misconduct findings and should not be treated as automated adverse decisions.
+# Queue records are prioritized for payroll review because they differ from expected history, peer context, deterministic payroll rules, missing-deduction checks, or estimated-exposure signals. They are not confirmed misconduct findings and should not be treated as automated adverse decisions.
 
 # %%
 sample_review_language()
@@ -61,6 +62,22 @@ queue.select(
     ReviewCol.DOLLARS_AT_RISK,
     RuleCol.REASON_CODES,
     ReviewCol.EXPLANATION,
+).head(15)
+
+# %% [markdown]
+# ## Evaluation-Labeled Queue
+#
+# Synthetic labels and injected dollar impacts are preserved only in the separate evaluation-labeled queue for metrics and category analysis. They are intentionally absent from the analyst-safe queue above.
+
+# %%
+evaluation_queue.select(
+    ReviewCol.RANK,
+    PayrollCol.EMPLOYEE_ID,
+    PayrollCol.PAY_PERIOD_INDEX,
+    ReviewCol.DOLLARS_AT_RISK,
+    PayrollCol.IS_ANOMALY,
+    PayrollCol.ANOMALY_CATEGORY,
+    PayrollCol.ANOMALY_DOLLARS,
 ).head(15)
 
 # %% [markdown]
@@ -120,4 +137,4 @@ queue.group_by(ReviewCol.RISK_CATEGORY).agg(pl.len().alias(AggregateCol.RECORDS)
 # %% [markdown]
 # ## What This Proves
 #
-# The scoring output can be translated into a practical, review-safe payroll queue with explanations, compact case cards, risk categories, workload controls, and a clear analyst operating model.
+# The scoring output can be translated into a practical, review-safe payroll queue with explanations, compact case cards, risk categories, workload controls, and a clear analyst operating model while synthetic labels remain isolated for evaluation.

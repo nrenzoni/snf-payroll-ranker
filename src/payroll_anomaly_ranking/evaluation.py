@@ -3,7 +3,7 @@ from __future__ import annotations
 import polars as pl
 from sklearn.metrics import average_precision_score
 
-from payroll_anomaly_ranking.columns import AggregateCol, PayrollCol, ScoreCol
+from payroll_anomaly_ranking.columns import AggregateCol, MODEL_FEATURE_COLUMNS, PayrollCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
 
 
@@ -72,5 +72,114 @@ def backtest_by_period(scored: pl.DataFrame, config: PayrollConfig = PayrollConf
     return pl.DataFrame(rows)
 
 
+def rolling_origin_evaluation(scored: pl.DataFrame, config: PayrollConfig = PayrollConfig()) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    periods = sorted(scored.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list())
+    if len(periods) < 6:
+        return pl.DataFrame(), pl.DataFrame(), pl.DataFrame()
+
+    metric_rows = []
+    selected_rows = []
+    queue_sets = []
+    thresholds = [0.35, 0.5, 0.65, 0.8]
+    for origin, validation_period in enumerate(periods[3:-2], start=1):
+        test_period = periods[periods.index(validation_period) + 1]
+        train_periods = [period for period in periods if period < validation_period]
+        validation = scored.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) == validation_period)
+        test = scored.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) == test_period)
+        selected_threshold, validation_f1 = _select_threshold(validation, thresholds)
+        test_at_threshold = test.filter(pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= selected_threshold)
+        budget = min(config.review_budgets[0], test.height)
+        top = test.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(budget)
+        queue_sets.append(set(top.get_column(PayrollCol.RECORD_ID).to_list()))
+        metric_rows.append(
+            {
+                "origin": origin,
+                "train_start_period": min(train_periods),
+                "train_end_period": max(train_periods),
+                "validation_period": validation_period,
+                "test_period": test_period,
+                "selected_threshold": selected_threshold,
+                "validation_f1": validation_f1,
+                "threshold_precision": _precision(test_at_threshold),
+                "threshold_recall": _recall(test, test_at_threshold),
+                **precision_recall_at_k(test, budget),
+                "test_score_mean": float(test.select(pl.mean(ScoreCol.FINAL_ANOMALY_SCORE)).item() or 0.0),
+            }
+        )
+        selected_rows.append(
+            {
+                "origin": origin,
+                "selected_on_period": validation_period,
+                "applied_to_period": test_period,
+                "selected_threshold": selected_threshold,
+                "validation_f1": validation_f1,
+            }
+        )
+
+    metrics = pl.DataFrame(metric_rows)
+    settings = pl.DataFrame(selected_rows)
+    stability = pl.DataFrame(
+        [
+            {
+                "origin_count": metrics.height,
+                "precision_at_k_min": float(metrics.select(pl.min("precision_at_k")).item() or 0.0),
+                "precision_at_k_max": float(metrics.select(pl.max("precision_at_k")).item() or 0.0),
+                "recall_at_k_min": float(metrics.select(pl.min("recall_at_k")).item() or 0.0),
+                "recall_at_k_max": float(metrics.select(pl.max("recall_at_k")).item() or 0.0),
+                "score_mean_min": float(metrics.select(pl.min("test_score_mean")).item() or 0.0),
+                "score_mean_max": float(metrics.select(pl.max("test_score_mean")).item() or 0.0),
+                "mean_adjacent_queue_overlap": _mean_adjacent_overlap(queue_sets),
+            }
+        ]
+    )
+    return metrics, settings, stability
+
+
+def leakage_checks(analyst_queue: pl.DataFrame) -> pl.DataFrame:
+    leakage_columns = {PayrollCol.IS_ANOMALY, PayrollCol.ANOMALY_CATEGORY, PayrollCol.ANOMALY_DOLLARS}
+    return pl.DataFrame(
+        [
+            {"check": "model_features_exclude_labels", "passed": not bool(leakage_columns & set(MODEL_FEATURE_COLUMNS))},
+            {"check": "analyst_queue_excludes_labels", "passed": not bool(leakage_columns & set(analyst_queue.columns))},
+            {"check": "scoring_features_exclude_anomaly_dollars", "passed": PayrollCol.ANOMALY_DOLLARS not in MODEL_FEATURE_COLUMNS},
+        ]
+    )
+
+
 def _f1(precision: float, recall: float) -> float:
     return 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
+
+
+def _select_threshold(validation: pl.DataFrame, thresholds: list[float]) -> tuple[float, float]:
+    best_threshold = thresholds[0]
+    best_f1 = -1.0
+    for threshold in thresholds:
+        selected = validation.filter(pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= threshold)
+        f1 = _f1(_precision(selected), _recall(validation, selected))
+        if f1 > best_f1:
+            best_threshold = threshold
+            best_f1 = f1
+    return best_threshold, best_f1
+
+
+def _precision(selected: pl.DataFrame) -> float:
+    if selected.height == 0:
+        return 0.0
+    return selected.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height / selected.height
+
+
+def _recall(all_rows: pl.DataFrame, selected: pl.DataFrame) -> float:
+    total = all_rows.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height
+    if total == 0:
+        return 0.0
+    return selected.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height / total
+
+
+def _mean_adjacent_overlap(queue_sets: list[set[int]]) -> float:
+    if len(queue_sets) < 2:
+        return 0.0
+    overlaps = []
+    for left, right in zip(queue_sets, queue_sets[1:], strict=False):
+        denominator = len(left | right) or 1
+        overlaps.append(len(left & right) / denominator)
+    return sum(overlaps) / len(overlaps)

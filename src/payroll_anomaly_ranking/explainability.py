@@ -32,14 +32,21 @@ def build_review_queue(scored: pl.DataFrame, top_k: int = 25) -> pl.DataFrame:
         ReviewCol.DIFFERENCE_FROM_EXPECTED,
         FeatureCol.PEER_GROSS_MEDIAN,
         RuleCol.REASON_CODES,
-        PayrollCol.ANOMALY_DOLLARS,
-        PayrollCol.ANOMALY_CATEGORY,
+        ScoreCol.ESTIMATED_EXPOSURE,
         ReviewCol.EXPLANATION,
         *RULE_COLUMNS,
     ]
     return explained.filter(pl.col(ScoreCol.PAY_PERIOD_RANK) <= top_k).select(fields).rename(
-        {ScoreCol.PAY_PERIOD_RANK: ReviewCol.RANK, FeatureCol.GROSS_PAY_ROLLING_MEDIAN: ReviewCol.EXPECTED_GROSS_PAY, FeatureCol.PEER_GROSS_MEDIAN: ReviewCol.PEER_CONTEXT, PayrollCol.ANOMALY_DOLLARS: ReviewCol.DOLLARS_AT_RISK}
+        {ScoreCol.PAY_PERIOD_RANK: ReviewCol.RANK, FeatureCol.GROSS_PAY_ROLLING_MEDIAN: ReviewCol.EXPECTED_GROSS_PAY, FeatureCol.PEER_GROSS_MEDIAN: ReviewCol.PEER_CONTEXT, ScoreCol.ESTIMATED_EXPOSURE: ReviewCol.DOLLARS_AT_RISK}
     ).sort([PayrollCol.PAY_PERIOD_INDEX, ReviewCol.RANK])
+
+
+def build_evaluation_review_queue(scored: pl.DataFrame, top_k: int = 25) -> pl.DataFrame:
+    return build_review_queue(scored, top_k).join(
+        scored.select(PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX, PayrollCol.IS_ANOMALY, PayrollCol.ANOMALY_CATEGORY, PayrollCol.ANOMALY_DOLLARS),
+        on=[PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX],
+        how="left",
+    )
 
 
 def sample_review_language() -> str:
@@ -47,6 +54,8 @@ def sample_review_language() -> str:
 
 
 def _primary_reason(row: dict[str, object]) -> str:
+    if int(row.get(RuleCol.MISSING_DEDUCTION) or 0):
+        return "Rule flag: missing or zero deductions"
     if row.get(RuleCol.REASON_CODES) and row[RuleCol.REASON_CODES] != "none":
         return f"Rule flag: {row[RuleCol.REASON_CODES]}"
     if abs(float(row.get(FeatureCol.PEER_GROSS_DEVIATION_RATIO) or 0)) > 0.5:
@@ -57,6 +66,8 @@ def _primary_reason(row: dict[str, object]) -> str:
 
 
 def _secondary_reason(row: dict[str, object]) -> str:
+    if int(row.get(RuleCol.MISSING_DEDUCTION) or 0):
+        return "Expected payroll deductions appear absent or materially understated"
     if float(row.get(PayrollCol.OVERTIME_HOURS) or 0) > 20:
         return "Elevated overtime hours contribute to payroll risk"
     if float(row.get(ReviewCol.DIFFERENCE_FROM_EXPECTED) or 0) > 1000:

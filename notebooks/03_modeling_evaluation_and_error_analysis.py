@@ -16,7 +16,7 @@
 # %% [markdown]
 # # 03 Modeling, Evaluation, And Error Analysis
 #
-# **Executive takeaway:** Payroll anomaly ranking should be evaluated against realistic review budgets over time. Hybrid scoring performs best when it captures high-value synthetic exceptions early enough for payroll analysts to review before finalization.
+# **Executive takeaway:** Payroll anomaly ranking should be evaluated against realistic review budgets over time. Hybrid scoring is stronger when label-free exposure estimates, validation-selected thresholds, and rolling-origin checks are stable enough for payroll analysts to review before finalization.
 
 # %%
 import polars as pl
@@ -42,6 +42,10 @@ metrics = results["metrics"]
 comparison = results["model_comparison"]
 backtest = results["backtest"]
 category = results["category_error_analysis"]
+rolling_origin = results["rolling_origin_metrics"]
+validation_settings = results["validation_selected_settings"]
+stability = results["stability_summary"]
+leakage = results["leakage_checks"]
 scored = results["scored"]
 review_budget = 25
 
@@ -61,7 +65,7 @@ review_budget = 25
 metrics
 
 # %% [markdown]
-# Precision@K shows how concentrated true synthetic exceptions are in the queue. Recall@K and dollar capture rate show whether the queue covers enough total risk. Average anomaly rank and mean reciprocal rank summarize how early anomalies appear in each period.
+# Precision@K shows how concentrated true synthetic exceptions are in the queue. Recall@K and dollar capture rate show whether the queue covers enough evaluation-only synthetic impact. Average anomaly rank and mean reciprocal rank summarize how early anomalies appear in each period.
 
 # %%
 precision_at_k_chart(metrics)
@@ -78,7 +82,7 @@ dollars_captured_chart(metrics)
 comparison
 
 # %% [markdown]
-# The hybrid ranking fits payroll review because compliance-like rule breaks, unusual employee history, peer differences, multivariate ML outliers, and dollar impact all describe different analyst concerns. A single score source can miss costly exceptions that another source catches.
+# The hybrid ranking fits payroll review because compliance-like rule breaks, unusual employee history, peer differences, multivariate ML outliers, and label-free estimated exposure all describe different analyst concerns. A single score source can miss costly exceptions that another source catches.
 
 # %% [markdown]
 # ## Backtest By Period
@@ -90,6 +94,23 @@ backtest
 
 # %%
 ggplot(backtest, aes(PayrollCol.PAY_PERIOD_INDEX, MetricCol.PRECISION_AT_K)) + geom_line() + geom_point() + ggtitle("Backtest Precision@K Over Time") + theme_minimal()
+
+# %% [markdown]
+# ## Rolling-Origin Validation And Leakage Checks
+#
+# Rolling-origin evaluation calibrates a threshold on one pay period and reports later test-period metrics. The leakage table explicitly confirms that injected labels and injected dollar impacts are excluded from model features and analyst queues.
+
+# %%
+rolling_origin
+
+# %%
+validation_settings
+
+# %%
+stability
+
+# %%
+leakage
 
 # %% [markdown]
 # ## Category-Level Error Analysis
@@ -104,7 +125,7 @@ category.sort(AggregateCol.FALSE_NEGATIVES, descending=True)
 #
 # Reviewing more records generally improves recall and dollar capture but can reduce precision as lower-ranked items enter the queue. The practical review budget is the point where additional review effort still captures meaningful dollars at risk without overwhelming payroll analysts with too many low-confidence exceptions.
 #
-# Category-level false negatives are useful for rule tuning and analyst feedback: a missed high-dollar category may justify more weight, a new deterministic rule, or a lower threshold during sensitive payroll periods.
+# Category-level false negatives are useful for rule tuning and analyst feedback: a missed high-exposure category may justify more weight, a new deterministic rule, or a lower threshold during sensitive payroll periods.
 
 # %% [markdown]
 # ## Common Evaluation Mistakes To Avoid
@@ -388,7 +409,7 @@ ggplot(queue_plot, aes("budget", "records", color="outcome")) + geom_point(size=
 #
 # **Anti-pattern:** rank by anomaly likelihood alone and treat every synthetic anomaly as equally important regardless of dollars at risk or review capacity.
 #
-# **Corrected method:** include severity and dollar exposure when ranking review candidates, then compare captured exposure per reviewed row across fixed review budgets. Impact-aware ranking may not dominate every small queue, so the useful question is the operational tradeoff between anomaly count and dollars at risk.
+# **Corrected method:** include severity and label-free estimated exposure when ranking review candidates, then compare captured evaluation impact per reviewed row across fixed review budgets. Impact-aware ranking may not dominate every small queue, so the useful question is the operational tradeoff between anomaly count and estimated exposure.
 
 # %%
 importance_rows = []
@@ -420,7 +441,7 @@ importance_summary
 ggplot(importance_summary, aes("budget", "dollars_captured_per_review", color="method")) + geom_point(size=5) + geom_line() + ggtitle("Review Budget Tradeoff: Likelihood vs Dollar Exposure") + theme_minimal()
 
 # %% [markdown]
-# The corrected ranking is evaluated on exposure captured under fixed review capacity, not on anomaly count alone. `max_missed_anomaly_dollars` makes the residual risk visible when a queue misses a high-dollar synthetic exception.
+# The corrected ranking is evaluated on exposure captured under fixed review capacity, not on anomaly count alone. `max_missed_anomaly_dollars` remains an evaluation-only synthetic diagnostic for residual risk; it is not an analyst-facing scoring input.
 
 # %% [markdown]
 # ### Mistake 6: Overclaiming Fraud Detection
@@ -444,10 +465,10 @@ ggplot(importance_summary, aes("budget", "dollars_captured_per_review", color="m
 # | Default Isolation Forest | Hidden fit, contamination, and stability assumptions | Configured temporal model plus seed-stability metrics | Document assumptions behind review queues |
 # | ROC-AUC only | One generic metric hides imbalance | PR-AUC, lift, Precision@K, and dollar capture | Judge the ranked analyst queue, not only model discrimination |
 # | False-positive neglect | Captured anomalies shown without review burden | False positives, false negatives, and review minutes | Balance recall against analyst capacity |
-# | Equal importance | Likelihood-only ranking treats dollars as secondary | Dollar exposure per review and missed high-dollar anomalies | Prioritize material payroll risk under fixed budget |
+# | Equal importance | Likelihood-only ranking treats exposure as secondary | Estimated exposure per review and missed high-impact anomalies | Prioritize material payroll risk under fixed budget |
 # | Fraud overclaiming | Claims confirmed fraud or misconduct | Review-prioritization language | Keep conclusions within synthetic-data evidence |
 
 # %% [markdown]
 # ## What This Proves
 #
-# The evaluation layer supports temporal, review-budget-oriented decisions with precision, recall, F1, PR-AUC, rank, dollar capture, model comparison, period backtesting, and category error analysis. These outputs make the ranking workflow auditable for business review capacity rather than only model accuracy, and they surface synthetic exceptions as review candidates rather than confirmed fraud.
+# The evaluation layer supports temporal, review-budget-oriented decisions with precision, recall, F1, PR-AUC, rank, dollar capture, model comparison, period backtesting, rolling-origin validation, stability summaries, leakage checks, and category error analysis. These outputs make the ranking workflow auditable for business review capacity rather than only model accuracy, and they surface synthetic exceptions as review candidates rather than confirmed fraud.

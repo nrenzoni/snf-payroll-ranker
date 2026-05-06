@@ -18,7 +18,7 @@ class PayrollConfig:
             ScoreCol.HISTORY_SCORE: 0.22,
             ScoreCol.PEER_SCORE: 0.18,
             ScoreCol.ML_SCORE: 0.20,
-            ScoreCol.DOLLAR_SCORE: 0.10,
+            ScoreCol.EXPOSURE_SCORE: 0.10,
         }
     )
     data_dir: Path = Path("data/synthetic")

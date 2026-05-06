@@ -1,6 +1,6 @@
 # Payroll Anomaly Ranking
 
-This project demonstrates a privacy-safe payroll anomaly detection workflow using synthetic employee-pay-period data. It generates payroll-like records, injects known anomaly categories, builds leakage-safe features, compares rule/statistical/Isolation Forest/hybrid scoring approaches, and exports an analyst-ready review queue.
+This project demonstrates a privacy-safe payroll anomaly detection workflow using synthetic employee-pay-period data. It generates payroll-like records, injects known anomaly categories, builds leakage-safe features, compares rule/statistical/Isolation Forest/hybrid scoring approaches, and exports separate analyst-safe and evaluation-labeled review queues.
 
 ## Privacy Guardrails
 
@@ -29,16 +29,21 @@ Expected generated files:
 - `outputs/evaluation/model_comparison.csv`
 - `outputs/evaluation/category_error_analysis.csv`
 - `outputs/evaluation/backtest_metrics.csv`
-- `outputs/evaluation/review_queue.csv`
+- `outputs/evaluation/rolling_origin_metrics.csv`
+- `outputs/evaluation/validation_selected_settings.csv`
+- `outputs/evaluation/stability_summary.csv`
+- `outputs/evaluation/leakage_checks.csv`
+- `outputs/evaluation/analyst_review_queue.csv`
+- `outputs/evaluation/evaluation_labeled_review_queue.csv`
 
 ## Notebook Sequence
 
 The Jupytext-paired notebook index is `notebooks/payroll_anomaly_detection.py`. The business-facing sequence is:
 
 - `notebooks/01_problem_framing_and_data_maturity.py`: business framing, synthetic-data privacy, payroll anomaly taxonomy, schema dictionary, validation failures versus warnings, quality summaries, and data maturity visuals.
-- `notebooks/02_feature_engineering_and_baselines.py`: leakage-safe employee history features, peer-relative context, rule flags, robust statistical features, score components, baseline comparison, score distribution, and selected employee history.
-- `notebooks/03_modeling_evaluation_and_error_analysis.py`: temporal validation framing, precision@K, recall@K, F1@K, PR-AUC, average anomaly rank, mean reciprocal rank, dollars captured@K, model comparison, backtesting, and category error analysis.
-- `notebooks/04_review_queue_explainability_and_thresholds.py`: analyst-readable review queue, review-safe explanations, compact case cards, top-K and threshold workload views, risk categories, operating model, and conceptual feedback capture.
+- `notebooks/02_feature_engineering_and_baselines.py`: leakage-safe employee history features, period-safe peer context, rule flags, robust statistical features, estimated exposure, score components, baseline comparison, score distribution, and selected employee history.
+- `notebooks/03_modeling_evaluation_and_error_analysis.py`: temporal validation framing, rolling-origin validation, validation-selected thresholds, stability summaries, leakage checks, precision@K, recall@K, F1@K, PR-AUC, average anomaly rank, mean reciprocal rank, dollars captured@K, model comparison, backtesting, and category error analysis.
+- `notebooks/04_review_queue_explainability_and_thresholds.py`: analyst-safe review queue, separate evaluation-labeled queue, review-safe explanations, compact case cards, top-K and threshold workload views, risk categories, operating model, and conceptual feedback capture.
 - `notebooks/05_production_monitoring_and_deployment_path.py`: realistic deployment path, architecture table, monitoring metrics, retraining triggers, limitations, and governance controls without claiming live integrations.
 
 Run a notebook from a clean checkout with:
@@ -53,8 +58,8 @@ uv run jupyter nbconvert --to notebook --execute notebooks/01_problem_framing_an
 - Synthetic employee and payroll-period generation with departments, job families, locations, pay types, tenure, lifecycle dates, pay rates, status changes, payroll values, and controlled imperfections.
 - Injected anomaly labels for duplicate payment, overtime spike, pay after termination, gross pay spike, incorrect pay rate, missing deduction, negative net pay, retro pay outlier, department payroll spike, and new employee large payment.
 - Validation checks that separate hard data failures from warning-level payroll exceptions.
-- Prior-period history features, peer-relative features, robust statistical features, deterministic rule flags, Isolation Forest scores, and configurable hybrid ranking.
-- Temporal evaluation, review-budget metrics, dollars-at-risk capture, model comparison, backtesting-style summaries, category error analysis, and review queue explanations.
+- Prior-period history features, period-safe peer-relative features, robust statistical features, deterministic rule flags including missing deductions, Isolation Forest scores, estimated exposure, and configurable hybrid ranking.
+- Temporal evaluation, rolling-origin validation, review-budget metrics, dollars-at-risk capture, model comparison, backtesting-style summaries, leakage checks, category error analysis, and review queue explanations.
 
 ## Intended Production Flow
 

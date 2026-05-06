@@ -16,7 +16,7 @@
 # %% [markdown]
 # # 02 Feature Engineering And Baselines
 #
-# **Executive takeaway:** Leakage-safe employee history, peer context, deterministic rules, robust statistics, ML scores, and dollar impact each capture different payroll review signals. The hybrid rank combines them so analysts are not dependent on a single fragile indicator.
+# **Executive takeaway:** Leakage-safe employee history, period-safe peer context, deterministic rules, robust statistics, ML scores, and estimated exposure each capture different payroll review signals. The hybrid rank combines them so analysts are not dependent on a single fragile indicator.
 
 # %%
 import polars as pl
@@ -33,7 +33,7 @@ LetsPlot.setup_html()
 config = PayrollConfig(employee_count=650, pay_periods=26)
 results = run_pipeline(config)
 scored = results["scored"]
-queue = results["review_queue"]
+queue = results["analyst_review_queue"]
 
 # %% [markdown]
 # ## Concrete Feature Examples
@@ -56,7 +56,8 @@ scored.join(example_ids, on=PayrollCol.EMPLOYEE_ID, how="semi").sort([PayrollCol
     ScoreCol.RULE_SCORE,
     ScoreCol.STATISTICAL_SCORE,
     ScoreCol.ML_SCORE,
-    ScoreCol.DOLLAR_SCORE,
+    ScoreCol.EXPOSURE_SCORE,
+    ScoreCol.ESTIMATED_EXPOSURE,
     ScoreCol.FINAL_ANOMALY_SCORE,
     ScoreCol.PAY_PERIOD_RANK,
 ).filter(pl.col(ScoreCol.PAY_PERIOD_RANK) <= 25).head(12)
@@ -64,14 +65,14 @@ scored.join(example_ids, on=PayrollCol.EMPLOYEE_ID, how="semi").sort([PayrollCol
 # %% [markdown]
 # ## Leakage-Safe Construction
 #
-# Historical features use shifted employee history, so current-period and future-period gross pay are excluded from rolling medians and lag changes. Peer features compare the current row to employees in similar synthetic department, job family, pay type, location, and tenure groups.
+# Historical features use shifted employee history, so current-period and future-period gross pay are excluded from rolling medians and lag changes. Peer and robust features use prior pay periods where available, with early-period fallbacks for sparse synthetic history.
 #
-# Injected labels such as `is_anomaly`, `anomaly_category`, and `anomaly_dollars` are retained for evaluation and cost-aware reporting. They are not used as scoring features for the Isolation Forest or as direct inputs to history, peer, rule, or statistical features.
+# Injected labels such as `is_anomaly`, `anomaly_category`, and `anomaly_dollars` are retained for evaluation-only artifacts. They are not used as scoring features, estimated exposure inputs, or analyst-facing queue fields.
 
 # %% [markdown]
 # ## Baseline Ranking Signals
 #
-# The model comparison output evaluates rule score, statistical score, ML score, and hybrid score under the same review-budget framing. The hybrid score is the operating rank because deterministic compliance issues, statistical outliers, peer context, employee history, and dollar impact represent different review risks.
+# The model comparison output evaluates rule score, statistical score, ML score, and hybrid score under the same review-budget framing. The hybrid score is the operating rank because deterministic compliance issues, statistical outliers, peer context, employee history, and estimated exposure represent different review risks.
 
 # %%
 results["model_comparison"]
@@ -83,7 +84,8 @@ scored.select(
     ScoreCol.RULE_SCORE,
     ScoreCol.STATISTICAL_SCORE,
     ScoreCol.ML_SCORE,
-    ScoreCol.DOLLAR_SCORE,
+    ScoreCol.EXPOSURE_SCORE,
+    ScoreCol.ESTIMATED_EXPOSURE,
     ScoreCol.FINAL_ANOMALY_SCORE,
     ScoreCol.PAY_PERIOD_RANK,
     RuleCol.REASON_CODES,

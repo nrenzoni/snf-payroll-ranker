@@ -48,10 +48,29 @@ def add_isolation_forest_scores(payroll: pl.DataFrame, config: PayrollConfig = P
 
 
 def add_hybrid_scores(payroll: pl.DataFrame, config: PayrollConfig = PayrollConfig()) -> pl.DataFrame:
+    expected_gross = pl.coalesce(
+        pl.col(FeatureCol.GROSS_PAY_ROLLING_MEDIAN),
+        pl.col(FeatureCol.PEER_GROSS_MEDIAN),
+        pl.col(PayrollCol.GROSS_PAY),
+    )
+    expected_deductions = pl.col(PayrollCol.GROSS_PAY) * pl.coalesce(
+        pl.col(FeatureCol.DEDUCTION_RATIO_ROLLING_MEDIAN),
+        pl.lit(0.22),
+    )
+    exposure = pl.max_horizontal(
+        (pl.col(PayrollCol.GROSS_PAY) - expected_gross).clip(0, None),
+        (pl.col(PayrollCol.GROSS_PAY) - pl.col(FeatureCol.PEER_GROSS_MEDIAN).fill_null(expected_gross)).clip(0, None),
+        ((pl.col(PayrollCol.OVERTIME_HOURS) - pl.col(FeatureCol.OVERTIME_ROLLING_MEDIAN).fill_null(0)).clip(0, None) * pl.col(PayrollCol.PAY_RATE) * 1.5),
+        pl.col(PayrollCol.MANUAL_ADJUSTMENT).abs().fill_null(0),
+        (expected_deductions - pl.col(PayrollCol.DEDUCTIONS).fill_null(0)).clip(0, None),
+        pl.col(PayrollCol.GROSS_PAY).abs().fill_null(0) * (pl.col(RuleCol.SEVERITY_SCORE).fill_null(0) / 100),
+    )
     scored = payroll.with_columns(
         (pl.col(RuleCol.SEVERITY_SCORE) / 100).clip(0, 1).alias(ScoreCol.RULE_SCORE),
-        (pl.col(PayrollCol.ANOMALY_DOLLARS).abs() / pl.col(PayrollCol.GROSS_PAY).abs().clip(1, None)).clip(0, 1).alias(ScoreCol.DOLLAR_SCORE),
+        exposure.alias(ScoreCol.ESTIMATED_EXPOSURE),
+        (exposure / pl.col(PayrollCol.GROSS_PAY).abs().clip(1, None)).clip(0, 1).alias(ScoreCol.EXPOSURE_SCORE),
     )
+    scored = scored.with_columns(pl.col(ScoreCol.EXPOSURE_SCORE).alias(ScoreCol.DOLLAR_SCORE))
     weights = config.hybrid_weights
     return scored.with_columns(
         sum(pl.col(name).fill_null(0) * weight for name, weight in weights.items()).alias(ScoreCol.FINAL_ANOMALY_SCORE)

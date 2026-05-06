@@ -43,6 +43,7 @@ class FeatureCol(StrEnum):
     GROSS_PAY_PCT_CHANGE = "gross_pay_pct_change"
     GROSS_PAY_CHANGE_RANK = "gross_pay_change_rank"
     DEDUCTION_RATIO = "deduction_ratio"
+    DEDUCTION_RATIO_ROLLING_MEDIAN = "deduction_ratio_rolling_median"
     NET_TO_GROSS_RATIO = "net_to_gross_ratio"
     TENURE_BUCKET = "tenure_bucket"
     PEER_GROSS_MEDIAN = "peer_gross_median"
@@ -67,6 +68,7 @@ class RuleCol(StrEnum):
     EXTREME_OVERTIME = "rule_extreme_overtime"
     LARGE_MANUAL_ADJUSTMENT = "rule_large_manual_adjustment"
     PAY_RATE_CHANGE = "rule_pay_rate_change"
+    MISSING_DEDUCTION = "rule_missing_deduction"
     SEVERITY_SCORE = "rule_severity_score"
     REASON_CODES = "rule_reason_codes"
 
@@ -77,6 +79,8 @@ class ScoreCol(StrEnum):
     HISTORY_SCORE = "history_score"
     PEER_SCORE = "peer_score"
     ML_SCORE = "ml_score"
+    ESTIMATED_EXPOSURE = "estimated_exposure"
+    EXPOSURE_SCORE = "exposure_score"
     DOLLAR_SCORE = "dollar_score"
     FINAL_ANOMALY_SCORE = "final_anomaly_score"
     PAY_PERIOD_RANK = "pay_period_rank"
@@ -93,6 +97,11 @@ class ReviewCol(StrEnum):
     PEER_CONTEXT = "peer_context"
     DOLLARS_AT_RISK = "dollars_at_risk"
     ACTUAL_GROSS_PAY = "actual_gross_pay"
+
+
+class OutputName(StrEnum):
+    ANALYST_REVIEW_QUEUE = "analyst_review_queue.csv"
+    EVALUATION_LABELED_REVIEW_QUEUE = "evaluation_labeled_review_queue.csv"
 
 
 class MetricCol(StrEnum):
@@ -147,6 +156,7 @@ RULE_FLAG_COLUMNS = [
     RuleCol.EXTREME_OVERTIME,
     RuleCol.LARGE_MANUAL_ADJUSTMENT,
     RuleCol.PAY_RATE_CHANGE,
+    RuleCol.MISSING_DEDUCTION,
 ]
 
 PEER_GROUP_COLUMNS = [
@@ -170,6 +180,7 @@ MODEL_FEATURE_COLUMNS = [
     PayrollCol.MANUAL_ADJUSTMENT,
     FeatureCol.GROSS_PAY_PCT_CHANGE,
     FeatureCol.DEDUCTION_RATIO,
+    FeatureCol.DEDUCTION_RATIO_ROLLING_MEDIAN,
     FeatureCol.NET_TO_GROSS_RATIO,
     FeatureCol.PEER_GROSS_DEVIATION_RATIO,
     FeatureCol.PEER_OVERTIME_DEVIATION_RATIO,
