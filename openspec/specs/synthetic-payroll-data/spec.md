@@ -1,8 +1,6 @@
 ## Purpose
 Define synthetic payroll data generation requirements for anomaly detection development and evaluation.
-
 ## Requirements
-
 ### Requirement: Synthetic payroll data only
 The system SHALL generate and use synthetic payroll data that contains no real employee identifiers, salaries, tax information, banking details, HR comments, or company-specific records.
 
@@ -26,7 +24,7 @@ The system SHALL generate payroll records at employee-pay-period grain with real
 - **THEN** the data includes variation across departments, job levels, hourly and salaried workers, tenure, promotions, bonuses, commissions, retro pay, deductions, overtime, terminations, and seasonal periods
 
 ### Requirement: Injected anomaly labels
-The system SHALL inject known payroll anomaly categories and retain labels for evaluation.
+The system SHALL inject known payroll anomaly categories and retain labels for evaluation-only artifacts.
 
 #### Scenario: Supported anomaly categories are injected
 - **WHEN** the data generator injects anomalies
@@ -35,6 +33,14 @@ The system SHALL inject known payroll anomaly categories and retain labels for e
 #### Scenario: Evaluation labels are retained separately from model features
 - **WHEN** model features are built
 - **THEN** injected anomaly labels are available for evaluation but are not included as training or scoring features
+
+#### Scenario: Evaluation labels are absent from analyst outputs
+- **WHEN** analyst-facing review outputs are generated
+- **THEN** injected anomaly labels, injected anomaly categories, and injected anomaly dollar impacts are excluded from those outputs
+
+#### Scenario: Evaluation labels remain available for synthetic analysis
+- **WHEN** synthetic evaluation outputs are generated
+- **THEN** injected anomaly labels and injected anomaly dollar impacts are available in separate evaluation artifacts for metrics, category error analysis, and notebook interpretation
 
 ### Requirement: Reproducible data generation
 The system SHALL make synthetic data generation reproducible through configuration and random seeds.
@@ -70,3 +76,4 @@ The notebooks SHALL demonstrate hard validation failures separately from payroll
 #### Scenario: Validation outputs are separated
 - **WHEN** validation results are shown in the data maturity notebook
 - **THEN** hard failures are presented as pipeline-stopping data issues and warnings are presented as payroll exceptions that may require analyst review
+
