@@ -54,6 +54,7 @@ from lets_plot import LetsPlot
 
 
 from payroll_anomaly_ranking.charts import department_heatmap_data, overtime_distribution_chart, pay_distribution_chart, payroll_trend_chart
+from payroll_anomaly_ranking.columns import AggregateCol, PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.pipeline import run_pipeline
 from payroll_anomaly_ranking.presentation import data_quality_summary, synthetic_schema_dictionary
@@ -80,7 +81,7 @@ synthetic_schema_dictionary()
 # Hard failures are pipeline-stopping data problems, such as missing required columns or impossible lifecycle dates. Warning-level checks are payroll exceptions that may be legitimate but should be available for analyst review.
 
 # %%
-hard_failure_demo, _ = validate_payroll(payroll.drop("employee_id"))
+hard_failure_demo, _ = validate_payroll(payroll.drop(PayrollCol.EMPLOYEE_ID))
 hard_failure_demo
 
 # %%
@@ -96,13 +97,13 @@ data_quality_summary(payroll, results["validation_warnings"])
 
 # %%
 payroll.select(
-    pl.min("gross_pay").alias("min_gross_pay"),
-    pl.col("gross_pay").quantile(0.25).alias("gross_q25"),
-    pl.median("gross_pay").alias("gross_median"),
-    pl.col("gross_pay").quantile(0.75).alias("gross_q75"),
-    pl.max("gross_pay").alias("max_gross_pay"),
-    pl.mean("overtime_hours").alias("mean_overtime_hours"),
-    pl.max("overtime_hours").alias("max_overtime_hours"),
+    pl.min(PayrollCol.GROSS_PAY).alias(AggregateCol.MIN_GROSS_PAY),
+    pl.col(PayrollCol.GROSS_PAY).quantile(0.25).alias(AggregateCol.GROSS_Q25),
+    pl.median(PayrollCol.GROSS_PAY).alias(AggregateCol.GROSS_MEDIAN),
+    pl.col(PayrollCol.GROSS_PAY).quantile(0.75).alias(AggregateCol.GROSS_Q75),
+    pl.max(PayrollCol.GROSS_PAY).alias(AggregateCol.MAX_GROSS_PAY),
+    pl.mean(PayrollCol.OVERTIME_HOURS).alias(AggregateCol.MEAN_OVERTIME_HOURS),
+    pl.max(PayrollCol.OVERTIME_HOURS).alias(AggregateCol.MAX_OVERTIME_HOURS),
 )
 
 # %% [markdown]
@@ -120,7 +121,7 @@ pay_distribution_chart(payroll)
 overtime_distribution_chart(payroll)
 
 # %%
-department_heatmap_data(payroll).pivot(index="pay_period_index", on="department", values="department_gross_pay", aggregate_function="sum").sort("pay_period_index").head(10)
+department_heatmap_data(payroll).pivot(index=PayrollCol.PAY_PERIOD_INDEX, on=PayrollCol.DEPARTMENT, values=AggregateCol.DEPARTMENT_GROSS_PAY, aggregate_function="sum").sort(PayrollCol.PAY_PERIOD_INDEX).head(10)
 
 # %% [markdown]
 # ## What This Proves

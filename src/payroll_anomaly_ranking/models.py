@@ -4,53 +4,36 @@ import numpy as np
 import polars as pl
 from sklearn.ensemble import IsolationForest
 
+from payroll_anomaly_ranking.columns import FeatureCol, MODEL_FEATURE_COLUMNS, PayrollCol, RuleCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
 
 
-FEATURE_COLUMNS = [
-    "gross_pay",
-    "net_pay",
-    "regular_hours",
-    "overtime_hours",
-    "pay_rate",
-    "bonus",
-    "commission",
-    "retro_pay",
-    "manual_adjustment",
-    "gross_pay_pct_change",
-    "deduction_ratio",
-    "net_to_gross_ratio",
-    "peer_gross_deviation_ratio",
-    "peer_overtime_deviation_ratio",
-    "gross_pay_robust_z",
-    "gross_pay_mad_score",
-    "rule_severity_score",
-]
+FEATURE_COLUMNS = MODEL_FEATURE_COLUMNS
 
 
 def temporal_split(payroll: pl.DataFrame, validation_periods: int = 4, test_periods: int = 4) -> dict[str, pl.DataFrame]:
-    periods = sorted(payroll.get_column("pay_period_index").unique().to_list())
+    periods = sorted(payroll.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list())
     test_start = periods[-test_periods]
     validation_start = periods[-(test_periods + validation_periods)]
     return {
-        "train": payroll.filter(pl.col("pay_period_index") < validation_start),
-        "validation": payroll.filter((pl.col("pay_period_index") >= validation_start) & (pl.col("pay_period_index") < test_start)),
-        "test": payroll.filter(pl.col("pay_period_index") >= test_start),
+        "train": payroll.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) < validation_start),
+        "validation": payroll.filter((pl.col(PayrollCol.PAY_PERIOD_INDEX) >= validation_start) & (pl.col(PayrollCol.PAY_PERIOD_INDEX) < test_start)),
+        "test": payroll.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) >= test_start),
     }
 
 
 def add_statistical_scores(payroll: pl.DataFrame) -> pl.DataFrame:
     return payroll.with_columns(
         pl.max_horizontal(
-            pl.col("gross_pay_robust_z").fill_null(0) / 8,
-            pl.col("gross_pay_mad_score").fill_null(0) / 10,
-            pl.col("peer_gross_deviation_ratio").abs().fill_null(0) / 2,
-            pl.col("peer_overtime_deviation_ratio").abs().fill_null(0) / 6,
+            pl.col(FeatureCol.GROSS_PAY_ROBUST_Z).fill_null(0) / 8,
+            pl.col(FeatureCol.GROSS_PAY_MAD_SCORE).fill_null(0) / 10,
+            pl.col(FeatureCol.PEER_GROSS_DEVIATION_RATIO).abs().fill_null(0) / 2,
+            pl.col(FeatureCol.PEER_OVERTIME_DEVIATION_RATIO).abs().fill_null(0) / 6,
         )
         .clip(0, 1)
-        .alias("statistical_score"),
-        pl.max_horizontal(pl.col("gross_pay_robust_z").fill_null(0) / 8, pl.col("gross_pay_pct_change").abs().fill_null(0) / 2).clip(0, 1).alias("history_score"),
-        pl.max_horizontal(pl.col("peer_gross_deviation_ratio").abs().fill_null(0) / 2, pl.col("peer_overtime_deviation_ratio").abs().fill_null(0) / 6).clip(0, 1).alias("peer_score"),
+        .alias(ScoreCol.STATISTICAL_SCORE),
+        pl.max_horizontal(pl.col(FeatureCol.GROSS_PAY_ROBUST_Z).fill_null(0) / 8, pl.col(FeatureCol.GROSS_PAY_PCT_CHANGE).abs().fill_null(0) / 2).clip(0, 1).alias(ScoreCol.HISTORY_SCORE),
+        pl.max_horizontal(pl.col(FeatureCol.PEER_GROSS_DEVIATION_RATIO).abs().fill_null(0) / 2, pl.col(FeatureCol.PEER_OVERTIME_DEVIATION_RATIO).abs().fill_null(0) / 6).clip(0, 1).alias(ScoreCol.PEER_SCORE),
     )
 
 
@@ -61,19 +44,19 @@ def add_isolation_forest_scores(payroll: pl.DataFrame, config: PayrollConfig = P
     model = IsolationForest(n_estimators=100, contamination=0.03, random_state=config.seed)
     model.fit(train)
     raw = -model.decision_function(all_features)
-    return payroll.with_columns(pl.Series("ml_score", _minmax(raw)))
+    return payroll.with_columns(pl.Series(ScoreCol.ML_SCORE, _minmax(raw)))
 
 
 def add_hybrid_scores(payroll: pl.DataFrame, config: PayrollConfig = PayrollConfig()) -> pl.DataFrame:
     scored = payroll.with_columns(
-        (pl.col("rule_severity_score") / 100).clip(0, 1).alias("rule_score"),
-        (pl.col("anomaly_dollars").abs() / pl.col("gross_pay").abs().clip(1, None)).clip(0, 1).alias("dollar_score"),
+        (pl.col(RuleCol.SEVERITY_SCORE) / 100).clip(0, 1).alias(ScoreCol.RULE_SCORE),
+        (pl.col(PayrollCol.ANOMALY_DOLLARS).abs() / pl.col(PayrollCol.GROSS_PAY).abs().clip(1, None)).clip(0, 1).alias(ScoreCol.DOLLAR_SCORE),
     )
     weights = config.hybrid_weights
     return scored.with_columns(
-        sum(pl.col(name).fill_null(0) * weight for name, weight in weights.items()).alias("final_anomaly_score")
+        sum(pl.col(name).fill_null(0) * weight for name, weight in weights.items()).alias(ScoreCol.FINAL_ANOMALY_SCORE)
     ).with_columns(
-        pl.col("final_anomaly_score").rank("ordinal", descending=True).over("pay_period_index").alias("pay_period_rank")
+        pl.col(ScoreCol.FINAL_ANOMALY_SCORE).rank("ordinal", descending=True).over(PayrollCol.PAY_PERIOD_INDEX).alias(ScoreCol.PAY_PERIOD_RANK)
     )
 
 

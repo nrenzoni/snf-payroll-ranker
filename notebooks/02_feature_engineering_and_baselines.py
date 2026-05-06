@@ -23,6 +23,7 @@ import polars as pl
 from lets_plot import LetsPlot
 
 from payroll_anomaly_ranking.charts import employee_history_chart, score_distribution_chart
+from payroll_anomaly_ranking.columns import FeatureCol, PayrollCol, RuleCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.pipeline import run_pipeline
 
@@ -40,25 +41,25 @@ queue = results["review_queue"]
 # These selected synthetic records show the feature families used for review prioritization: prior employee history, peer-relative comparison, deterministic rule flags, robust statistical outlier features, and component scores.
 
 # %%
-example_ids = queue.select("employee_id").head(8)
-scored.join(example_ids, on="employee_id", how="semi").sort(["employee_id", "pay_period_index"]).select(
-    "employee_id",
-    "pay_period_index",
-    "gross_pay",
-    "gross_pay_rolling_median",
-    "gross_pay_pct_change",
-    "peer_gross_median",
-    "peer_gross_deviation_ratio",
-    "gross_pay_robust_z",
-    "gross_pay_mad_score",
-    "rule_reason_codes",
-    "rule_score",
-    "statistical_score",
-    "ml_score",
-    "dollar_score",
-    "final_anomaly_score",
-    "pay_period_rank",
-).filter(pl.col("pay_period_rank") <= 25).head(12)
+example_ids = queue.select(PayrollCol.EMPLOYEE_ID).head(8)
+scored.join(example_ids, on=PayrollCol.EMPLOYEE_ID, how="semi").sort([PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX]).select(
+    PayrollCol.EMPLOYEE_ID,
+    PayrollCol.PAY_PERIOD_INDEX,
+    PayrollCol.GROSS_PAY,
+    FeatureCol.GROSS_PAY_ROLLING_MEDIAN,
+    FeatureCol.GROSS_PAY_PCT_CHANGE,
+    FeatureCol.PEER_GROSS_MEDIAN,
+    FeatureCol.PEER_GROSS_DEVIATION_RATIO,
+    FeatureCol.GROSS_PAY_ROBUST_Z,
+    FeatureCol.GROSS_PAY_MAD_SCORE,
+    RuleCol.REASON_CODES,
+    ScoreCol.RULE_SCORE,
+    ScoreCol.STATISTICAL_SCORE,
+    ScoreCol.ML_SCORE,
+    ScoreCol.DOLLAR_SCORE,
+    ScoreCol.FINAL_ANOMALY_SCORE,
+    ScoreCol.PAY_PERIOD_RANK,
+).filter(pl.col(ScoreCol.PAY_PERIOD_RANK) <= 25).head(12)
 
 # %% [markdown]
 # ## Leakage-Safe Construction
@@ -77,16 +78,16 @@ results["model_comparison"]
 
 # %%
 scored.select(
-    "employee_id",
-    "pay_period_index",
-    "rule_score",
-    "statistical_score",
-    "ml_score",
-    "dollar_score",
-    "final_anomaly_score",
-    "pay_period_rank",
-    "rule_reason_codes",
-).sort("final_anomaly_score", descending=True).head(15)
+    PayrollCol.EMPLOYEE_ID,
+    PayrollCol.PAY_PERIOD_INDEX,
+    ScoreCol.RULE_SCORE,
+    ScoreCol.STATISTICAL_SCORE,
+    ScoreCol.ML_SCORE,
+    ScoreCol.DOLLAR_SCORE,
+    ScoreCol.FINAL_ANOMALY_SCORE,
+    ScoreCol.PAY_PERIOD_RANK,
+    RuleCol.REASON_CODES,
+).sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(15)
 
 # %% [markdown]
 # ## Simple Gross-Pay-Change Baseline
@@ -94,15 +95,15 @@ scored.select(
 # Existing outputs contain the core score comparison. This lightweight table adds a business-intuitive gross-pay-change reference for reviewers who want to see how far a pure change-based baseline would get without rule, peer, ML, or dollar context.
 
 # %%
-scored.with_columns(pl.col("gross_pay_pct_change").abs().rank("ordinal", descending=True).over("pay_period_index").alias("gross_pay_change_rank")).select(
-    "employee_id",
-    "pay_period_index",
-    "gross_pay",
-    "gross_pay_pct_change",
-    "gross_pay_change_rank",
-    "final_anomaly_score",
-    "pay_period_rank",
-).sort("gross_pay_change_rank").head(12)
+scored.with_columns(pl.col(FeatureCol.GROSS_PAY_PCT_CHANGE).abs().rank("ordinal", descending=True).over(PayrollCol.PAY_PERIOD_INDEX).alias(FeatureCol.GROSS_PAY_CHANGE_RANK)).select(
+    PayrollCol.EMPLOYEE_ID,
+    PayrollCol.PAY_PERIOD_INDEX,
+    PayrollCol.GROSS_PAY,
+    FeatureCol.GROSS_PAY_PCT_CHANGE,
+    FeatureCol.GROSS_PAY_CHANGE_RANK,
+    ScoreCol.FINAL_ANOMALY_SCORE,
+    ScoreCol.PAY_PERIOD_RANK,
+).sort(FeatureCol.GROSS_PAY_CHANGE_RANK).head(12)
 
 # %% [markdown]
 # ## Score Distribution
@@ -118,7 +119,7 @@ score_distribution_chart(scored)
 # A flagged employee history helps analysts see whether a current-period value differs from the employee's previous payroll pattern.
 
 # %%
-highlight_employee = queue.select("employee_id").item(0, 0)
+highlight_employee = queue.select(PayrollCol.EMPLOYEE_ID).item(0, 0)
 employee_history_chart(scored, highlight_employee)
 
 # %% [markdown]

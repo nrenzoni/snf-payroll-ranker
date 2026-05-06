@@ -2,35 +2,37 @@ from __future__ import annotations
 
 import polars as pl
 
+from payroll_anomaly_ranking.columns import PayrollCol, ReviewCol
+
 
 def synthetic_schema_dictionary() -> pl.DataFrame:
     rows = [
-        ("record_id", "Synthetic row identifier", "identifier", "Low; synthetic only", "Present and unique enough for row-level tracing"),
-        ("employee_id", "Synthetic employee identifier", "identifier", "Low; no real employee identity", "Required and non-null"),
-        ("pay_period_index", "Sequential payroll cycle", "period", "Low", "Required and non-null"),
-        ("pay_period_start", "Synthetic cycle start date", "date", "Low", "Start date before end date"),
-        ("pay_period_end", "Synthetic cycle end date", "date", "Low", "End date after hire date unless lifecycle exception"),
-        ("department", "Synthetic cost center grouping", "category", "Low; fictional organization", "Expected known department values"),
-        ("job_family", "Synthetic role grouping", "category", "Low", "Expected within department"),
-        ("location", "Synthetic work location", "category", "Low", "Expected known location values"),
-        ("employment_status", "Active or terminated status for the cycle", "category", "Medium; synthetic lifecycle signal", "Consistent with hire and termination dates"),
-        ("pay_type", "Hourly or salaried pay basis", "category", "Low", "Expected known pay type values"),
-        ("regular_hours", "Regular hours paid in the cycle", "numeric", "Medium; synthetic payroll amount driver", "Non-negative for normal records"),
-        ("overtime_hours", "Overtime hours paid in the cycle", "numeric", "Medium", "Extreme values become review warnings or flags"),
-        ("pay_rate", "Hourly rate or period salary amount", "numeric", "Medium; synthetic compensation", "Non-negative and stable unless expected change"),
-        ("gross_pay", "Total gross pay before deductions", "numeric", "Medium; synthetic compensation", "Non-negative for normal records"),
-        ("deductions", "Synthetic deductions amount", "numeric", "Medium", "Missing or zero values may require review"),
-        ("net_pay", "Gross pay less deductions", "numeric", "Medium", "Negative or unusually high values may require review"),
-        ("bonus", "Synthetic bonus amount", "numeric", "Medium", "Non-negative"),
-        ("commission", "Synthetic commission amount", "numeric", "Medium", "Non-negative"),
-        ("retro_pay", "Synthetic retroactive pay amount", "numeric", "Medium", "Large outliers may require review"),
-        ("manual_adjustment", "Manual payroll adjustment", "numeric", "Medium", "Large adjustments may require review"),
-        ("tenure_months", "Employee tenure at the pay period", "numeric", "Low", "Consistent with hire date"),
-        ("hire_date", "Synthetic hire date", "date", "Medium; lifecycle signal", "Not after pay period end"),
-        ("termination_date", "Synthetic termination date where applicable", "date", "Medium; lifecycle signal", "Pay after termination is a review exception"),
-        ("is_anomaly", "Injected synthetic evaluation label", "evaluation label", "Internal synthetic label", "Retained for evaluation, not scoring features"),
-        ("anomaly_category", "Injected synthetic category", "evaluation label", "Internal synthetic label", "Used for error analysis only"),
-        ("anomaly_dollars", "Synthetic dollar impact from injected exception", "evaluation label", "Internal synthetic label", "Used for cost-aware evaluation"),
+        (PayrollCol.RECORD_ID, "Synthetic row identifier", "identifier", "Low; synthetic only", "Present and unique enough for row-level tracing"),
+        (PayrollCol.EMPLOYEE_ID, "Synthetic employee identifier", "identifier", "Low; no real employee identity", "Required and non-null"),
+        (PayrollCol.PAY_PERIOD_INDEX, "Sequential payroll cycle", "period", "Low", "Required and non-null"),
+        (PayrollCol.PAY_PERIOD_START, "Synthetic cycle start date", "date", "Low", "Start date before end date"),
+        (PayrollCol.PAY_PERIOD_END, "Synthetic cycle end date", "date", "Low", "End date after hire date unless lifecycle exception"),
+        (PayrollCol.DEPARTMENT, "Synthetic cost center grouping", "category", "Low; fictional organization", "Expected known department values"),
+        (PayrollCol.JOB_FAMILY, "Synthetic role grouping", "category", "Low", "Expected within department"),
+        (PayrollCol.LOCATION, "Synthetic work location", "category", "Low", "Expected known location values"),
+        (PayrollCol.EMPLOYMENT_STATUS, "Active or terminated status for the cycle", "category", "Medium; synthetic lifecycle signal", "Consistent with hire and termination dates"),
+        (PayrollCol.PAY_TYPE, "Hourly or salaried pay basis", "category", "Low", "Expected known pay type values"),
+        (PayrollCol.REGULAR_HOURS, "Regular hours paid in the cycle", "numeric", "Medium; synthetic payroll amount driver", "Non-negative for normal records"),
+        (PayrollCol.OVERTIME_HOURS, "Overtime hours paid in the cycle", "numeric", "Medium", "Extreme values become review warnings or flags"),
+        (PayrollCol.PAY_RATE, "Hourly rate or period salary amount", "numeric", "Medium; synthetic compensation", "Non-negative and stable unless expected change"),
+        (PayrollCol.GROSS_PAY, "Total gross pay before deductions", "numeric", "Medium; synthetic compensation", "Non-negative for normal records"),
+        (PayrollCol.DEDUCTIONS, "Synthetic deductions amount", "numeric", "Medium", "Missing or zero values may require review"),
+        (PayrollCol.NET_PAY, "Gross pay less deductions", "numeric", "Medium", "Negative or unusually high values may require review"),
+        (PayrollCol.BONUS, "Synthetic bonus amount", "numeric", "Medium", "Non-negative"),
+        (PayrollCol.COMMISSION, "Synthetic commission amount", "numeric", "Medium", "Non-negative"),
+        (PayrollCol.RETRO_PAY, "Synthetic retroactive pay amount", "numeric", "Medium", "Large outliers may require review"),
+        (PayrollCol.MANUAL_ADJUSTMENT, "Manual payroll adjustment", "numeric", "Medium", "Large adjustments may require review"),
+        (PayrollCol.TENURE_MONTHS, "Employee tenure at the pay period", "numeric", "Low", "Consistent with hire date"),
+        (PayrollCol.HIRE_DATE, "Synthetic hire date", "date", "Medium; lifecycle signal", "Not after pay period end"),
+        (PayrollCol.TERMINATION_DATE, "Synthetic termination date where applicable", "date", "Medium; lifecycle signal", "Pay after termination is a review exception"),
+        (PayrollCol.IS_ANOMALY, "Injected synthetic evaluation label", "evaluation label", "Internal synthetic label", "Retained for evaluation, not scoring features"),
+        (PayrollCol.ANOMALY_CATEGORY, "Injected synthetic category", "evaluation label", "Internal synthetic label", "Used for error analysis only"),
+        (PayrollCol.ANOMALY_DOLLARS, "Synthetic dollar impact from injected exception", "evaluation label", "Internal synthetic label", "Used for cost-aware evaluation"),
     ]
     return pl.DataFrame(
         rows,
@@ -41,13 +43,13 @@ def synthetic_schema_dictionary() -> pl.DataFrame:
 
 def data_quality_summary(payroll: pl.DataFrame, validation_warnings: pl.DataFrame) -> pl.DataFrame:
     missing_values = sum(payroll.select(pl.all().null_count()).row(0))
-    invalid_lifecycle = payroll.filter(pl.col("hire_date") > pl.col("pay_period_end")).height
-    terminated_with_pay = payroll.filter((pl.col("employment_status") == "terminated") & (pl.col("gross_pay") > 0)).height
+    invalid_lifecycle = payroll.filter(pl.col(PayrollCol.HIRE_DATE) > pl.col(PayrollCol.PAY_PERIOD_END)).height
+    terminated_with_pay = payroll.filter((pl.col(PayrollCol.EMPLOYMENT_STATUS) == "terminated") & (pl.col(PayrollCol.GROSS_PAY) > 0)).height
     return pl.DataFrame(
         [
             {"measure": "records", "value": payroll.height},
-            {"measure": "pay_periods", "value": payroll.select(pl.n_unique("pay_period_index")).item()},
-            {"measure": "employees", "value": payroll.select(pl.n_unique("employee_id")).item()},
+            {"measure": "pay_periods", "value": payroll.select(pl.n_unique(PayrollCol.PAY_PERIOD_INDEX)).item()},
+            {"measure": "employees", "value": payroll.select(pl.n_unique(PayrollCol.EMPLOYEE_ID)).item()},
             {"measure": "missing_values", "value": missing_values},
             {"measure": "invalid_lifecycle_rows", "value": invalid_lifecycle},
             {"measure": "terminated_records_with_pay", "value": terminated_with_pay},
@@ -58,17 +60,17 @@ def data_quality_summary(payroll: pl.DataFrame, validation_warnings: pl.DataFram
 
 def compact_case_cards(review_queue: pl.DataFrame, limit: int = 5) -> pl.DataFrame:
     columns = [
-        "rank",
-        "employee_id",
-        "pay_period_index",
-        "risk_category",
-        "primary_reason",
-        "secondary_reason",
-        "expected_gross_pay",
-        "gross_pay",
-        "difference_from_expected",
-        "peer_context",
-        "dollars_at_risk",
-        "explanation",
+        ReviewCol.RANK,
+        PayrollCol.EMPLOYEE_ID,
+        PayrollCol.PAY_PERIOD_INDEX,
+        ReviewCol.RISK_CATEGORY,
+        ReviewCol.PRIMARY_REASON,
+        ReviewCol.SECONDARY_REASON,
+        ReviewCol.EXPECTED_GROSS_PAY,
+        PayrollCol.GROSS_PAY,
+        ReviewCol.DIFFERENCE_FROM_EXPECTED,
+        ReviewCol.PEER_CONTEXT,
+        ReviewCol.DOLLARS_AT_RISK,
+        ReviewCol.EXPLANATION,
     ]
-    return review_queue.select(columns).head(limit).rename({"gross_pay": "actual_gross_pay"})
+    return review_queue.select(columns).head(limit).rename({PayrollCol.GROSS_PAY: ReviewCol.ACTUAL_GROSS_PAY})

@@ -2,25 +2,9 @@ from __future__ import annotations
 
 import polars as pl
 
+from payroll_anomaly_ranking.columns import AggregateCol, PayrollCol, REQUIRED_PAYROLL_COLUMNS
 
-REQUIRED_COLUMNS = {
-    "employee_id",
-    "pay_period_index",
-    "department",
-    "job_family",
-    "location",
-    "employment_status",
-    "pay_type",
-    "regular_hours",
-    "overtime_hours",
-    "pay_rate",
-    "gross_pay",
-    "deductions",
-    "net_pay",
-    "tenure_months",
-    "hire_date",
-    "termination_date",
-}
+REQUIRED_COLUMNS = REQUIRED_PAYROLL_COLUMNS
 
 
 def validate_payroll(payroll: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
@@ -31,20 +15,20 @@ def validate_payroll(payroll: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]
         failures.append({"check": "required_column", "column": column, "message": f"Missing required column: {column}"})
     if missing:
         return pl.DataFrame(failures), pl.DataFrame(warnings)
-    if payroll.filter(pl.col("employee_id").is_null()).height:
-        failures.append({"check": "null_identifier", "column": "employee_id", "message": "Employee identifiers cannot be null"})
-    if payroll.filter(pl.col("pay_period_index").is_null()).height:
-        failures.append({"check": "null_period", "column": "pay_period_index", "message": "Pay periods cannot be null"})
-    if payroll.filter(pl.col("hire_date") > pl.col("pay_period_end")).height:
-        failures.append({"check": "invalid_lifecycle_dates", "column": "hire_date", "message": "Hire date after pay period end"})
-    negative_normal = payroll.filter((pl.col("is_anomaly") == 0) & ((pl.col("gross_pay") < 0) | (pl.col("regular_hours") < 0)))
+    if payroll.filter(pl.col(PayrollCol.EMPLOYEE_ID).is_null()).height:
+        failures.append({"check": "null_identifier", "column": PayrollCol.EMPLOYEE_ID, "message": "Employee identifiers cannot be null"})
+    if payroll.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX).is_null()).height:
+        failures.append({"check": "null_period", "column": PayrollCol.PAY_PERIOD_INDEX, "message": "Pay periods cannot be null"})
+    if payroll.filter(pl.col(PayrollCol.HIRE_DATE) > pl.col(PayrollCol.PAY_PERIOD_END)).height:
+        failures.append({"check": "invalid_lifecycle_dates", "column": PayrollCol.HIRE_DATE, "message": "Hire date after pay period end"})
+    negative_normal = payroll.filter((pl.col(PayrollCol.IS_ANOMALY) == 0) & ((pl.col(PayrollCol.GROSS_PAY) < 0) | (pl.col(PayrollCol.REGULAR_HOURS) < 0)))
     if negative_normal.height:
-        failures.append({"check": "negative_normal_payroll", "column": "gross_pay", "message": "Normal records have negative payroll values"})
+        failures.append({"check": "negative_normal_payroll", "column": PayrollCol.GROSS_PAY, "message": "Normal records have negative payroll values"})
     warning_checks = {
-        "missing_deduction": payroll.filter(pl.col("deductions").is_null() | (pl.col("deductions") == 0)).height,
-        "negative_net_pay": payroll.filter(pl.col("net_pay") < 0).height,
-        "net_exceeds_gross": payroll.filter(pl.col("net_pay") > pl.col("gross_pay") * 1.05).height,
-        "large_manual_adjustment": payroll.filter(pl.col("manual_adjustment").abs() > pl.col("gross_pay") * 0.25).height,
+        "missing_deduction": payroll.filter(pl.col(PayrollCol.DEDUCTIONS).is_null() | (pl.col(PayrollCol.DEDUCTIONS) == 0)).height,
+        "negative_net_pay": payroll.filter(pl.col(PayrollCol.NET_PAY) < 0).height,
+        "net_exceeds_gross": payroll.filter(pl.col(PayrollCol.NET_PAY) > pl.col(PayrollCol.GROSS_PAY) * 1.05).height,
+        "large_manual_adjustment": payroll.filter(pl.col(PayrollCol.MANUAL_ADJUSTMENT).abs() > pl.col(PayrollCol.GROSS_PAY) * 0.25).height,
     }
     for check, count in warning_checks.items():
         if count:
@@ -54,11 +38,11 @@ def validate_payroll(payroll: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]
 
 def payroll_aggregations(payroll: pl.DataFrame) -> dict[str, pl.DataFrame]:
     return {
-        "payroll_volume": payroll.group_by("pay_period_index").agg(pl.len().alias("records"), pl.sum("gross_pay").alias("gross_pay")),
-        "active_employee_counts": payroll.filter(pl.col("employment_status") == "active").group_by("pay_period_index").agg(pl.n_unique("employee_id").alias("active_employees")),
-        "department_payroll": payroll.group_by(["pay_period_index", "department"]).agg(pl.sum("gross_pay").alias("department_gross_pay")),
-        "overtime": payroll.group_by("pay_period_index").agg(pl.mean("overtime_hours").alias("mean_overtime_hours"), pl.sum("overtime_hours").alias("total_overtime_hours")),
-        "manual_adjustments": payroll.group_by("pay_period_index").agg(pl.sum("manual_adjustment").alias("manual_adjustment_total"), pl.mean("manual_adjustment").alias("manual_adjustment_mean")),
-        "pay_rate_changes": payroll.sort(["employee_id", "pay_period_index"]).with_columns(pl.col("pay_rate").diff().over("employee_id").abs().alias("pay_rate_change")).group_by("pay_period_index").agg((pl.col("pay_rate_change") > 0).cast(pl.Int64).sum().alias("pay_rate_changes")),
-        "distribution_summary": payroll.select(pl.col("gross_pay").quantile(0.25).alias("gross_q25"), pl.median("gross_pay").alias("gross_median"), pl.col("gross_pay").quantile(0.75).alias("gross_q75"), pl.mean("net_pay").alias("mean_net_pay")),
+        "payroll_volume": payroll.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(pl.len().alias(AggregateCol.RECORDS), pl.sum(PayrollCol.GROSS_PAY).alias(PayrollCol.GROSS_PAY)),
+        "active_employee_counts": payroll.filter(pl.col(PayrollCol.EMPLOYMENT_STATUS) == "active").group_by(PayrollCol.PAY_PERIOD_INDEX).agg(pl.n_unique(PayrollCol.EMPLOYEE_ID).alias(AggregateCol.ACTIVE_EMPLOYEES)),
+        "department_payroll": payroll.group_by([PayrollCol.PAY_PERIOD_INDEX, PayrollCol.DEPARTMENT]).agg(pl.sum(PayrollCol.GROSS_PAY).alias(AggregateCol.DEPARTMENT_GROSS_PAY)),
+        "overtime": payroll.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(pl.mean(PayrollCol.OVERTIME_HOURS).alias(AggregateCol.MEAN_OVERTIME_HOURS), pl.sum(PayrollCol.OVERTIME_HOURS).alias(AggregateCol.TOTAL_OVERTIME_HOURS)),
+        "manual_adjustments": payroll.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(pl.sum(PayrollCol.MANUAL_ADJUSTMENT).alias(AggregateCol.MANUAL_ADJUSTMENT_TOTAL), pl.mean(PayrollCol.MANUAL_ADJUSTMENT).alias(AggregateCol.MANUAL_ADJUSTMENT_MEAN)),
+        "pay_rate_changes": payroll.sort([PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX]).with_columns(pl.col(PayrollCol.PAY_RATE).diff().over(PayrollCol.EMPLOYEE_ID).abs().alias(AggregateCol.PAY_RATE_CHANGE)).group_by(PayrollCol.PAY_PERIOD_INDEX).agg((pl.col(AggregateCol.PAY_RATE_CHANGE) > 0).cast(pl.Int64).sum().alias(AggregateCol.PAY_RATE_CHANGES)),
+        "distribution_summary": payroll.select(pl.col(PayrollCol.GROSS_PAY).quantile(0.25).alias(AggregateCol.GROSS_Q25), pl.median(PayrollCol.GROSS_PAY).alias(AggregateCol.GROSS_MEDIAN), pl.col(PayrollCol.GROSS_PAY).quantile(0.75).alias(AggregateCol.GROSS_Q75), pl.mean(PayrollCol.NET_PAY).alias(AggregateCol.MEAN_NET_PAY)),
     }

@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
+from payroll_anomaly_ranking.columns import PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
 
 
@@ -54,16 +55,16 @@ def generate_employees(config: PayrollConfig = PayrollConfig()) -> pl.DataFrame:
     pay_rates = np.where(pay_types == "hourly", hourly_rates, salary_period_rates)
     return pl.DataFrame(
         {
-            "employee_id": employee_ids,
-            "manager_id": [f"SYN-M{int(i):04d}" for i in rng.integers(1, 80, config.employee_count)],
-            "department": departments,
-            "job_family": job_families,
-            "location": locations,
-            "job_level": job_levels,
-            "pay_type": pay_types,
-            "hire_date": hire_dates,
-            "termination_date": termination_dates,
-            "base_pay_rate": np.round(pay_rates, 2),
+            PayrollCol.EMPLOYEE_ID: employee_ids,
+            PayrollCol.MANAGER_ID: [f"SYN-M{int(i):04d}" for i in rng.integers(1, 80, config.employee_count)],
+            PayrollCol.DEPARTMENT: departments,
+            PayrollCol.JOB_FAMILY: job_families,
+            PayrollCol.LOCATION: locations,
+            PayrollCol.JOB_LEVEL: job_levels,
+            PayrollCol.PAY_TYPE: pay_types,
+            PayrollCol.HIRE_DATE: hire_dates,
+            PayrollCol.TERMINATION_DATE: termination_dates,
+            PayrollCol.BASE_PAY_RATE: np.round(pay_rates, 2),
         }
     )
 
@@ -72,9 +73,9 @@ def generate_pay_periods(config: PayrollConfig = PayrollConfig()) -> pl.DataFram
     start = date(2024, 1, 5)
     return pl.DataFrame(
         {
-            "pay_period_index": list(range(1, config.pay_periods + 1)),
-            "pay_period_start": [start + timedelta(days=(idx - 1) * 14) for idx in range(1, config.pay_periods + 1)],
-            "pay_period_end": [start + timedelta(days=(idx - 1) * 14 + 13) for idx in range(1, config.pay_periods + 1)],
+            PayrollCol.PAY_PERIOD_INDEX: list(range(1, config.pay_periods + 1)),
+            PayrollCol.PAY_PERIOD_START: [start + timedelta(days=(idx - 1) * 14) for idx in range(1, config.pay_periods + 1)],
+            PayrollCol.PAY_PERIOD_END: [start + timedelta(days=(idx - 1) * 14 + 13) for idx in range(1, config.pay_periods + 1)],
         }
     )
 
@@ -87,20 +88,20 @@ def generate_payroll(config: PayrollConfig = PayrollConfig()) -> tuple[pl.DataFr
     for emp in employees.iter_rows(named=True):
         promotion_period = int(rng.integers(5, config.pay_periods + 1)) if rng.random() < 0.16 else None
         for period in periods.iter_rows(named=True):
-            period_end = period["pay_period_end"]
-            active = period_end >= emp["hire_date"] and (emp["termination_date"] is None or period_end <= emp["termination_date"])
+            period_end = period[PayrollCol.PAY_PERIOD_END]
+            active = period_end >= emp[PayrollCol.HIRE_DATE] and (emp[PayrollCol.TERMINATION_DATE] is None or period_end <= emp[PayrollCol.TERMINATION_DATE])
             if not active and rng.random() > 0.03:
                 continue
-            seasonal = 1 + 0.06 * np.sin(period["pay_period_index"] / config.pay_periods * 2 * np.pi)
-            promoted = promotion_period is not None and period["pay_period_index"] >= promotion_period
-            pay_rate = float(emp["base_pay_rate"]) * (1.09 if promoted else 1.0)
-            hourly = emp["pay_type"] == "hourly"
+            seasonal = 1 + 0.06 * np.sin(period[PayrollCol.PAY_PERIOD_INDEX] / config.pay_periods * 2 * np.pi)
+            promoted = promotion_period is not None and period[PayrollCol.PAY_PERIOD_INDEX] >= promotion_period
+            pay_rate = float(emp[PayrollCol.BASE_PAY_RATE]) * (1.09 if promoted else 1.0)
+            hourly = emp[PayrollCol.PAY_TYPE] == "hourly"
             regular_hours = float(np.clip(rng.normal(78, 5), 45, 86)) if hourly else 80.0
-            overtime_base = 2.5 + (emp["department"] in ["Operations", "Support"]) * 3.0
+            overtime_base = 2.5 + (emp[PayrollCol.DEPARTMENT] in ["Operations", "Support"]) * 3.0
             overtime_hours = float(max(0, rng.gamma(1.5, overtime_base / 1.5) * seasonal)) if hourly else float(max(0, rng.normal(1.0, 1.2)))
             gross = regular_hours * pay_rate + overtime_hours * pay_rate * 1.5 if hourly else pay_rate * seasonal
-            bonus = float(rng.gamma(1.3, 550)) if emp["department"] in ["Sales", "Engineering"] and rng.random() < 0.12 else 0.0
-            commission = float(rng.gamma(2.0, 420)) if emp["department"] == "Sales" and rng.random() < 0.30 else 0.0
+            bonus = float(rng.gamma(1.3, 550)) if emp[PayrollCol.DEPARTMENT] in ["Sales", "Engineering"] and rng.random() < 0.12 else 0.0
+            commission = float(rng.gamma(2.0, 420)) if emp[PayrollCol.DEPARTMENT] == "Sales" and rng.random() < 0.30 else 0.0
             retro_pay = float(rng.gamma(1.4, 260)) if rng.random() < 0.025 else 0.0
             manual_adjustment = float(rng.normal(0, 160)) if rng.random() < 0.05 else 0.0
             gross_pay = max(0.0, gross + bonus + commission + retro_pay + manual_adjustment + rng.normal(0, 65))
@@ -113,24 +114,24 @@ def generate_payroll(config: PayrollConfig = PayrollConfig()) -> tuple[pl.DataFr
                 {
                     **emp,
                     **period,
-                    "employment_status": "active" if active else "terminated",
-                    "tenure_months": max(0, int((period_end - emp["hire_date"]).days / 30)),
-                    "regular_hours": round(regular_hours, 2),
-                    "overtime_hours": round(overtime_hours, 2),
-                    "pay_rate": round(pay_rate, 2),
-                    "bonus": round(bonus, 2),
-                    "commission": round(commission, 2),
-                    "retro_pay": round(retro_pay, 2),
-                    "manual_adjustment": round(manual_adjustment, 2),
-                    "gross_pay": round(gross_pay, 2),
-                    "deductions": None if deductions is None else round(deductions, 2),
-                    "net_pay": round(net_pay, 2),
-                    "is_anomaly": 0,
-                    "anomaly_category": "normal",
-                    "anomaly_dollars": 0.0,
+                    PayrollCol.EMPLOYMENT_STATUS: "active" if active else "terminated",
+                    PayrollCol.TENURE_MONTHS: max(0, int((period_end - emp[PayrollCol.HIRE_DATE]).days / 30)),
+                    PayrollCol.REGULAR_HOURS: round(regular_hours, 2),
+                    PayrollCol.OVERTIME_HOURS: round(overtime_hours, 2),
+                    PayrollCol.PAY_RATE: round(pay_rate, 2),
+                    PayrollCol.BONUS: round(bonus, 2),
+                    PayrollCol.COMMISSION: round(commission, 2),
+                    PayrollCol.RETRO_PAY: round(retro_pay, 2),
+                    PayrollCol.MANUAL_ADJUSTMENT: round(manual_adjustment, 2),
+                    PayrollCol.GROSS_PAY: round(gross_pay, 2),
+                    PayrollCol.DEDUCTIONS: None if deductions is None else round(deductions, 2),
+                    PayrollCol.NET_PAY: round(net_pay, 2),
+                    PayrollCol.IS_ANOMALY: 0,
+                    PayrollCol.ANOMALY_CATEGORY: "normal",
+                    PayrollCol.ANOMALY_DOLLARS: 0.0,
                 }
             )
-    payroll = pl.DataFrame(rows, infer_schema_length=None).with_row_index("record_id")
+    payroll = pl.DataFrame(rows, infer_schema_length=None).with_row_index(PayrollCol.RECORD_ID)
     return inject_anomalies(payroll, config)
 
 
@@ -146,45 +147,45 @@ def inject_anomalies(payroll: pl.DataFrame, config: PayrollConfig = PayrollConfi
     department_spike_department = str(rng.choice(DEPARTMENTS))
     for idx, category in zip(anomaly_indices, categories, strict=False):
         row = rows[int(idx)]
-        original = float(row["gross_pay"])
+        original = float(row[PayrollCol.GROSS_PAY])
         if category == "duplicate_payment":
-            row["gross_pay"] = round(original * 2, 2)
-            row["net_pay"] = round(float(row["net_pay"]) * 2, 2)
+            row[PayrollCol.GROSS_PAY] = round(original * 2, 2)
+            row[PayrollCol.NET_PAY] = round(float(row[PayrollCol.NET_PAY]) * 2, 2)
         elif category == "overtime_spike":
-            row["overtime_hours"] = round(max(float(row["overtime_hours"]) * 5, 35), 2)
-            row["gross_pay"] = round(original + float(row["overtime_hours"]) * float(row["pay_rate"]) * 1.5, 2)
+            row[PayrollCol.OVERTIME_HOURS] = round(max(float(row[PayrollCol.OVERTIME_HOURS]) * 5, 35), 2)
+            row[PayrollCol.GROSS_PAY] = round(original + float(row[PayrollCol.OVERTIME_HOURS]) * float(row[PayrollCol.PAY_RATE]) * 1.5, 2)
         elif category == "pay_after_termination":
-            row["employment_status"] = "terminated"
-            row["termination_date"] = row["pay_period_start"] - timedelta(days=14)
+            row[PayrollCol.EMPLOYMENT_STATUS] = "terminated"
+            row[PayrollCol.TERMINATION_DATE] = row[PayrollCol.PAY_PERIOD_START] - timedelta(days=14)
         elif category == "gross_pay_spike":
-            row["gross_pay"] = round(original * float(rng.uniform(2.2, 4.0)), 2)
+            row[PayrollCol.GROSS_PAY] = round(original * float(rng.uniform(2.2, 4.0)), 2)
         elif category == "incorrect_pay_rate":
-            row["pay_rate"] = round(float(row["pay_rate"]) * float(rng.uniform(1.45, 2.2)), 2)
-            row["gross_pay"] = round(original * float(rng.uniform(1.35, 1.9)), 2)
+            row[PayrollCol.PAY_RATE] = round(float(row[PayrollCol.PAY_RATE]) * float(rng.uniform(1.45, 2.2)), 2)
+            row[PayrollCol.GROSS_PAY] = round(original * float(rng.uniform(1.35, 1.9)), 2)
         elif category == "missing_deduction":
-            row["deductions"] = 0.0
+            row[PayrollCol.DEDUCTIONS] = 0.0
         elif category == "negative_net_pay":
-            row["deductions"] = round(float(row["gross_pay"]) * 1.35, 2)
-            row["net_pay"] = round(float(row["gross_pay"]) - float(row["deductions"]), 2)
+            row[PayrollCol.DEDUCTIONS] = round(float(row[PayrollCol.GROSS_PAY]) * 1.35, 2)
+            row[PayrollCol.NET_PAY] = round(float(row[PayrollCol.GROSS_PAY]) - float(row[PayrollCol.DEDUCTIONS]), 2)
         elif category == "retro_pay_outlier":
-            row["retro_pay"] = round(max(float(row["retro_pay"]), original * 1.2), 2)
-            row["gross_pay"] = round(original + float(row["retro_pay"]), 2)
+            row[PayrollCol.RETRO_PAY] = round(max(float(row[PayrollCol.RETRO_PAY]), original * 1.2), 2)
+            row[PayrollCol.GROSS_PAY] = round(original + float(row[PayrollCol.RETRO_PAY]), 2)
         elif category == "department_payroll_spike":
-            row["department"] = department_spike_department
-            row["pay_period_index"] = department_spike_period
-            row["gross_pay"] = round(original * 1.9, 2)
+            row[PayrollCol.DEPARTMENT] = department_spike_department
+            row[PayrollCol.PAY_PERIOD_INDEX] = department_spike_period
+            row[PayrollCol.GROSS_PAY] = round(original * 1.9, 2)
         elif category == "new_employee_large_payment":
-            row["hire_date"] = row["pay_period_start"] - timedelta(days=10)
-            row["tenure_months"] = 0
-            row["gross_pay"] = round(original * 2.4, 2)
+            row[PayrollCol.HIRE_DATE] = row[PayrollCol.PAY_PERIOD_START] - timedelta(days=10)
+            row[PayrollCol.TENURE_MONTHS] = 0
+            row[PayrollCol.GROSS_PAY] = round(original * 2.4, 2)
         if category not in ["negative_net_pay", "missing_deduction", "duplicate_payment"]:
-            deductions = float(row["deductions"] or 0.0)
-            row["net_pay"] = round(float(row["gross_pay"]) - deductions, 2)
-        row["is_anomaly"] = 1
-        row["anomaly_category"] = category
-        row["anomaly_dollars"] = round(abs(float(row["gross_pay"]) - original), 2)
+            deductions = float(row[PayrollCol.DEDUCTIONS] or 0.0)
+            row[PayrollCol.NET_PAY] = round(float(row[PayrollCol.GROSS_PAY]) - deductions, 2)
+        row[PayrollCol.IS_ANOMALY] = 1
+        row[PayrollCol.ANOMALY_CATEGORY] = category
+        row[PayrollCol.ANOMALY_DOLLARS] = round(abs(float(row[PayrollCol.GROSS_PAY]) - original), 2)
         rows[int(idx)] = row
-        labels.append({"record_id": row["record_id"], "anomaly_category": category, "anomaly_dollars": row["anomaly_dollars"]})
+        labels.append({PayrollCol.RECORD_ID: row[PayrollCol.RECORD_ID], PayrollCol.ANOMALY_CATEGORY: category, PayrollCol.ANOMALY_DOLLARS: row[PayrollCol.ANOMALY_DOLLARS]})
     return pl.DataFrame(rows, infer_schema_length=None), pl.DataFrame(labels, infer_schema_length=None)
 
 

@@ -21,6 +21,7 @@
 # %%
 import polars as pl
 
+from payroll_anomaly_ranking.columns import AggregateCol, PayrollCol, ReviewCol, RuleCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.explainability import sample_review_language
 from payroll_anomaly_ranking.pipeline import run_pipeline
@@ -47,19 +48,19 @@ sample_review_language()
 
 # %%
 queue.select(
-    "rank",
-    "employee_id",
-    "pay_period_index",
-    "risk_category",
-    "primary_reason",
-    "secondary_reason",
-    "expected_gross_pay",
-    "gross_pay",
-    "difference_from_expected",
-    "peer_context",
-    "dollars_at_risk",
-    "rule_reason_codes",
-    "explanation",
+    ReviewCol.RANK,
+    PayrollCol.EMPLOYEE_ID,
+    PayrollCol.PAY_PERIOD_INDEX,
+    ReviewCol.RISK_CATEGORY,
+    ReviewCol.PRIMARY_REASON,
+    ReviewCol.SECONDARY_REASON,
+    ReviewCol.EXPECTED_GROSS_PAY,
+    PayrollCol.GROSS_PAY,
+    ReviewCol.DIFFERENCE_FROM_EXPECTED,
+    ReviewCol.PEER_CONTEXT,
+    ReviewCol.DOLLARS_AT_RISK,
+    RuleCol.REASON_CODES,
+    ReviewCol.EXPLANATION,
 ).head(15)
 
 # %% [markdown]
@@ -76,18 +77,18 @@ compact_case_cards(queue, limit=5)
 # Teams can choose a fixed top-K review budget per pay period or a score threshold. Top-K gives predictable workload; thresholds adapt to risk concentration but can produce variable queue sizes.
 
 # %%
-budget_sizes = scored.group_by("pay_period_index").agg(
-    (pl.col("pay_period_rank") <= 10).sum().alias("top_10_queue"),
-    (pl.col("pay_period_rank") <= 25).sum().alias("top_25_queue"),
-    (pl.col("final_anomaly_score") >= 0.65).sum().alias("score_threshold_065_queue"),
-).sort("pay_period_index")
+budget_sizes = scored.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(
+    (pl.col(ScoreCol.PAY_PERIOD_RANK) <= 10).sum().alias(AggregateCol.TOP_10_QUEUE),
+    (pl.col(ScoreCol.PAY_PERIOD_RANK) <= 25).sum().alias(AggregateCol.TOP_25_QUEUE),
+    (pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= 0.65).sum().alias(AggregateCol.SCORE_THRESHOLD_065_QUEUE),
+).sort(PayrollCol.PAY_PERIOD_INDEX)
 budget_sizes.head(12)
 
 # %%
 budget_sizes.select(
-    pl.mean("top_10_queue").alias("expected_top_10_per_period"),
-    pl.mean("top_25_queue").alias("expected_top_25_per_period"),
-    pl.mean("score_threshold_065_queue").alias("expected_threshold_065_per_period"),
+    pl.mean(AggregateCol.TOP_10_QUEUE).alias(AggregateCol.EXPECTED_TOP_10_PER_PERIOD),
+    pl.mean(AggregateCol.TOP_25_QUEUE).alias(AggregateCol.EXPECTED_TOP_25_PER_PERIOD),
+    pl.mean(AggregateCol.SCORE_THRESHOLD_065_QUEUE).alias(AggregateCol.EXPECTED_THRESHOLD_065_PER_PERIOD),
 )
 
 # %% [markdown]
@@ -100,7 +101,7 @@ budget_sizes.select(
 # | Low | Monitor trends, sample for quality assurance, or leave unreviewed if capacity is constrained. |
 
 # %%
-queue.group_by("risk_category").agg(pl.len().alias("records"), pl.sum("dollars_at_risk").alias("dollars_at_risk")).sort("risk_category")
+queue.group_by(ReviewCol.RISK_CATEGORY).agg(pl.len().alias(AggregateCol.RECORDS), pl.sum(ReviewCol.DOLLARS_AT_RISK).alias(ReviewCol.DOLLARS_AT_RISK)).sort(ReviewCol.RISK_CATEGORY)
 
 # %% [markdown]
 # ## Payroll Analyst Operating Model

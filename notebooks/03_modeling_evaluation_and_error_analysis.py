@@ -22,6 +22,7 @@
 from lets_plot import LetsPlot, aes, geom_line, geom_point, ggplot, ggtitle, theme_minimal
 
 from payroll_anomaly_ranking.charts import dollars_captured_chart, precision_at_k_chart
+from payroll_anomaly_ranking.columns import AggregateCol, MetricCol, PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.pipeline import run_pipeline
 
@@ -79,7 +80,7 @@ comparison
 backtest
 
 # %%
-ggplot(backtest.to_dict(as_series=False), aes("pay_period_index", "precision_at_k")) + geom_line() + geom_point() + ggtitle("Backtest Precision@K Over Time") + theme_minimal()
+ggplot(backtest, aes(PayrollCol.PAY_PERIOD_INDEX, MetricCol.PRECISION_AT_K)) + geom_line() + geom_point() + ggtitle("Backtest Precision@K Over Time") + theme_minimal()
 
 # %% [markdown]
 # ## Category-Level Error Analysis
@@ -87,7 +88,7 @@ ggplot(backtest.to_dict(as_series=False), aes("pay_period_index", "precision_at_
 # Category analysis shows which synthetic exception types are reviewed, missed, or overrepresented as false positives under a fixed review budget.
 
 # %%
-category.sort("false_negatives", descending=True)
+category.sort(AggregateCol.FALSE_NEGATIVES, descending=True)
 
 # %% [markdown]
 # ## Cost-Aware Interpretation

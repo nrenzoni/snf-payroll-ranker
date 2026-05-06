@@ -2,46 +2,38 @@ from __future__ import annotations
 
 import polars as pl
 
+from payroll_anomaly_ranking.columns import PayrollCol, RuleCol, RULE_FLAG_COLUMNS
 
-RULE_COLUMNS = [
-    "rule_pay_after_termination",
-    "rule_duplicate_signature",
-    "rule_nonpositive_active_pay",
-    "rule_negative_net_pay",
-    "rule_net_exceeds_gross",
-    "rule_extreme_overtime",
-    "rule_large_manual_adjustment",
-    "rule_pay_rate_change",
-]
+RULE_COLUMNS = RULE_FLAG_COLUMNS
 
 
 def add_rule_flags(payroll: pl.DataFrame) -> pl.DataFrame:
     flagged = (
-        payroll.sort(["employee_id", "pay_period_index"])
+        payroll.sort([PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX])
         .with_columns(
-            ((pl.col("employment_status") == "terminated") & (pl.col("gross_pay") > 0)).cast(pl.Int64).alias("rule_pay_after_termination"),
-            (pl.struct(["employee_id", "pay_period_index", "gross_pay", "net_pay"]).is_duplicated()).cast(pl.Int64).alias("rule_duplicate_signature"),
-            ((pl.col("employment_status") == "active") & (pl.col("gross_pay") <= 0)).cast(pl.Int64).alias("rule_nonpositive_active_pay"),
-            (pl.col("net_pay") < 0).cast(pl.Int64).alias("rule_negative_net_pay"),
-            (pl.col("net_pay") > pl.col("gross_pay") * 1.05).cast(pl.Int64).alias("rule_net_exceeds_gross"),
-            (pl.col("overtime_hours") > 30).cast(pl.Int64).alias("rule_extreme_overtime"),
-            (pl.col("manual_adjustment").abs() > pl.col("gross_pay").abs() * 0.25).cast(pl.Int64).alias("rule_large_manual_adjustment"),
-            (pl.col("pay_rate").pct_change().over("employee_id").abs() > 0.25).fill_null(False).cast(pl.Int64).alias("rule_pay_rate_change"),
+            ((pl.col(PayrollCol.EMPLOYMENT_STATUS) == "terminated") & (pl.col(PayrollCol.GROSS_PAY) > 0)).cast(pl.Int64).alias(RuleCol.PAY_AFTER_TERMINATION),
+            (pl.struct([PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX, PayrollCol.GROSS_PAY, PayrollCol.NET_PAY]).is_duplicated()).cast(pl.Int64).alias(RuleCol.DUPLICATE_SIGNATURE),
+            ((pl.col(PayrollCol.EMPLOYMENT_STATUS) == "active") & (pl.col(PayrollCol.GROSS_PAY) <= 0)).cast(pl.Int64).alias(RuleCol.NONPOSITIVE_ACTIVE_PAY),
+            (pl.col(PayrollCol.NET_PAY) < 0).cast(pl.Int64).alias(RuleCol.NEGATIVE_NET_PAY),
+            (pl.col(PayrollCol.NET_PAY) > pl.col(PayrollCol.GROSS_PAY) * 1.05).cast(pl.Int64).alias(RuleCol.NET_EXCEEDS_GROSS),
+            (pl.col(PayrollCol.OVERTIME_HOURS) > 30).cast(pl.Int64).alias(RuleCol.EXTREME_OVERTIME),
+            (pl.col(PayrollCol.MANUAL_ADJUSTMENT).abs() > pl.col(PayrollCol.GROSS_PAY).abs() * 0.25).cast(pl.Int64).alias(RuleCol.LARGE_MANUAL_ADJUSTMENT),
+            (pl.col(PayrollCol.PAY_RATE).pct_change().over(PayrollCol.EMPLOYEE_ID).abs() > 0.25).fill_null(False).cast(pl.Int64).alias(RuleCol.PAY_RATE_CHANGE),
         )
         .with_columns(
             (
-                pl.col("rule_pay_after_termination") * 35
-                + pl.col("rule_duplicate_signature") * 25
-                + pl.col("rule_nonpositive_active_pay") * 15
-                + pl.col("rule_negative_net_pay") * 20
-                + pl.col("rule_net_exceeds_gross") * 12
-                + pl.col("rule_extreme_overtime") * 14
-                + pl.col("rule_large_manual_adjustment") * 10
-                + pl.col("rule_pay_rate_change") * 12
-            ).alias("rule_severity_score")
+                pl.col(RuleCol.PAY_AFTER_TERMINATION) * 35
+                + pl.col(RuleCol.DUPLICATE_SIGNATURE) * 25
+                + pl.col(RuleCol.NONPOSITIVE_ACTIVE_PAY) * 15
+                + pl.col(RuleCol.NEGATIVE_NET_PAY) * 20
+                + pl.col(RuleCol.NET_EXCEEDS_GROSS) * 12
+                + pl.col(RuleCol.EXTREME_OVERTIME) * 14
+                + pl.col(RuleCol.LARGE_MANUAL_ADJUSTMENT) * 10
+                + pl.col(RuleCol.PAY_RATE_CHANGE) * 12
+            ).alias(RuleCol.SEVERITY_SCORE)
         )
     )
-    return flagged.with_columns(pl.struct(RULE_COLUMNS).map_elements(_reason_codes, return_dtype=pl.String).alias("rule_reason_codes"))
+    return flagged.with_columns(pl.struct(RULE_COLUMNS).map_elements(_reason_codes, return_dtype=pl.String).alias(RuleCol.REASON_CODES))
 
 
 def _reason_codes(values: dict[str, int]) -> str:
