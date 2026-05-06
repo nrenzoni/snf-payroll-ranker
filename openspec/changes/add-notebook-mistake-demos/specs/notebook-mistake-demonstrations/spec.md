@@ -8,25 +8,36 @@ The notebook SHALL include demonstrations for random train/test splitting, defau
 - **THEN** each requested mistake is present as a distinct explained demonstration
 
 ### Requirement: Each demonstration compares anti-pattern and corrected method
-Each mistake demonstration SHALL show an explicit anti-pattern example and compare it against a corrected method using the existing payroll anomaly ranking context.
+Each mistake demonstration SHALL show an explicit anti-pattern example and compare it against a corrected method using the existing payroll anomaly ranking context. Random train/test splits SHALL be labeled as an anti-pattern and SHALL NOT be presented as an acceptable evaluation method.
 
 #### Scenario: Reader compares methods
 - **WHEN** a mistake demonstration is executed
 - **THEN** the anti-pattern output and corrected-method output are both visible and labeled so the difference is clear
 
 ### Requirement: Demonstrations include plots
-Each mistake demonstration SHALL include at least one Lets-plot visualization or plotted comparison that makes the problem observable.
+Each empirical mistake demonstration SHALL include at least one Lets-plot visualization or plotted comparison that makes the problem observable. The overclaiming fraud-detection demonstration MAY use a labeled claim-language comparison instead of a plot.
 
 #### Scenario: Reader inspects visual evidence
-- **WHEN** a demonstration section is run
+- **WHEN** an empirical demonstration section is run
 - **THEN** the notebook renders a plot that supports the explanation of why the anti-pattern is problematic
 
+#### Scenario: Reader inspects fraud-claim wording
+- **WHEN** the overclaiming fraud-detection demonstration is read
+- **THEN** the notebook contrasts overclaimed fraud-detection language with correct review-prioritization language
+
 ### Requirement: Evaluation demonstrations use operational metrics
-The notebook SHALL compare generic model metrics with payroll review metrics such as Precision@K, PR-AUC, false positives, false negatives, dollar capture, review budget effects, or rank-based outcomes where relevant.
+The notebook SHALL compare generic model metrics with payroll review metrics such as Precision@K, PR-AUC, false positives, false negatives, dollar capture, review budget effects, or rank-based outcomes where relevant. Evaluation metric comparisons SHALL be framed around later-period or held-out records when the demonstration concerns model evaluation.
 
 #### Scenario: Reader evaluates ranking quality
 - **WHEN** the notebook compares ROC-AUC-only reporting against corrected evaluation
 - **THEN** the corrected evaluation includes review-budget or imbalance-aware metrics beyond ROC-AUC
+
+### Requirement: Default model assumptions are made explicit
+The notebook SHALL demonstrate that default Isolation Forest settings encode assumptions that may not match payroll review capacity, temporal validation, contamination expectations, or seed-stability needs.
+
+#### Scenario: Reader compares Isolation Forest settings
+- **WHEN** the default-only Isolation Forest anti-pattern is shown
+- **THEN** the corrected comparison identifies the explicit modeling or evaluation assumptions used instead of relying on defaults alone
 
 ### Requirement: Anomaly importance is cost-aware
 The notebook SHALL demonstrate that anomalies differ by business impact and that prioritization must consider severity, dollar exposure, category, or review capacity instead of treating all anomaly labels as equal.

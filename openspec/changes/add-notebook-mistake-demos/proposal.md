@@ -15,6 +15,7 @@ The project needs explicit notebook demonstrations that teach why common anomaly
 - `notebook-mistake-demonstrations`: Educational notebook demonstrations for payroll anomaly modeling and evaluation mistakes, including visual comparisons between anti-patterns and corrected approaches.
 
 ### Modified Capabilities
+- `payroll-anomaly-evaluation`: Clarify that notebooks should avoid endorsing random row splits while allowing explicit anti-pattern demonstrations that compare them against temporal validation.
 
 ## Impact
 
