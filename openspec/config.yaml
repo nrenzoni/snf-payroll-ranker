@@ -1,54 +1,45 @@
 schema: spec-driven
 
 # Project context
-# Defines the core tech stack and architectural patterns for the AI.
 context: |
   Tech Stack: Python, Polars, Lets-plot, Jupytext, UV.
-  Workflow: Jupytext script files (.py) written to repo; user can use jupyter lab to view the .py files. 
+  Workflow: Jupytext script files (.py) written to repo; user can use jupyter lab to view the .py files.
   Architecture: Follow a "Notebook-Library" pattern. Shared definitions, complex logic, and data schemas reside in a sibling file prefixed with an underscore (e.g., research_task.py uses _research_task-lib.py).
   Coding Standard: High-performance data processing with a focus on type safety and maintainable schema references.
-  Repository Archetype:
-  - /src/payroll-anomaly-ranking/data_generation.py: Logic for synthetic payroll distributions.
-  - /src/payroll-anomaly-ranking/features.py: Polars expressions for the anomaly taxonomy.
-  - /src/payroll-anomaly-ranking/rules.py: Deterministic payroll logic (e.g., is_terminated check).
-  - /src/payroll-anomaly-ranking/evaluation.py: Precision@K and backtesting loops.
-  
-  When the user says "Let's work on feature engineering," the AI should suggest modifications specifically to /src/payroll-anomaly-ranking/features.py and the corresponding sibling lib file.
-  
+
 # Per-artifact rules
-# Strict constraints to enforce library choices and variable-naming conventions.
+# Ensure all strings containing colons are wrapped in double quotes.
 rules:
   python_files:
-    - Never use pandas. If a snippet requires dataframes, use Polars (pl).
-    - Never use matplotlib. Use Lets-plot (from lets_plot import *) for all visualizations.
-    - Target changes: Always apply code modifications to the Jupytext .py files, not the .ipynb artifacts.
-    
+    - "Never use pandas. If a snippet requires dataframes, use Polars (pl)."
+    - "Never use matplotlib. Use Lets-plot (from lets_plot import *) for all visualizations."
+    - "Target changes: Always apply code modifications to the Jupytext .py files, not the .ipynb artifacts."
+
   data_manipulation:
-    - Column Name Enforcement: Raw strings must not be used for column selection or transformations within method chains.
-    - Define all column names as UPPER_CASE constants at the top of the file or within the sibling lib file.
-    - Example: Use `pl_df.select(USER_ID)` instead of `pl_df.select("user_id")`.
-    
+    - "Column Name Enforcement: Raw strings must not be used for column selection or transformations within method chains."
+    - "Define all column names as UPPER_CASE constants at the top of the file or in src library."
+    - "Example: Use pl_df.select(USER_ID) instead of pl_df.select('user_id')."
+
   project_structure:
-    - When creating new research modules, automatically suggest or create the corresponding `_name-lib.py` for helper functions and constants.
-  
+    - "When creating new research modules, automatically suggest or create the corresponding _name-lib.py for helper functions and constants."
+
   performance:
-    - Prefer LazyFrames (`.lazy()`) for complex pipelines to optimize the query plan.
-    - Minimize `collect()` calls; keep data in the Polars engine as long as possible.
-    
+    - "Prefer LazyFrames (.lazy()) for complex pipelines to optimize the query plan."
+    - "Minimize collect() calls; keep data in the Polars engine as long as possible."
+
   documentation:
-    - Sibling library files must use explicit type hints for all function signatures.
-    - Use clear, descriptive variable names for intermediate transformation steps (e.g., `filtered_df` instead of `df2`).
-    - Maintain a `RESEARCH_LOG.md` at the root. 
-    - Every time a new `.py` file is created, add an entry with the hypothesis and the primary Polars transformations used.
-    - Docstrings: Use the `numpydoc` style to ensure compatibility with scientific documentation tools.
-    
+    - "Sibling library files must use explicit type hints for all function signatures."
+    - "Use clear, descriptive variable names for intermediate transformation steps (e.g., filtered_df instead of df2)."
+    - "Maintain a RESEARCH_LOG.md at the root."
+    - "Every time a new .py file is created, add an entry with the hypothesis and the primary Polars transformations used."
+    - "Docstrings: Use the numpydoc style to ensure compatibility with scientific documentation tools."
+
   visualizations:
-    - When using Lets-plot, prioritize the "Grammar of Graphics" approach (e.g., `ggplot(df) + geom_point()`).
-    - Standardize plot themes across the project for visual consistency (e.g., `theme_minimal()`).
-    - Do not convert Polars DataFrames to pandas for Lets-plot. Pass Polars DataFrames directly to `ggplot`; avoid `.to_pandas()` unless a specific API requires pandas and the reason is documented.
+    - "When using Lets-plot, prioritize the 'Grammar of Graphics' approach (e.g., ggplot(df) + geom_point())."
+    - "Standardize plot themes across the project for visual consistency (e.g., theme_minimal())."
+    - "Do not convert Polars DataFrames to pandas for Lets-plot. Pass Polars DataFrames directly to ggplot; avoid .to_pandas() unless a specific API requires pandas and the reason is documented."
 
   file_organization:
-    - Pathing: Use `pathlib.Path` for all file system interactions. No hardcoded string paths.
-    - Imports: Logic in `research/` files should prioritize imports from their local `_*-lib.py` first, then the global `common/` directory.
-    - Naming: Sibling files must always start with an underscore to visually distinguish them from the primary Jupytext scripts.
-  
+    - "Pathing: Use pathlib.Path for all file system interactions. No hardcoded string paths."
+    - "Imports: Logic in research/ files should prioritize imports from their local _*-lib.py first, then the global common/ directory."
+    - "Naming: Sibling files must always start with an underscore to visually distinguish them from the primary Jupytext scripts."
