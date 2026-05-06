@@ -20,3 +20,10 @@ notebooks/*.ipynb
 
 # vi temp
 *.swp
+
+# Generated synthetic data and evaluation outputs
+data/synthetic/*.csv
+outputs/evaluation/*.csv
+notebooks/data/
+notebooks/outputs/
+
