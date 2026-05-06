@@ -6,7 +6,7 @@ This project demonstrates a privacy-safe payroll anomaly detection workflow usin
 
 - The dataset is fully synthetic and reproducible from code.
 - No real employee identifiers, salaries, tax records, bank details, HR comments, company data, or production integrations are included.
-- Review queue outputs describe records requiring payroll review; they do not label employees or records as confirmed fraud.
+- Review queue outputs describe records requiring payroll review; they do not label employees or records as confirmed misconduct.
 
 ## Setup
 
@@ -31,15 +31,21 @@ Expected generated files:
 - `outputs/evaluation/backtest_metrics.csv`
 - `outputs/evaluation/review_queue.csv`
 
-## Notebook
+## Notebook Sequence
 
-The Jupytext-paired notebook source is `notebooks/payroll_anomaly_detection.py`.
+The Jupytext-paired notebook index is `notebooks/payroll_anomaly_detection.py`. The business-facing sequence is:
 
-Run it from a clean checkout with:
+- `notebooks/01_problem_framing_and_data_maturity.py`: business framing, synthetic-data privacy, payroll anomaly taxonomy, schema dictionary, validation failures versus warnings, quality summaries, and data maturity visuals.
+- `notebooks/02_feature_engineering_and_baselines.py`: leakage-safe employee history features, peer-relative context, rule flags, robust statistical features, score components, baseline comparison, score distribution, and selected employee history.
+- `notebooks/03_modeling_evaluation_and_error_analysis.py`: temporal validation framing, precision@K, recall@K, F1@K, PR-AUC, average anomaly rank, mean reciprocal rank, dollars captured@K, model comparison, backtesting, and category error analysis.
+- `notebooks/04_review_queue_explainability_and_thresholds.py`: analyst-readable review queue, review-safe explanations, compact case cards, top-K and threshold workload views, risk categories, operating model, and conceptual feedback capture.
+- `notebooks/05_production_monitoring_and_deployment_path.py`: realistic deployment path, architecture table, monitoring metrics, retraining triggers, limitations, and governance controls without claiming live integrations.
+
+Run a notebook from a clean checkout with:
 
 ```bash
-uv run jupytext --to ipynb notebooks/payroll_anomaly_detection.py
-uv run jupyter nbconvert --to notebook --execute notebooks/payroll_anomaly_detection.ipynb --output payroll_anomaly_detection.executed.ipynb --output-dir notebooks
+uv run jupytext --to ipynb notebooks/01_problem_framing_and_data_maturity.py
+uv run jupyter nbconvert --to notebook --execute notebooks/01_problem_framing_and_data_maturity.ipynb --output 01_problem_framing_and_data_maturity.executed.ipynb --output-dir notebooks
 ```
 
 ## What The Workflow Covers

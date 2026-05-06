@@ -48,6 +48,8 @@ The notebooks SHALL include clean visuals or tables for payroll trend, gross pay
 #### Scenario: Required visuals render from synthetic outputs
 - **WHEN** the notebook sequence is run on a clean checkout
 - **THEN** the required visuals or tables render using synthetic data and generated evaluation outputs
+- **AND** notebooks that render LetsPlot visuals call `LetsPlot.setup_html()` before displaying those charts
+- **AND** continuous distribution visuals use binned histograms or equivalent aggregation rather than one bar per raw numeric value
 
 ### Requirement: README notebook sequence documentation
 The README SHALL list the notebook sequence and briefly explain the purpose of each notebook.

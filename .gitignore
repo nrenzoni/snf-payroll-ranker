@@ -17,3 +17,6 @@ notebooks/*.ipynb
 
 # Ignore Jupyter autosave checkpoints
 **/.ipynb_checkpoints/
+
+# vi temp
+*.swp

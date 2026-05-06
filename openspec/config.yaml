@@ -4,7 +4,7 @@ schema: spec-driven
 # Defines the core tech stack and architectural patterns for the AI.
 context: |
   Tech Stack: Python, Polars, Lets-plot, Jupytext, UV.
-  Workflow: Notebooks (.ipynb) are paired with Jupytext script files (.py). 
+  Workflow: Jupytext script files (.py) written to repo; user can use jupyter lab to view the .py files. 
   Architecture: Follow a "Notebook-Library" pattern. Shared definitions, complex logic, and data schemas reside in a sibling file prefixed with an underscore (e.g., research_task.py uses _research_task-lib.py).
   Coding Standard: High-performance data processing with a focus on type safety and maintainable schema references.
   Repository Archetype:

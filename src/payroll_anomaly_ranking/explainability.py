@@ -42,7 +42,7 @@ def build_review_queue(scored: pl.DataFrame, top_k: int = 25) -> pl.DataFrame:
 
 
 def sample_review_language() -> str:
-    return "This synthetic record is prioritized for payroll review because it differs from expected history, peer context, or deterministic payroll rules; it is not a confirmed fraud finding."
+    return "This synthetic record is prioritized for payroll review because it differs from expected history, peer context, or deterministic payroll rules; it is not a confirmed misconduct finding."
 
 
 def _primary_reason(row: dict[str, object]) -> str:
@@ -73,4 +73,4 @@ def _risk_category(row: dict[str, object]) -> str:
 
 
 def _explanation(row: dict[str, object]) -> str:
-    return f"Synthetic payroll record requires review: {row.get('primary_reason')}. {row.get('secondary_reason')}. This is an exception triage signal, not a fraud conclusion."
+    return f"Synthetic payroll record requires review: {row.get('primary_reason')}. {row.get('secondary_reason')}. This is an exception triage signal, not a misconduct conclusion."

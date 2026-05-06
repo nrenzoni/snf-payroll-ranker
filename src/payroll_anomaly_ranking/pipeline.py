@@ -36,6 +36,7 @@ def run_pipeline(config: PayrollConfig = PayrollConfig()) -> dict[str, object]:
         "metrics": metrics,
         "model_comparison": comparison,
         "category_error_analysis": category,
+        "backtest": backtest,
         "review_queue": queue,
     }
 
