@@ -8,3 +8,12 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Ignore Jupyter Notebook files only in the notebooks directory
+notebooks/*.ipynb
+
+# Explicitly ensure paired python scripts are tracked
+!notebooks/*.py
+
+# Ignore Jupyter autosave checkpoints
+**/.ipynb_checkpoints/
