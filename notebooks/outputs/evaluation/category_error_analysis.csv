@@ -1,0 +1,12 @@
+anomaly_category,records,true_anomalies,reviewed_records,true_positive_reviews,false_negatives,false_positives
+normal,16269,0,469,0,0,469
+missing_deduction,22,22,0,0,22,0
+pay_after_termination,18,18,12,12,6,0
+duplicate_payment,25,25,24,24,1,0
+new_employee_large_payment,21,21,21,21,0,0
+negative_net_pay,26,26,13,13,13,0
+gross_pay_spike,24,24,24,24,0,0
+incorrect_pay_rate,32,32,29,29,3,0
+overtime_spike,22,22,22,22,0,0
+retro_pay_outlier,22,22,22,22,0,0
+department_payroll_spike,23,23,14,14,9,0
