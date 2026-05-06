@@ -45,6 +45,7 @@ rules:
   visualizations:
     - When using Lets-plot, prioritize the "Grammar of Graphics" approach (e.g., `ggplot(df) + geom_point()`).
     - Standardize plot themes across the project for visual consistency (e.g., `theme_minimal()`).
+    - Do not convert Polars DataFrames to pandas for Lets-plot. Pass Polars DataFrames directly to `ggplot`; avoid `.to_pandas()` unless a specific API requires pandas and the reason is documented.
 
   file_organization:
     - Pathing: Use `pathlib.Path` for all file system interactions. No hardcoded string paths.
