@@ -72,7 +72,7 @@ LetsPlot.setup_html()
 # %%
 config = PayrollConfig(employee_count=650, pay_periods=26)
 results = run_pipeline(config)
-payroll = results["payroll"]
+payroll = results.payroll
 
 # %% [markdown]
 # ## Schema And Data Dictionary
@@ -88,11 +88,11 @@ synthetic_schema_dictionary()
 # Hard failures are pipeline-stopping data problems, such as missing required columns or impossible lifecycle dates. Warning-level checks are payroll exceptions that may be legitimate but should be available for analyst review.
 
 # %%
-hard_failure_demo, _ = validate_payroll(payroll.drop(PayrollCol.EMPLOYEE_ID))
-hard_failure_demo
+hard_failure_demo = validate_payroll(payroll.drop(PayrollCol.EMPLOYEE_ID))
+hard_failure_demo.failures
 
 # %%
-results["validation_warnings"]
+results.validation_warnings
 
 # %% [markdown]
 # ## Data Quality Summary
@@ -100,7 +100,7 @@ results["validation_warnings"]
 # The summary checks record volume, cycle coverage, employee counts, missing values, lifecycle consistency, and warning counts.
 
 # %%
-data_quality_summary(payroll, results["validation_warnings"])
+data_quality_summary(payroll, results.validation_warnings)
 
 # %%
 payroll.select(

@@ -39,7 +39,12 @@ from payroll_anomaly_ranking.pipeline import run_pipeline
 results = run_pipeline(
     PayrollConfig(employee_count=120, pay_periods=12, review_budgets=(5, 10)),
 )
-sorted(results.keys())
+[
+    results.payroll.height,
+    results.scored.height,
+    results.metrics.height,
+    results.analyst_review_queue.height,
+]
 
 # %% [markdown]
 # ## What This Proves

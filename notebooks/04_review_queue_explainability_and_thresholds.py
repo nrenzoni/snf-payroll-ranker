@@ -36,9 +36,9 @@ from payroll_anomaly_ranking.presentation import compact_case_cards
 # %%
 config = PayrollConfig(employee_count=650, pay_periods=26, review_budgets=(10, 25, 50))
 results = run_pipeline(config)
-queue = results["analyst_review_queue"]
-evaluation_queue = results["evaluation_labeled_review_queue"]
-scored = results["scored"]
+queue = results.analyst_review_queue
+evaluation_queue = results.evaluation_labeled_review_queue
+scored = results.scored
 
 # %% [markdown]
 # ## Review-Safe Language

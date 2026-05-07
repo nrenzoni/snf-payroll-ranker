@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from collections import Counter, defaultdict
+from dataclasses import dataclass
+from typing import Any, cast
+
 import numpy as np
 import polars as pl
 from sklearn.ensemble import IsolationForest
@@ -17,22 +21,60 @@ from payroll_anomaly_ranking.config import PayrollConfig
 FEATURE_COLUMNS = MODEL_FEATURE_COLUMNS
 
 
+@dataclass(frozen=True)
+class TemporalSplit:
+    train: pl.DataFrame
+    validation: pl.DataFrame
+    test: pl.DataFrame
+
+
+@dataclass(frozen=True)
+class BootstrapInterval:
+    p10: float | None
+    p90: float | None
+    std: float | None
+    width: float
+
+
+@dataclass(frozen=True)
+class ConformalStats:
+    p_value: float | None
+    percentile: float | None
+
+
+@dataclass(frozen=True)
+class ExpectedGrossPayInterval:
+    p10: float | None
+    p50: float | None
+    p90: float | None
+    width: float | None
+    excess: float | None
+
+
+@dataclass(frozen=True)
+class ExpectedGrossPayBaseline:
+    p10: float
+    p50: float
+    p90: float
+    width: float
+
+
 def temporal_split(
     payroll: pl.DataFrame,
     validation_periods: int = 4,
     test_periods: int = 4,
-) -> dict[str, pl.DataFrame]:
+) -> TemporalSplit:
     periods = sorted(payroll.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list())
     test_start = periods[-test_periods]
     validation_start = periods[-(test_periods + validation_periods)]
-    return {
-        "train": payroll.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) < validation_start),
-        "validation": payroll.filter(
+    return TemporalSplit(
+        train=payroll.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) < validation_start),
+        validation=payroll.filter(
             (pl.col(PayrollCol.PAY_PERIOD_INDEX) >= validation_start)
             & (pl.col(PayrollCol.PAY_PERIOD_INDEX) < test_start),
         ),
-        "test": payroll.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) >= test_start),
-    }
+        test=payroll.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) >= test_start),
+    )
 
 
 def add_statistical_scores(payroll: pl.DataFrame) -> pl.DataFrame:
@@ -65,7 +107,7 @@ def add_isolation_forest_scores(
     config: PayrollConfig = PayrollConfig(),
 ) -> pl.DataFrame:
     splits = temporal_split(payroll)
-    train = _feature_matrix(splits["train"])
+    train = _feature_matrix(splits.train)
     all_features = _feature_matrix(payroll)
     model = IsolationForest(
         n_estimators=100,
@@ -123,10 +165,11 @@ def add_hybrid_scores(
         pl.col(ScoreCol.EXPOSURE_SCORE).alias(ScoreCol.DOLLAR_SCORE),
     )
     weights = config.hybrid_weights
+    weighted_score = pl.lit(0.0)
+    for name, weight in weights.items():
+        weighted_score = weighted_score + pl.col(name).fill_null(0) * weight
     return scored.with_columns(
-        sum(
-            pl.col(name).fill_null(0) * weight for name, weight in weights.items()
-        ).alias(ScoreCol.FINAL_ANOMALY_SCORE),
+        weighted_score.alias(ScoreCol.FINAL_ANOMALY_SCORE),
     ).with_columns(
         pl.col(ScoreCol.FINAL_ANOMALY_SCORE)
         .rank("ordinal", descending=True)
@@ -166,7 +209,7 @@ def add_uncertainty_scores(
             config.reference_window_periods,
         )
         reference_scores = [
-            float(row[ScoreCol.FINAL_ANOMALY_SCORE] or 0.0) for row in references
+            _row_float(row, ScoreCol.FINAL_ANOMALY_SCORE) for row in references
         ]
         reference_features = np.array(
             [
@@ -185,24 +228,44 @@ def add_uncertainty_scores(
             reference_features,
             target_features,
         )
+        expected_pay_baselines, fallback_expected_pay = _expected_gross_pay_baselines(
+            references,
+        )
+        pay_code_counts = Counter(
+            reference.get(PayrollCol.PAY_CODE) for reference in references
+        )
+        pay_code_combo_counts = Counter(
+            (
+                reference.get(PayrollCol.PAY_CODE),
+                reference.get(PayrollCol.PAY_TYPE),
+                reference.get(PayrollCol.DEPARTMENT),
+            )
+            for reference in references
+        )
         for index, row in enumerate(target_rows):
-            gross_interval = _expected_gross_pay_interval(row, references)
+            gross_interval = _expected_gross_pay_interval(
+                row,
+                expected_pay_baselines,
+                fallback_expected_pay,
+            )
             conformal = _conformal_context(
-                float(row[ScoreCol.FINAL_ANOMALY_SCORE] or 0.0),
+                _row_float(row, ScoreCol.FINAL_ANOMALY_SCORE),
                 reference_scores,
             )
             peer_uncertainty = _sample_size_uncertainty(
-                int(row.get(FeatureCol.EFFECTIVE_PEER_REFERENCE_SIZE) or 0),
+                _row_int(row, FeatureCol.EFFECTIVE_PEER_REFERENCE_SIZE),
                 target=25,
             )
             history_uncertainty = _sample_size_uncertainty(
-                int(row.get(FeatureCol.PRIOR_EMPLOYEE_PAY_PERIOD_COUNT) or 0),
+                _row_int(row, FeatureCol.PRIOR_EMPLOYEE_PAY_PERIOD_COUNT),
                 target=config.reference_window_periods,
             )
             data_quality, data_quality_drivers = _data_quality_uncertainty(row)
             ood, ood_drivers = _ood_uncertainty(
                 row,
-                references,
+                bool(references),
+                pay_code_counts,
+                pay_code_combo_counts,
                 ood_distance_scores[index],
                 config,
             )
@@ -210,7 +273,7 @@ def add_uncertainty_scores(
             interval_uncertainty = _interval_uncertainty(gross_interval)
             components = {
                 ScoreCol.ENSEMBLE_DISAGREEMENT_UNCERTAINTY: ensemble,
-                ScoreCol.BOOTSTRAP_INTERVAL_UNCERTAINTY: bootstrap[index]["width"],
+                ScoreCol.BOOTSTRAP_INTERVAL_UNCERTAINTY: bootstrap[index].width,
                 ScoreCol.EXPECTED_GROSS_PAY_INTERVAL_WIDTH: interval_uncertainty,
                 ScoreCol.PEER_GROUP_UNCERTAINTY: peer_uncertainty,
                 ScoreCol.EMPLOYEE_HISTORY_UNCERTAINTY: history_uncertainty,
@@ -229,17 +292,17 @@ def add_uncertainty_scores(
                 {
                     PayrollCol.RECORD_ID: row[PayrollCol.RECORD_ID],
                     ScoreCol.ENSEMBLE_DISAGREEMENT_UNCERTAINTY: ensemble,
-                    ScoreCol.BOOTSTRAP_SCORE_P10: bootstrap[index]["p10"],
-                    ScoreCol.BOOTSTRAP_SCORE_P90: bootstrap[index]["p90"],
-                    ScoreCol.BOOTSTRAP_SCORE_STD: bootstrap[index]["std"],
-                    ScoreCol.BOOTSTRAP_INTERVAL_UNCERTAINTY: bootstrap[index]["width"],
-                    ScoreCol.CONFORMAL_P_VALUE: conformal["p_value"],
-                    ScoreCol.CONFORMAL_PERCENTILE: conformal["percentile"],
-                    ScoreCol.EXPECTED_GROSS_PAY_P10: gross_interval["p10"],
-                    ScoreCol.EXPECTED_GROSS_PAY_P50: gross_interval["p50"],
-                    ScoreCol.EXPECTED_GROSS_PAY_P90: gross_interval["p90"],
-                    ScoreCol.EXPECTED_GROSS_PAY_INTERVAL_WIDTH: gross_interval["width"],
-                    ScoreCol.GROSS_PAY_EXCESS_VS_P90: gross_interval["excess"],
+                    ScoreCol.BOOTSTRAP_SCORE_P10: bootstrap[index].p10,
+                    ScoreCol.BOOTSTRAP_SCORE_P90: bootstrap[index].p90,
+                    ScoreCol.BOOTSTRAP_SCORE_STD: bootstrap[index].std,
+                    ScoreCol.BOOTSTRAP_INTERVAL_UNCERTAINTY: bootstrap[index].width,
+                    ScoreCol.CONFORMAL_P_VALUE: conformal.p_value,
+                    ScoreCol.CONFORMAL_PERCENTILE: conformal.percentile,
+                    ScoreCol.EXPECTED_GROSS_PAY_P10: gross_interval.p10,
+                    ScoreCol.EXPECTED_GROSS_PAY_P50: gross_interval.p50,
+                    ScoreCol.EXPECTED_GROSS_PAY_P90: gross_interval.p90,
+                    ScoreCol.EXPECTED_GROSS_PAY_INTERVAL_WIDTH: gross_interval.width,
+                    ScoreCol.GROSS_PAY_EXCESS_VS_P90: gross_interval.excess,
                     ScoreCol.PEER_GROUP_UNCERTAINTY: peer_uncertainty,
                     ScoreCol.EMPLOYEE_HISTORY_UNCERTAINTY: history_uncertainty,
                     ScoreCol.DATA_QUALITY_UNCERTAINTY: data_quality,
@@ -280,7 +343,7 @@ def _rows_by_period(
 ) -> dict[int, list[dict[str, object]]]:
     by_period: dict[int, list[dict[str, object]]] = {}
     for row in rows:
-        by_period.setdefault(int(row[PayrollCol.PAY_PERIOD_INDEX]), []).append(row)
+        by_period.setdefault(_row_int(row, PayrollCol.PAY_PERIOD_INDEX), []).append(row)
     return by_period
 
 
@@ -292,7 +355,7 @@ def _prior_reference_rows(
     return [
         row
         for row in rows
-        if period - window <= int(row[PayrollCol.PAY_PERIOD_INDEX]) < period
+        if period - window <= _row_int(row, PayrollCol.PAY_PERIOD_INDEX) < period
     ]
 
 
@@ -301,8 +364,8 @@ def _ensemble_disagreement(row: dict[str, object], config: PayrollConfig) -> flo
     weights = []
     for score_name, weight in config.hybrid_weights.items():
         if score_name in row and row[score_name] is not None:
-            values.append(float(row[score_name]))
-            weights.append(float(weight))
+            values.append(_row_float(row, score_name))
+            weights.append(weight)
     if len(values) < 2:
         return 0.0
     value_array = np.array(values)
@@ -316,10 +379,9 @@ def _bootstrap_intervals(
     reference_features: np.ndarray,
     target_features: np.ndarray,
     config: PayrollConfig,
-) -> list[dict[str, float | None]]:
+) -> list[BootstrapInterval]:
     empty = [
-        {"p10": None, "p90": None, "std": None, "width": 0.0}
-        for _ in range(len(target_features))
+        BootstrapInterval(None, None, None, 0.0) for _ in range(len(target_features))
     ]
     if (
         len(reference_features) < config.bootstrap_min_reference_rows
@@ -343,12 +405,12 @@ def _bootstrap_intervals(
     width = _minmax(upper - lower)
     std = np.std(scores, axis=0)
     return [
-        {
-            "p10": float(lower[index]),
-            "p90": float(upper[index]),
-            "std": float(std[index]),
-            "width": float(width[index]),
-        }
+        BootstrapInterval(
+            p10=float(lower[index]),
+            p90=float(upper[index]),
+            std=float(std[index]),
+            width=float(width[index]),
+        )
         for index in range(len(target_features))
     ]
 
@@ -356,44 +418,69 @@ def _bootstrap_intervals(
 def _conformal_context(
     score: float,
     reference_scores: list[float],
-) -> dict[str, float | None]:
+) -> ConformalStats:
     if not reference_scores:
-        return {"p_value": None, "percentile": None}
+        return ConformalStats(None, None)
     more_extreme = sum(1 for reference in reference_scores if reference >= score)
     less_equal = sum(1 for reference in reference_scores if reference <= score)
     denominator = len(reference_scores) + 1
-    return {
-        "p_value": (more_extreme + 1) / denominator,
-        "percentile": less_equal / len(reference_scores),
-    }
+    return ConformalStats(
+        p_value=(more_extreme + 1) / denominator,
+        percentile=less_equal / len(reference_scores),
+    )
 
 
 def _expected_gross_pay_interval(
     row: dict[str, object],
-    references: list[dict[str, object]],
-) -> dict[str, float | None]:
-    peer_values = [
-        float(reference[PayrollCol.GROSS_PAY])
-        for reference in references
-        if _peer_key(reference) == _peer_key(row)
-    ]
-    values = (
-        peer_values
-        if len(peer_values) >= 5
-        else [float(reference[PayrollCol.GROSS_PAY]) for reference in references]
+    peer_baselines: dict[tuple[object, ...], ExpectedGrossPayBaseline],
+    fallback_baseline: ExpectedGrossPayBaseline | None,
+) -> ExpectedGrossPayInterval:
+    baseline = peer_baselines.get(_peer_key(row), fallback_baseline)
+    if baseline is None:
+        return ExpectedGrossPayInterval(None, None, None, None, None)
+    excess = max(_row_float(row, PayrollCol.GROSS_PAY) - baseline.p90, 0.0)
+    return ExpectedGrossPayInterval(
+        p10=baseline.p10,
+        p50=baseline.p50,
+        p90=baseline.p90,
+        width=baseline.width,
+        excess=excess,
     )
-    if len(values) < 3:
-        return {"p10": None, "p50": None, "p90": None, "width": None, "excess": None}
-    p10, p50, p90 = np.percentile(np.array(values), [10, 50, 90])
-    width = float(p90 - p10)
-    excess = max(float(row[PayrollCol.GROSS_PAY]) - float(p90), 0.0)
-    return {
-        "p10": float(p10),
-        "p50": float(p50),
-        "p90": float(p90),
-        "width": width,
-        "excess": excess,
+
+
+def _expected_gross_pay_baselines(
+    references: list[dict[str, object]],
+) -> tuple[
+    dict[tuple[object, ...], ExpectedGrossPayBaseline],
+    ExpectedGrossPayBaseline | None,
+]:
+    values_by_peer: dict[tuple[object, ...], list[float]] = defaultdict(list)
+    all_values = []
+    for reference in references:
+        gross_pay = _row_float(reference, PayrollCol.GROSS_PAY)
+        values_by_peer[_peer_key(reference)].append(gross_pay)
+        all_values.append(gross_pay)
+    fallback = _expected_gross_pay_baseline(all_values)
+    baselines = {
+        key: baseline
+        for key, values in values_by_peer.items()
+        if len(values) >= 5 and (baseline := _expected_gross_pay_baseline(values))
     }
+    return baselines, fallback
+
+
+def _expected_gross_pay_baseline(
+    values: list[float],
+) -> ExpectedGrossPayBaseline | None:
+    if len(values) < 3:
+        return None
+    p10, p50, p90 = np.percentile(np.array(values), [10, 50, 90])
+    return ExpectedGrossPayBaseline(
+        p10=float(p10),
+        p50=float(p50),
+        p90=float(p90),
+        width=float(p90 - p10),
+    )
 
 
 def _sample_size_uncertainty(count: int, target: int) -> float:
@@ -404,24 +491,24 @@ def _data_quality_uncertainty(row: dict[str, object]) -> tuple[float, list[str]]
     drivers = []
     if row.get(PayrollCol.DEDUCTIONS) is None:
         drivers.append("missing deductions")
-    if float(row.get(PayrollCol.NET_PAY) or 0.0) < 0:
+    if _row_float(row, PayrollCol.NET_PAY) < 0:
         drivers.append("negative net pay")
     if (
-        float(row.get(PayrollCol.NET_PAY) or 0.0)
-        > float(row.get(PayrollCol.GROSS_PAY) or 0.0) * 1.05
+        _row_float(row, PayrollCol.NET_PAY)
+        > _row_float(row, PayrollCol.GROSS_PAY) * 1.05
     ):
         drivers.append("net pay exceeds gross pay")
     if (
-        float(row.get(PayrollCol.REGULAR_HOURS) or 0.0) <= 0
+        _row_float(row, PayrollCol.REGULAR_HOURS) <= 0
         and row.get(PayrollCol.EMPLOYMENT_STATUS) == "active"
     ):
         drivers.append("nonpositive active regular hours")
     if (
-        float(row.get(PayrollCol.MANUAL_ADJUSTMENT) or 0.0)
-        > float(row.get(PayrollCol.GROSS_PAY) or 0.0) * 0.25
+        _row_float(row, PayrollCol.MANUAL_ADJUSTMENT)
+        > _row_float(row, PayrollCol.GROSS_PAY) * 0.25
     ):
         drivers.append("large manual adjustment")
-    return float(min(len(drivers) * 0.25, 1.0)), drivers
+    return min(len(drivers) * 0.25, 1.0), drivers
 
 
 def _nearest_neighbor_uncertainty(
@@ -449,32 +536,27 @@ def _nearest_neighbor_uncertainty(
 
 def _ood_uncertainty(
     row: dict[str, object],
-    references: list[dict[str, object]],
+    has_references: bool,
+    pay_code_counts: Counter[object],
+    pay_code_combo_counts: Counter[tuple[object, object, object]],
     distance_score: float,
     config: PayrollConfig,
 ) -> tuple[float, list[str]]:
     drivers = []
     pay_code = row.get(PayrollCol.PAY_CODE)
-    reference_pay_codes = [
-        reference.get(PayrollCol.PAY_CODE) for reference in references
+    pay_code_count = pay_code_counts[pay_code]
+    combo_count = pay_code_combo_counts[
+        (pay_code, row.get(PayrollCol.PAY_TYPE), row.get(PayrollCol.DEPARTMENT))
     ]
-    pay_code_count = reference_pay_codes.count(pay_code)
-    combo_count = sum(
-        1
-        for reference in references
-        if reference.get(PayrollCol.PAY_CODE) == pay_code
-        and reference.get(PayrollCol.PAY_TYPE) == row.get(PayrollCol.PAY_TYPE)
-        and reference.get(PayrollCol.DEPARTMENT) == row.get(PayrollCol.DEPARTMENT)
-    )
-    if references and pay_code_count == 0:
+    if has_references and pay_code_count == 0:
         drivers.append("unseen pay code")
-    elif references and pay_code_count <= config.ood_rare_pay_code_threshold:
+    elif has_references and pay_code_count <= config.ood_rare_pay_code_threshold:
         drivers.append("rare pay code")
-    if references and combo_count <= config.ood_rare_pay_code_threshold:
+    if has_references and combo_count <= config.ood_rare_pay_code_threshold:
         drivers.append("rare pay-code peer combination")
-    if float(row.get(PayrollCol.OVERTIME_HOURS) or 0.0) > 60:
+    if _row_float(row, PayrollCol.OVERTIME_HOURS) > 60:
         drivers.append("out-of-range overtime")
-    if float(row.get(PayrollCol.GROSS_PAY) or 0.0) <= 0:
+    if _row_float(row, PayrollCol.GROSS_PAY) <= 0:
         drivers.append("out-of-range gross pay")
     if distance_score >= config.ood_nearest_neighbor_percentile:
         drivers.append("distant from recent feature neighbors")
@@ -482,22 +564,22 @@ def _ood_uncertainty(
     return float(np.clip(max(categorical_score, distance_score), 0.0, 1.0)), drivers
 
 
-def _interval_uncertainty(interval: dict[str, float | None]) -> float:
-    width = interval.get("width")
-    p50 = interval.get("p50")
+def _interval_uncertainty(interval: ExpectedGrossPayInterval) -> float:
+    width = interval.width
+    p50 = interval.p50
     if width is None or p50 is None:
         return 0.75
-    return float(np.clip(float(width) / max(abs(float(p50)), 1.0), 0.0, 1.0))
+    return float(np.clip(width / max(abs(p50), 1.0), 0.0, 1.0))
 
 
 def _weighted_composite(
     components: dict[ScoreCol, float],
-    weights: dict[str, float],
+    weights: dict[ScoreCol, float],
 ) -> float:
     weighted = 0.0
     total = 0.0
     for name, value in components.items():
-        weight = float(weights.get(name, 0.0))
+        weight = weights.get(name, 0.0)
         weighted += value * weight
         total += weight
     return float(np.clip(weighted / max(total, 1e-9), 0.0, 1.0))
@@ -538,3 +620,13 @@ def _peer_key(row: dict[str, object]) -> tuple[object, ...]:
         row.get(PayrollCol.LOCATION),
         row.get(FeatureCol.TENURE_BUCKET),
     )
+
+
+def _row_float(row: dict[str, object], key: str) -> float:
+    value = row.get(key)
+    return 0.0 if value is None else float(cast(Any, value))
+
+
+def _row_int(row: dict[str, object], key: str) -> int:
+    value = row.get(key)
+    return 0 if value is None else int(cast(Any, value))

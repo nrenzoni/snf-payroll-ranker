@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import Any, cast
 
 import polars as pl
 
@@ -86,10 +87,11 @@ def add_peer_features(payroll: pl.DataFrame) -> pl.DataFrame:
             if len(references) < 3:
                 references = prior_rows
             gross_values = [
-                float(candidate[PayrollCol.GROSS_PAY]) for candidate in references
+                _row_float(candidate, PayrollCol.GROSS_PAY) for candidate in references
             ]
             overtime_values = [
-                float(candidate[PayrollCol.OVERTIME_HOURS]) for candidate in references
+                _row_float(candidate, PayrollCol.OVERTIME_HOURS)
+                for candidate in references
             ]
             peer_rows.append(
                 {
@@ -211,5 +213,10 @@ def _quantile(values: list[float], quantile: float) -> float:
     if not values:
         return 0.0
     ordered = sorted(values)
-    index = min(max(int(round((len(ordered) - 1) * quantile)), 0), len(ordered) - 1)
+    index = min(max(round((len(ordered) - 1) * quantile), 0), len(ordered) - 1)
     return ordered[index]
+
+
+def _row_float(row: dict[str, object], key: str) -> float:
+    value = row.get(key)
+    return 0.0 if value is None else float(cast(Any, value))

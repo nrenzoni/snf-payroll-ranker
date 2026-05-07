@@ -19,17 +19,10 @@
 # **Executive takeaway:** Payroll anomaly ranking should be evaluated against realistic review budgets over time. Hybrid scoring is stronger when label-free exposure estimates, validation-selected thresholds, and rolling-origin checks are stable enough for payroll analysts to review before finalization.
 
 # %%
+from typing import Any
+
+import lets_plot as lp
 import polars as pl
-from lets_plot import (
-    LetsPlot,
-    aes,
-    geom_histogram,
-    geom_line,
-    geom_point,
-    ggplot,
-    ggtitle,
-    theme_minimal,
-)
 from sklearn.ensemble import IsolationForest
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.model_selection import train_test_split
@@ -47,23 +40,32 @@ from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.models import temporal_split
 from payroll_anomaly_ranking.pipeline import run_pipeline
 
+LetsPlot: Any = getattr(lp, "LetsPlot")
+aes: Any = getattr(lp, "aes")
+geom_histogram: Any = getattr(lp, "geom_histogram")
+geom_line: Any = getattr(lp, "geom_line")
+geom_point: Any = getattr(lp, "geom_point")
+ggplot: Any = getattr(lp, "ggplot")
+ggtitle: Any = getattr(lp, "ggtitle")
+theme_minimal: Any = getattr(lp, "theme_minimal")
+
 LetsPlot.setup_html()
 
 # %%
 config = PayrollConfig(employee_count=650, pay_periods=26, review_budgets=(10, 25, 50))
 results = run_pipeline(config)
-metrics = results["metrics"]
-comparison = results["model_comparison"]
-backtest = results["backtest"]
-category = results["category_error_analysis"]
-rolling_origin = results["rolling_origin_metrics"]
-validation_settings = results["validation_selected_settings"]
-stability = results["stability_summary"]
-leakage = results["leakage_checks"]
-scored = results["scored"]
-uncertainty_bucket_metrics = results["uncertainty_bucket_metrics"]
-risk_coverage = results["risk_coverage_analysis"]
-interval_metrics = results["expected_gross_pay_interval_metrics"]
+metrics = results.metrics
+comparison = results.model_comparison
+backtest = results.backtest
+category = results.category_error_analysis
+rolling_origin = results.rolling_origin_metrics
+validation_settings = results.validation_selected_settings
+stability = results.stability_summary
+leakage = results.leakage_checks
+scored = results.scored
+uncertainty_bucket_metrics = results.uncertainty_bucket_metrics
+risk_coverage = results.risk_coverage_analysis
+interval_metrics = results.expected_gross_pay_interval_metrics
 review_budget = 25
 
 # %% [markdown]
@@ -198,7 +200,7 @@ scored.group_by(ReviewCol.UNCERTAINTY_BUCKET).agg(
 # The next cells intentionally show anti-patterns beside corrected methods. The labels are synthetic injected exceptions, so these demos evaluate whether the workflow ranks known synthetic anomalies for review; they do not prove confirmed fraud detection.
 
 # %%
-temporal_test = temporal_split(scored)["test"]
+temporal_test = temporal_split(scored).test
 random_train_indices, random_row_indices = train_test_split(
     list(range(scored.height)),
     test_size=temporal_test.height,
@@ -212,7 +214,7 @@ random_train = indexed_scored.filter(
 random_test = indexed_scored.filter(
     pl.col("demo_row_index").is_in(random_row_indices),
 ).drop("demo_row_index")
-temporal_train = temporal_split(scored)["train"]
+temporal_train = temporal_split(scored).train
 
 
 def demo_metrics(
@@ -396,7 +398,7 @@ default_test = scored.with_columns(
     ),
 )
 
-temporal_train = temporal_split(scored)["train"]
+temporal_train = temporal_split(scored).train
 configured_model = IsolationForest(
     n_estimators=200,
     contamination=0.03,
@@ -555,7 +557,8 @@ metric_comparison = pl.DataFrame(
         },
         {
             "metric": "Corrected: lift over prevalence",
-            "value": roc_only_metric["precision_at_k"] / max(anomaly_prevalence, 1e-9),
+            "value": float(roc_only_metric["precision_at_k"])
+            / max(anomaly_prevalence, 1e-9),
             "metric_group": "review queue",
         },
         {

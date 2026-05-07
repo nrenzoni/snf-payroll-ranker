@@ -13,7 +13,7 @@ from payroll_anomaly_ranking.rules import RULE_COLUMNS
 
 
 def add_explanations(scored: pl.DataFrame) -> pl.DataFrame:
-    return scored.with_columns(
+    explained = scored.with_columns(
         pl.concat_str(
             [
                 pl.lit("Pay period "),
@@ -22,21 +22,6 @@ def add_explanations(scored: pl.DataFrame) -> pl.DataFrame:
                 pl.col(PayrollCol.PAY_PERIOD_END).cast(pl.String),
             ],
         ).alias(ReviewCol.PAY_PERIOD_LABEL),
-        pl.struct(scored.columns)
-        .map_elements(_primary_reason, return_dtype=pl.String)
-        .alias(ReviewCol.PRIMARY_REASON),
-        pl.struct(scored.columns)
-        .map_elements(_secondary_reason, return_dtype=pl.String)
-        .alias(ReviewCol.SECONDARY_REASON),
-        pl.struct(scored.columns)
-        .map_elements(_risk_category, return_dtype=pl.String)
-        .alias(ReviewCol.RISK_CATEGORY),
-        pl.struct(scored.columns)
-        .map_elements(_why_risky, return_dtype=pl.String)
-        .alias(ReviewCol.WHY_RISKY),
-        pl.struct(scored.columns)
-        .map_elements(_why_uncertain, return_dtype=pl.String)
-        .alias(ReviewCol.WHY_UNCERTAIN),
         (
             pl.col(PayrollCol.GROSS_PAY)
             - pl.col(FeatureCol.GROSS_PAY_ROLLING_MEDIAN)
@@ -44,11 +29,74 @@ def add_explanations(scored: pl.DataFrame) -> pl.DataFrame:
             .fill_null(pl.col(PayrollCol.GROSS_PAY))
         ).alias(ReviewCol.DIFFERENCE_FROM_EXPECTED),
     ).with_columns(
-        pl.struct(
-            scored.columns + [ReviewCol.PRIMARY_REASON, ReviewCol.SECONDARY_REASON],
+        pl.when(pl.col(RuleCol.MISSING_DEDUCTION).fill_null(0) == 1)
+        .then(pl.lit("Rule flag: missing or zero deductions"))
+        .when(
+            pl.col(RuleCol.REASON_CODES).is_not_null()
+            & (pl.col(RuleCol.REASON_CODES) != "none"),
         )
-        .map_elements(_explanation, return_dtype=pl.String)
-        .alias(ReviewCol.EXPLANATION),
+        .then(pl.concat_str([pl.lit("Rule flag: "), pl.col(RuleCol.REASON_CODES)]))
+        .when(pl.col(FeatureCol.PEER_GROSS_DEVIATION_RATIO).fill_null(0).abs() > 0.5)
+        .then(pl.lit("Gross pay materially differs from similar peer group"))
+        .when(pl.col(FeatureCol.GROSS_PAY_PCT_CHANGE).fill_null(0).abs() > 0.5)
+        .then(pl.lit("Gross pay changed sharply versus prior payroll history"))
+        .otherwise(pl.lit("High combined anomaly score"))
+        .alias(ReviewCol.PRIMARY_REASON),
+        pl.when(pl.col(RuleCol.MISSING_DEDUCTION).fill_null(0) == 1)
+        .then(
+            pl.lit(
+                "Expected payroll deductions appear absent or materially understated",
+            ),
+        )
+        .when(pl.col(PayrollCol.OVERTIME_HOURS).fill_null(0) > 20)
+        .then(pl.lit("Elevated overtime hours contribute to payroll risk"))
+        .when(pl.col(ReviewCol.DIFFERENCE_FROM_EXPECTED).fill_null(0) > 1000)
+        .then(pl.lit("Dollar difference from expected payroll baseline is meaningful"))
+        .otherwise(
+            pl.lit(
+                "Review recommended before treating the record as an approved exception",
+            ),
+        )
+        .alias(ReviewCol.SECONDARY_REASON),
+        pl.when(pl.col(ScoreCol.FINAL_ANOMALY_SCORE).fill_null(0) >= 0.65)
+        .then(pl.lit("high"))
+        .when(pl.col(ScoreCol.FINAL_ANOMALY_SCORE).fill_null(0) >= 0.35)
+        .then(pl.lit("medium"))
+        .otherwise(pl.lit("low"))
+        .alias(ReviewCol.RISK_CATEGORY),
+        pl.when(
+            pl.col(ReviewCol.UNCERTAINTY_DRIVERS).is_not_null()
+            & (pl.col(ReviewCol.UNCERTAINTY_DRIVERS) != "none"),
+        )
+        .then(pl.col(ReviewCol.UNCERTAINTY_DRIVERS))
+        .otherwise(
+            pl.lit("Recent payroll context is comparatively stable for this score"),
+        )
+        .alias(ReviewCol.WHY_UNCERTAIN),
+    )
+    return explained.with_columns(
+        pl.concat_str(
+            [
+                pl.col(ReviewCol.PRIMARY_REASON),
+                pl.when(pl.col(ScoreCol.GROSS_PAY_EXCESS_VS_P90).fill_null(0) > 0)
+                .then(pl.lit("; gross pay is above the recent expected p90"))
+                .otherwise(pl.lit("")),
+                pl.when(pl.col(ScoreCol.CONFORMAL_PERCENTILE).fill_null(0) >= 0.9)
+                .then(pl.lit("; score is unusually high versus recent payroll history"))
+                .otherwise(pl.lit("")),
+            ],
+        ).alias(ReviewCol.WHY_RISKY),
+        pl.concat_str(
+            [
+                pl.lit("Synthetic payroll record requires review: "),
+                pl.col(ReviewCol.PRIMARY_REASON),
+                pl.lit(". "),
+                pl.col(ReviewCol.SECONDARY_REASON),
+                pl.lit(
+                    ". This is an exception triage signal, not a misconduct conclusion.",
+                ),
+            ],
+        ).alias(ReviewCol.EXPLANATION),
     )
 
 
@@ -123,60 +171,3 @@ def build_evaluation_review_queue(
 
 def sample_review_language() -> str:
     return "This synthetic record is prioritized for payroll review because it differs from expected history, peer context, or deterministic payroll rules; it is not a confirmed misconduct finding."
-
-
-def _primary_reason(row: dict[str, object]) -> str:
-    if int(row.get(RuleCol.MISSING_DEDUCTION) or 0):
-        return "Rule flag: missing or zero deductions"
-    if row.get(RuleCol.REASON_CODES) and row[RuleCol.REASON_CODES] != "none":
-        return f"Rule flag: {row[RuleCol.REASON_CODES]}"
-    if abs(float(row.get(FeatureCol.PEER_GROSS_DEVIATION_RATIO) or 0)) > 0.5:
-        return "Gross pay materially differs from similar peer group"
-    if abs(float(row.get(FeatureCol.GROSS_PAY_PCT_CHANGE) or 0)) > 0.5:
-        return "Gross pay changed sharply versus prior payroll history"
-    return "High combined anomaly score"
-
-
-def _secondary_reason(row: dict[str, object]) -> str:
-    if int(row.get(RuleCol.MISSING_DEDUCTION) or 0):
-        return "Expected payroll deductions appear absent or materially understated"
-    if float(row.get(PayrollCol.OVERTIME_HOURS) or 0) > 20:
-        return "Elevated overtime hours contribute to payroll risk"
-    if float(row.get(ReviewCol.DIFFERENCE_FROM_EXPECTED) or 0) > 1000:
-        return "Dollar difference from expected payroll baseline is meaningful"
-    return "Review recommended before treating the record as an approved exception"
-
-
-def _risk_category(row: dict[str, object]) -> str:
-    score = float(row.get(ScoreCol.FINAL_ANOMALY_SCORE) or 0)
-    if score >= 0.65:
-        return "high"
-    if score >= 0.35:
-        return "medium"
-    return "low"
-
-
-def _explanation(row: dict[str, object]) -> str:
-    return f"Synthetic payroll record requires review: {row.get(ReviewCol.PRIMARY_REASON)}. {row.get(ReviewCol.SECONDARY_REASON)}. This is an exception triage signal, not a misconduct conclusion."
-
-
-def _why_risky(row: dict[str, object]) -> str:
-    parts = [
-        str(
-            row.get(ReviewCol.PRIMARY_REASON)
-            or "Combined payroll anomaly score is elevated",
-        ),
-    ]
-    if float(row.get(ScoreCol.GROSS_PAY_EXCESS_VS_P90) or 0.0) > 0:
-        parts.append("gross pay is above the recent expected p90")
-    percentile = row.get(ScoreCol.CONFORMAL_PERCENTILE)
-    if percentile is not None and float(percentile) >= 0.9:
-        parts.append("score is unusually high versus recent payroll history")
-    return "; ".join(parts)
-
-
-def _why_uncertain(row: dict[str, object]) -> str:
-    drivers = row.get(ReviewCol.UNCERTAINTY_DRIVERS)
-    if drivers and drivers != "none":
-        return str(drivers)
-    return "Recent payroll context is comparatively stable for this score"

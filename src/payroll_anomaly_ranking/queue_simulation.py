@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import numpy as np
 import polars as pl
 
@@ -66,7 +68,7 @@ def simulate_queue_capacity(
 def summarize_queue_simulation(simulation: pl.DataFrame) -> pl.DataFrame:
     if simulation.is_empty():
         return pl.DataFrame()
-    group_cols = [PayrollCol.PAY_PERIOD_INDEX]
+    group_cols: list[str] = [PayrollCol.PAY_PERIOD_INDEX]
     for column in ["scenario", "demand_mode", "resolved_threshold"]:
         if column in simulation.columns:
             group_cols.insert(0, column)
@@ -90,7 +92,7 @@ def summarize_queue_simulation(simulation: pl.DataFrame) -> pl.DataFrame:
 
 def compare_scenarios(
     config: PayrollConfig,
-    scenarios: dict[str, ScenarioSpec | None],
+    scenarios: Mapping[str, ScenarioSpec | None],
     queue_spec: QueueSimulationSpec = QueueSimulationSpec(),
 ) -> pl.DataFrame:
     rows = []
@@ -110,7 +112,7 @@ def compare_scenarios(
             scenario=scenario_name,
         )
         summary = summarize_queue_simulation(
-            simulate_queue_capacity(results["scored"], scenario_queue_spec),
+            simulate_queue_capacity(results.scored, scenario_queue_spec),
         )
         for row in summary.to_dicts():
             rows.append({**row, "scenario": row.get("scenario", scenario_name)})
@@ -123,10 +125,10 @@ def _capacity_for_period(
     rng: np.random.Generator,
 ) -> int:
     base = spec.period_capacity.get(period, spec.fixed_capacity or spec.review_budget)
-    base = int(round(base * spec.period_capacity_multipliers.get(period, 1.0)))
+    base = round(base * spec.period_capacity_multipliers.get(period, 1.0))
     if spec.capacity_sd <= 0:
-        return max(int(base), 0)
-    return max(int(round(rng.normal(base, spec.capacity_sd))), 0)
+        return max(base, 0)
+    return max(round(rng.normal(base, spec.capacity_sd)), 0)
 
 
 def _threshold_specs(
@@ -134,17 +136,15 @@ def _threshold_specs(
     spec: QueueSimulationSpec,
 ) -> list[tuple[str, float | None]]:
     if spec.score_thresholds:
-        return [
-            ("threshold_grid", float(threshold)) for threshold in spec.score_thresholds
-        ]
+        return [("threshold_grid", threshold) for threshold in spec.score_thresholds]
     if spec.adaptive_threshold_quantile is not None:
-        quantile = min(max(float(spec.adaptive_threshold_quantile), 0.0), 1.0)
+        quantile = min(max(spec.adaptive_threshold_quantile, 0.0), 1.0)
         threshold = scored.select(
             pl.col(ScoreCol.FINAL_ANOMALY_SCORE).quantile(quantile),
         ).item()
         return [("adaptive_threshold", float(threshold or 0.0))]
     if spec.score_threshold is not None:
-        return [("score_threshold", float(spec.score_threshold))]
+        return [("score_threshold", spec.score_threshold)]
     return [("fixed_top_k", None)]
 
 

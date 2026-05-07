@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import polars as pl
 
 from payroll_anomaly_ranking.columns import (
@@ -11,7 +13,25 @@ from payroll_anomaly_ranking.columns import (
 REQUIRED_COLUMNS = REQUIRED_PAYROLL_COLUMNS
 
 
-def validate_payroll(payroll: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
+@dataclass(frozen=True)
+class ValidationResults:
+    failures: pl.DataFrame
+    warnings: pl.DataFrame
+
+
+@dataclass(frozen=True)
+class PayrollAggregations:
+    payroll_volume: pl.DataFrame
+    active_employee_counts: pl.DataFrame
+    department_payroll: pl.DataFrame
+    overtime: pl.DataFrame
+    manual_adjustments: pl.DataFrame
+    pay_rate_changes: pl.DataFrame
+    pay_code_distribution: pl.DataFrame
+    distribution_summary: pl.DataFrame
+
+
+def validate_payroll(payroll: pl.DataFrame) -> ValidationResults:
     failures: list[dict[str, object]] = []
     warnings: list[dict[str, object]] = []
     missing = sorted(REQUIRED_COLUMNS - set(payroll.columns))
@@ -24,7 +44,7 @@ def validate_payroll(payroll: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]
             },
         )
     if missing:
-        return pl.DataFrame(failures), pl.DataFrame(warnings)
+        return ValidationResults(pl.DataFrame(failures), pl.DataFrame(warnings))
     if payroll.filter(pl.col(PayrollCol.EMPLOYEE_ID).is_null()).height:
         failures.append(
             {
@@ -93,28 +113,28 @@ def validate_payroll(payroll: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]
                     "message": f"{count} records may require payroll exception review",
                 },
             )
-    return pl.DataFrame(failures), pl.DataFrame(warnings)
+    return ValidationResults(pl.DataFrame(failures), pl.DataFrame(warnings))
 
 
-def payroll_aggregations(payroll: pl.DataFrame) -> dict[str, pl.DataFrame]:
-    return {
-        "payroll_volume": payroll.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(
+def payroll_aggregations(payroll: pl.DataFrame) -> PayrollAggregations:
+    return PayrollAggregations(
+        payroll_volume=payroll.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(
             pl.len().alias(AggregateCol.RECORDS),
             pl.sum(PayrollCol.GROSS_PAY).alias(PayrollCol.GROSS_PAY),
         ),
-        "active_employee_counts": payroll.filter(
+        active_employee_counts=payroll.filter(
             pl.col(PayrollCol.EMPLOYMENT_STATUS) == "active",
         )
         .group_by(PayrollCol.PAY_PERIOD_INDEX)
         .agg(pl.n_unique(PayrollCol.EMPLOYEE_ID).alias(AggregateCol.ACTIVE_EMPLOYEES)),
-        "department_payroll": payroll.group_by(
+        department_payroll=payroll.group_by(
             [PayrollCol.PAY_PERIOD_INDEX, PayrollCol.DEPARTMENT],
         ).agg(pl.sum(PayrollCol.GROSS_PAY).alias(AggregateCol.DEPARTMENT_GROSS_PAY)),
-        "overtime": payroll.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(
+        overtime=payroll.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(
             pl.mean(PayrollCol.OVERTIME_HOURS).alias(AggregateCol.MEAN_OVERTIME_HOURS),
             pl.sum(PayrollCol.OVERTIME_HOURS).alias(AggregateCol.TOTAL_OVERTIME_HOURS),
         ),
-        "manual_adjustments": payroll.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(
+        manual_adjustments=payroll.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(
             pl.sum(PayrollCol.MANUAL_ADJUSTMENT).alias(
                 AggregateCol.MANUAL_ADJUSTMENT_TOTAL,
             ),
@@ -122,7 +142,7 @@ def payroll_aggregations(payroll: pl.DataFrame) -> dict[str, pl.DataFrame]:
                 AggregateCol.MANUAL_ADJUSTMENT_MEAN,
             ),
         ),
-        "pay_rate_changes": payroll.sort(
+        pay_rate_changes=payroll.sort(
             [PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX],
         )
         .with_columns(
@@ -139,13 +159,13 @@ def payroll_aggregations(payroll: pl.DataFrame) -> dict[str, pl.DataFrame]:
             .sum()
             .alias(AggregateCol.PAY_RATE_CHANGES),
         ),
-        "pay_code_distribution": payroll.group_by(
+        pay_code_distribution=payroll.group_by(
             [PayrollCol.PAY_PERIOD_INDEX, PayrollCol.PAY_CODE],
         ).agg(pl.len().alias(AggregateCol.RECORDS)),
-        "distribution_summary": payroll.select(
+        distribution_summary=payroll.select(
             pl.col(PayrollCol.GROSS_PAY).quantile(0.25).alias(AggregateCol.GROSS_Q25),
             pl.median(PayrollCol.GROSS_PAY).alias(AggregateCol.GROSS_MEDIAN),
             pl.col(PayrollCol.GROSS_PAY).quantile(0.75).alias(AggregateCol.GROSS_Q75),
             pl.mean(PayrollCol.NET_PAY).alias(AggregateCol.MEAN_NET_PAY),
         ),
-    }
+    )

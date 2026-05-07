@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 
 import numpy as np
@@ -118,7 +118,7 @@ def component_superiority_summary(
 
 def run_diagnostic_comparison_units(
     config: PayrollConfig = PayrollConfig(),
-    scenarios: dict[str, ScenarioSpec | None] | None = None,
+    scenarios: Mapping[str, ScenarioSpec | None] | None = None,
     seeds: tuple[int, ...] = (42, 43),
     origins: tuple[str, ...] = ("default",),
     k: int | None = None,
@@ -143,7 +143,7 @@ def run_diagnostic_comparison_units(
         for seed in seeds:
             seed_config = replace(config, seed=seed)
             results = run_pipeline(seed_config, scenario=scenario)
-            scored = results["scored"]
+            scored = results.scored
             for origin in origins:
                 unit = f"{scenario_name}|seed={seed}|origin={origin}"
                 for signal_name, signal_column in SCORE_SIGNALS.items():
@@ -261,7 +261,7 @@ def subgroup_diagnostics(
             )
             rows.append(
                 {
-                    "dimension": str(dimension),
+                    "dimension": dimension,
                     "subgroup": str(row[dimension]),
                     "scenario": scenario,
                     **{key: row[key] for key in row if key != dimension},
@@ -399,7 +399,7 @@ def robustness_summary(frames: dict[str, pl.DataFrame], k: int = 25) -> pl.DataF
         )
     for row in rows:
         overlaps = [
-            _jaccard(queues[row["setting"]], other)
+            _jaccard(queues[str(row["setting"])], other)
             for name, other in queues.items()
             if name != row["setting"]
         ]

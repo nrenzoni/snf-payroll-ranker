@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import polars as pl
 from sklearn.metrics import average_precision_score
 
@@ -12,6 +14,23 @@ from payroll_anomaly_ranking.columns import (
     ScoreCol,
 )
 from payroll_anomaly_ranking.config import PayrollConfig
+
+
+@dataclass(frozen=True)
+class EvaluationResults:
+    metrics: pl.DataFrame
+    model_comparison: pl.DataFrame
+    category_error_analysis: pl.DataFrame
+    uncertainty_bucket_metrics: pl.DataFrame
+    risk_coverage_analysis: pl.DataFrame
+    expected_gross_pay_interval_metrics: pl.DataFrame
+
+
+@dataclass(frozen=True)
+class RollingOriginResults:
+    metrics: pl.DataFrame
+    selected_settings: pl.DataFrame
+    stability_summary: pl.DataFrame
 
 
 def precision_recall_at_k(scored: pl.DataFrame, k: int) -> dict[str, float]:
@@ -94,14 +113,7 @@ def ranking_metrics(scored: pl.DataFrame) -> dict[str, float]:
 def evaluate_scores(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
-) -> tuple[
-    pl.DataFrame,
-    pl.DataFrame,
-    pl.DataFrame,
-    pl.DataFrame,
-    pl.DataFrame,
-    pl.DataFrame,
-]:
+) -> EvaluationResults:
     rows = []
     for k in config.review_budgets:
         rows.append(
@@ -116,13 +128,13 @@ def evaluate_scores(
     uncertainty = precision_by_uncertainty_bucket(scored)
     risk_coverage = risk_coverage_analysis(scored, config)
     interval = expected_gross_pay_interval_evaluation(scored)
-    return (
-        pl.DataFrame(rows),
-        comparison,
-        category,
-        uncertainty,
-        risk_coverage,
-        interval,
+    return EvaluationResults(
+        metrics=pl.DataFrame(rows),
+        model_comparison=comparison,
+        category_error_analysis=category,
+        uncertainty_bucket_metrics=uncertainty,
+        risk_coverage_analysis=risk_coverage,
+        expected_gross_pay_interval_metrics=interval,
     )
 
 
@@ -286,10 +298,10 @@ def backtest_by_period(
 def rolling_origin_evaluation(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
-) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+) -> RollingOriginResults:
     periods = sorted(scored.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list())
     if len(periods) < 6:
-        return pl.DataFrame(), pl.DataFrame(), pl.DataFrame()
+        return RollingOriginResults(pl.DataFrame(), pl.DataFrame(), pl.DataFrame())
 
     metric_rows = []
     selected_rows = []
@@ -364,7 +376,7 @@ def rolling_origin_evaluation(
             },
         ],
     )
-    return metrics, settings, stability
+    return RollingOriginResults(metrics, settings, stability)
 
 
 def leakage_checks(analyst_queue: pl.DataFrame) -> pl.DataFrame:

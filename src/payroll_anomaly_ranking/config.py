@@ -12,7 +12,7 @@ class PayrollConfig:
     employee_count: int = 650
     pay_periods: int = 26
     review_budgets: tuple[int, ...] = (10, 25, 50)
-    hybrid_weights: dict[str, float] = field(
+    hybrid_weights: dict[ScoreCol, float] = field(
         default_factory=lambda: {
             ScoreCol.RULE_SCORE: 0.30,
             ScoreCol.HISTORY_SCORE: 0.22,
@@ -21,7 +21,7 @@ class PayrollConfig:
             ScoreCol.EXPOSURE_SCORE: 0.10,
         },
     )
-    uncertainty_component_weights: dict[str, float] = field(
+    uncertainty_component_weights: dict[ScoreCol, float] = field(
         default_factory=lambda: {
             ScoreCol.ENSEMBLE_DISAGREEMENT_UNCERTAINTY: 0.18,
             ScoreCol.BOOTSTRAP_INTERVAL_UNCERTAINTY: 0.14,

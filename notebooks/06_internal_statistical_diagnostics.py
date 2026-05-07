@@ -72,13 +72,13 @@ FAST_MODE_SAMPLE_COUNT = 25
 FAST_MODE_NOTE = "Dense defaults: 8 scenarios, 3 seeds, 220 employees, 14 pay periods, samples=75. Fast mode: reduce to FAST_MODE_SCENARIOS, FAST_MODE_SEEDS, or FAST_MODE_SAMPLE_COUNT."
 scenarios = diagnostic_scenario_presets(DIAGNOSTIC_SCENARIOS)
 results = run_pipeline(config, scenario=scenarios["subgroup-drift"])
-scored = results["scored"]
+scored = results.scored
 
 # %%
 sanity = pl.concat(
     [
         scenario_sanity_summary(
-            run_pipeline(config, scenario=scenario)["scored"],
+            run_pipeline(config, scenario=scenario).scored,
             scenario=name,
         )
         for name, scenario in scenarios.items()
@@ -172,7 +172,7 @@ alt_results = run_pipeline(
 robustness = robustness_summary(
     {
         "subgroup-drift|seed=42|origin=default": scored,
-        "baseline|seed=43|origin=default": alt_results["scored"],
+        "baseline|seed=43|origin=default": alt_results.scored,
     },
     k=10,
 )

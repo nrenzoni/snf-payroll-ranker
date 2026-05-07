@@ -71,7 +71,7 @@ baseline = run_pipeline(config, scenario=scenarios["baseline"])
 queue_sanity = pl.concat(
     [
         scenario_sanity_summary(
-            run_pipeline(config, scenario=scenario)["scored"],
+            run_pipeline(config, scenario=scenario).scored,
             scenario=name,
             score_thresholds=QUEUE_THRESHOLD_GRID,
         )
@@ -98,13 +98,13 @@ adaptive_queue_spec = QueueSimulationSpec(
 # Diagnostic question: how many candidates exceed the operational score threshold, and how much demand remains unreviewed when capacity fluctuates? This is separate from fixed review-budget evaluation metrics.
 
 # %%
-simulation = simulate_queue_capacity(baseline["scored"], queue_spec)
+simulation = simulate_queue_capacity(baseline.scored, queue_spec)
 summary = summarize_queue_simulation(simulation)
 summary
 
 # %%
 adaptive_summary = summarize_queue_simulation(
-    simulate_queue_capacity(baseline["scored"], adaptive_queue_spec),
+    simulate_queue_capacity(baseline.scored, adaptive_queue_spec),
 )
 adaptive_summary
 

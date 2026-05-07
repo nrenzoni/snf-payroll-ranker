@@ -1,17 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
+import lets_plot as lp
 import polars as pl
-from lets_plot import (
-    aes,
-    geom_errorbar,
-    geom_histogram,
-    geom_line,
-    geom_point,
-    geom_tile,
-    ggplot,
-    ggtitle,
-    theme_minimal,
-)
 
 from payroll_anomaly_ranking.columns import (
     AggregateCol,
@@ -19,6 +11,16 @@ from payroll_anomaly_ranking.columns import (
     PayrollCol,
     ScoreCol,
 )
+
+aes: Any = getattr(lp, "aes")
+geom_errorbar: Any = getattr(lp, "geom_errorbar")
+geom_histogram: Any = getattr(lp, "geom_histogram")
+geom_line: Any = getattr(lp, "geom_line")
+geom_point: Any = getattr(lp, "geom_point")
+geom_tile: Any = getattr(lp, "geom_tile")
+ggplot: Any = getattr(lp, "ggplot")
+ggtitle: Any = getattr(lp, "ggtitle")
+theme_minimal: Any = getattr(lp, "theme_minimal")
 
 
 def payroll_trend_chart(payroll: pl.DataFrame):

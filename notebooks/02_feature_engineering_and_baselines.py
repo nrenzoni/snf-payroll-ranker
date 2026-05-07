@@ -35,8 +35,8 @@ LetsPlot.setup_html()
 # %%
 config = PayrollConfig(employee_count=650, pay_periods=26)
 results = run_pipeline(config)
-scored = results["scored"]
-queue = results["analyst_review_queue"]
+scored = results.scored
+queue = results.analyst_review_queue
 
 # %% [markdown]
 # ## Concrete Feature Examples
@@ -80,7 +80,7 @@ scored.join(example_ids, on=PayrollCol.EMPLOYEE_ID, how="semi").sort(
 # The model comparison output evaluates rule score, statistical score, ML score, and hybrid score under the same review-budget framing. The hybrid score is the operating rank because deterministic compliance issues, statistical outliers, peer context, employee history, and estimated exposure represent different review risks.
 
 # %%
-results["model_comparison"]
+results.model_comparison
 
 # %%
 scored.select(

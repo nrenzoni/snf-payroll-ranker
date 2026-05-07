@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import Any, cast
 
 import numpy as np
 import polars as pl
@@ -39,6 +41,12 @@ ANOMALY_CATEGORIES = [
 ]
 BASE_PAY_CODES = ["REG", "OT", "SAL", "BON", "COM", "RET"]
 LATE_PERIOD_PAY_CODES = ["SHIFT", "SPEC", "ADJX"]
+
+
+@dataclass(frozen=True)
+class GeneratedPayroll:
+    payroll: pl.DataFrame
+    labels: pl.DataFrame
 
 
 def generate_employees(config: PayrollConfig = PayrollConfig()) -> pl.DataFrame:
@@ -115,7 +123,7 @@ def generate_pay_periods(config: PayrollConfig = PayrollConfig()) -> pl.DataFram
 def generate_payroll(
     config: PayrollConfig = PayrollConfig(),
     scenario: ScenarioSpec | None = None,
-) -> tuple[pl.DataFrame, pl.DataFrame]:
+) -> GeneratedPayroll:
     payroll = generate_baseline_payroll(config)
     if scenario is not None:
         payroll = apply_scenario(payroll, config, scenario)
@@ -164,7 +172,7 @@ def generate_baseline_payroll(
             overtime_hours = (
                 float(max(0, rng.gamma(1.5, overtime_base / 1.5) * seasonal))
                 if hourly
-                else float(max(0, rng.normal(1.0, 1.2)))
+                else max(0, rng.normal(1.0, 1.2))
             )
             gross = (
                 regular_hours * pay_rate + overtime_hours * pay_rate * 1.5
@@ -172,25 +180,23 @@ def generate_baseline_payroll(
                 else pay_rate * seasonal
             )
             bonus = (
-                float(rng.gamma(1.3, 550))
+                rng.gamma(1.3, 550)
                 if emp[PayrollCol.DEPARTMENT] in ["Sales", "Engineering"]
                 and rng.random() < 0.12
                 else 0.0
             )
             commission = (
-                float(rng.gamma(2.0, 420))
+                rng.gamma(2.0, 420)
                 if emp[PayrollCol.DEPARTMENT] == "Sales" and rng.random() < 0.30
                 else 0.0
             )
-            retro_pay = float(rng.gamma(1.4, 260)) if rng.random() < 0.025 else 0.0
-            manual_adjustment = (
-                float(rng.normal(0, 160)) if rng.random() < 0.05 else 0.0
-            )
+            retro_pay = rng.gamma(1.4, 260) if rng.random() < 0.025 else 0.0
+            manual_adjustment = rng.normal(0, 160) if rng.random() < 0.05 else 0.0
             pay_code, ood_context = _pay_code_for_row(
                 rng,
                 str(emp[PayrollCol.PAY_TYPE]),
-                float(overtime_hours),
-                float(bonus + commission + retro_pay),
+                overtime_hours,
+                bonus + commission + retro_pay,
                 int(period[PayrollCol.PAY_PERIOD_INDEX]),
                 config,
             )
@@ -261,7 +267,7 @@ def inject_anomalies(
     config: PayrollConfig = PayrollConfig(),
     *,
     anomaly_plan: AnomalyPlan | None = None,
-) -> tuple[pl.DataFrame, pl.DataFrame]:
+) -> GeneratedPayroll:
     rng = np.random.default_rng(config.seed + 11)
     payroll = payroll.clone()
     default_target = min(max(60, payroll.height // 70), payroll.height // 8)
@@ -276,9 +282,9 @@ def inject_anomalies(
     department_spike_period = int(rng.integers(8, max(9, config.pay_periods - 2)))
     department_spike_department = str(rng.choice(DEPARTMENTS))
     for idx, category, severity_overrides in selected:
-        row = rows[int(idx)]
+        row = rows[idx]
         original = float(row[PayrollCol.GROSS_PAY])
-        severity = _severity_multiplier(anomaly_plan, str(category), severity_overrides)
+        severity = _severity_multiplier(anomaly_plan, category, severity_overrides)
         if category == "duplicate_payment":
             row[PayrollCol.GROSS_PAY] = round(original * (1 + severity), 2)
             row[PayrollCol.NET_PAY] = round(
@@ -307,18 +313,16 @@ def inject_anomalies(
             ] - timedelta(days=14)
         elif category == "gross_pay_spike":
             row[PayrollCol.GROSS_PAY] = round(
-                original * float(rng.uniform(2.2, 4.0)) * severity,
+                original * rng.uniform(2.2, 4.0) * severity,
                 2,
             )
         elif category == "incorrect_pay_rate":
             row[PayrollCol.PAY_RATE] = round(
-                float(row[PayrollCol.PAY_RATE])
-                * float(rng.uniform(1.45, 2.2))
-                * severity,
+                float(row[PayrollCol.PAY_RATE]) * rng.uniform(1.45, 2.2) * severity,
                 2,
             )
             row[PayrollCol.GROSS_PAY] = round(
-                original * float(rng.uniform(1.35, 1.9)) * severity,
+                original * rng.uniform(1.35, 1.9) * severity,
                 2,
             )
         elif category == "missing_deduction":
@@ -367,7 +371,7 @@ def inject_anomalies(
             abs(float(row[PayrollCol.GROSS_PAY]) - original),
             2,
         )
-        rows[int(idx)] = row
+        rows[idx] = row
         labels.append(
             {
                 PayrollCol.RECORD_ID: row[PayrollCol.RECORD_ID],
@@ -375,9 +379,9 @@ def inject_anomalies(
                 PayrollCol.ANOMALY_DOLLARS: row[PayrollCol.ANOMALY_DOLLARS],
             },
         )
-    return pl.DataFrame(rows, infer_schema_length=None), pl.DataFrame(
-        labels,
-        infer_schema_length=None,
+    return GeneratedPayroll(
+        payroll=pl.DataFrame(rows, infer_schema_length=None),
+        labels=pl.DataFrame(labels, infer_schema_length=None),
     )
 
 
@@ -433,7 +437,7 @@ def _control_target_count(
     if control.target_count is not None:
         return control.target_count
     base_rate = min(global_target / max(candidates * 8, 1), 0.35)
-    return max(int(round(candidates * base_rate * control.propensity_multiplier)), 1)
+    return max(round(candidates * base_rate * control.propensity_multiplier), 1)
 
 
 def _choose_categories(
@@ -460,9 +464,9 @@ def _severity_multiplier(
 ) -> float:
     multiplier = 1.0
     if plan is not None:
-        multiplier = float(plan.severity_multipliers.get(category, multiplier))
+        multiplier = plan.severity_multipliers.get(category, multiplier)
     if overrides:
-        multiplier = float(overrides.get(category, multiplier))
+        multiplier = overrides.get(category, multiplier)
     return max(multiplier, 0.0)
 
 
@@ -497,9 +501,7 @@ def _apply_drift_plan(
         _multiply_numeric(row, PayrollCol.GROSS_PAY, plan.gross_pay_multiplier)
         if plan.payroll_total_multiplier is not None:
             noise = (
-                float(rng.normal(0, plan.multiplier_noise))
-                if plan.multiplier_noise
-                else 0.0
+                rng.normal(0, plan.multiplier_noise) if plan.multiplier_noise else 0.0
             )
             _multiply_numeric(
                 row,
@@ -523,7 +525,7 @@ def _apply_change_point(rows: list[dict[str, object]], event: ChangePointEvent) 
             row[PayrollCol.OOD_PAY_CODE_CONTEXT] = "scenario_change_point_pay_code"
         if event.field in row and isinstance(row[event.field], int | float):
             row[event.field] = round(
-                float(row[event.field]) * event.multiplier + event.additive_shift,
+                _as_float(row[event.field]) * event.multiplier + event.additive_shift,
                 2,
             )
         _recompute_net_pay(row)
@@ -535,7 +537,7 @@ def _matches_period_and_subgroup(
     end_period: int | None,
     subgroup_filters: dict[str, object],
 ) -> bool:
-    period = int(row[PayrollCol.PAY_PERIOD_INDEX])
+    period = _as_int(row[PayrollCol.PAY_PERIOD_INDEX])
     if start_period is not None and period < start_period:
         return False
     if end_period is not None and period > end_period:
@@ -557,14 +559,14 @@ def _multiply_numeric(
 ) -> None:
     if multiplier is None or row.get(column) is None:
         return
-    row[column] = round(float(row[column]) * multiplier, 2)
+    row[column] = round(_as_float(row[column]) * multiplier, 2)
 
 
 def _recompute_net_pay(row: dict[str, object]) -> None:
     if row.get(PayrollCol.DEDUCTIONS) is None:
         return
     row[PayrollCol.NET_PAY] = round(
-        float(row[PayrollCol.GROSS_PAY]) - float(row[PayrollCol.DEDUCTIONS]),
+        _as_float(row[PayrollCol.GROSS_PAY]) - _as_float(row[PayrollCol.DEDUCTIONS]),
         2,
     )
 
@@ -595,14 +597,12 @@ def _pay_code_for_row(
     return "REG", "standard_pay_code"
 
 
-def write_synthetic_data(
-    config: PayrollConfig = PayrollConfig(),
-) -> tuple[pl.DataFrame, pl.DataFrame]:
+def write_synthetic_data(config: PayrollConfig = PayrollConfig()) -> GeneratedPayroll:
     config.data_dir.mkdir(parents=True, exist_ok=True)
-    payroll, labels = generate_payroll(config)
-    payroll.write_csv(config.data_dir / "synthetic_payroll.csv")
-    labels.write_csv(config.data_dir / "synthetic_payroll_labels.csv")
-    return payroll, labels
+    generated = generate_payroll(config)
+    generated.payroll.write_csv(config.data_dir / "synthetic_payroll.csv")
+    generated.labels.write_csv(config.data_dir / "synthetic_payroll_labels.csv")
+    return generated
 
 
 def scenario_summary(
@@ -711,8 +711,10 @@ def scenario_sanity_summary(
     concentration_min_share: float = 0.20,
 ) -> pl.DataFrame:
     total_rows = scored.height
-    total_anomalies = int(_scalar(scored, pl.sum(PayrollCol.IS_ANOMALY)) or 0)
-    total_dollars = float(_scalar(scored, pl.sum(PayrollCol.ANOMALY_DOLLARS)) or 0.0)
+    total_anomalies = _as_int(_scalar(scored, pl.sum(PayrollCol.IS_ANOMALY)) or 0)
+    total_dollars = _as_float(
+        _scalar(scored, pl.sum(PayrollCol.ANOMALY_DOLLARS)) or 0.0,
+    )
     score_exprs = []
     if score_column in scored.columns:
         score_exprs = [
@@ -732,7 +734,7 @@ def scenario_sanity_summary(
     }
     category_rows = _category_mix_rows(scored, total_anomalies)
     concentration = _subgroup_period_concentration(scored, subgroup_dimension)
-    max_concentration = float(
+    max_concentration = _as_float(
         concentration.get("max_subgroup_period_anomaly_share", 0.0),
     )
     zero_thresholds = [
@@ -795,7 +797,7 @@ def _subgroup_period_concentration(
             "max_subgroup_period_anomalies": 0,
             "max_subgroup_period_anomaly_share": 0.0,
         }
-    total_anomalies = int(_scalar(scored, pl.sum(PayrollCol.IS_ANOMALY)) or 0)
+    total_anomalies = _as_int(_scalar(scored, pl.sum(PayrollCol.IS_ANOMALY)) or 0)
     grouped = (
         scored.group_by([subgroup_dimension, PayrollCol.PAY_PERIOD_INDEX])
         .agg(pl.sum(PayrollCol.IS_ANOMALY).alias("anomalies"))
@@ -816,5 +818,13 @@ def _subgroup_period_concentration(
     }
 
 
-def _scalar(frame: pl.DataFrame, expr: pl.Expr) -> object:
+def _scalar(frame: pl.DataFrame, expr: pl.Expr) -> Any:
     return frame.select(expr).item()
+
+
+def _as_float(value: object) -> float:
+    return float(cast(Any, value))
+
+
+def _as_int(value: object) -> int:
+    return int(cast(Any, value))
