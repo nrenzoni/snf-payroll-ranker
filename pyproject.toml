@@ -42,6 +42,7 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"] # Error, Pyflakes, Isort, Upgrade
+ignore = ["E501"] # Line too long
 
 [tool.ruff.format]
 quote-style = "double"
