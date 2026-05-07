@@ -76,6 +76,13 @@ def validate_payroll(payroll: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]
             pl.col(PayrollCol.MANUAL_ADJUSTMENT).abs()
             > pl.col(PayrollCol.GROSS_PAY) * 0.25,
         ).height,
+        "late_period_pay_code_ood_context": payroll.filter(
+            pl.col(PayrollCol.OOD_PAY_CODE_CONTEXT).is_in(
+                ["late_period_new_or_rare_pay_code", "rare_pay_code"],
+            ),
+        ).height
+        if PayrollCol.OOD_PAY_CODE_CONTEXT in payroll.columns
+        else 0,
     }
     for check, count in warning_checks.items():
         if count:
@@ -132,6 +139,9 @@ def payroll_aggregations(payroll: pl.DataFrame) -> dict[str, pl.DataFrame]:
             .sum()
             .alias(AggregateCol.PAY_RATE_CHANGES),
         ),
+        "pay_code_distribution": payroll.group_by(
+            [PayrollCol.PAY_PERIOD_INDEX, PayrollCol.PAY_CODE],
+        ).agg(pl.len().alias(AggregateCol.RECORDS)),
         "distribution_summary": payroll.select(
             pl.col(PayrollCol.GROSS_PAY).quantile(0.25).alias(AggregateCol.GROSS_Q25),
             pl.median(PayrollCol.GROSS_PAY).alias(AggregateCol.GROSS_MEDIAN),

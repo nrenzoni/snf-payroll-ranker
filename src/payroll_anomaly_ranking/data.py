@@ -30,6 +30,8 @@ ANOMALY_CATEGORIES = [
     "department_payroll_spike",
     "new_employee_large_payment",
 ]
+BASE_PAY_CODES = ["REG", "OT", "SAL", "BON", "COM", "RET"]
+LATE_PERIOD_PAY_CODES = ["SHIFT", "SPEC", "ADJX"]
 
 
 def generate_employees(config: PayrollConfig = PayrollConfig()) -> pl.DataFrame:
@@ -166,6 +168,14 @@ def generate_payroll(
             manual_adjustment = (
                 float(rng.normal(0, 160)) if rng.random() < 0.05 else 0.0
             )
+            pay_code, ood_context = _pay_code_for_row(
+                rng,
+                str(emp[PayrollCol.PAY_TYPE]),
+                float(overtime_hours),
+                float(bonus + commission + retro_pay),
+                int(period[PayrollCol.PAY_PERIOD_INDEX]),
+                config,
+            )
             gross_pay = max(
                 0.0,
                 gross
@@ -185,6 +195,7 @@ def generate_payroll(
                     **emp,
                     **period,
                     PayrollCol.EMPLOYMENT_STATUS: "active" if active else "terminated",
+                    PayrollCol.PAY_CODE: pay_code,
                     PayrollCol.TENURE_MONTHS: max(
                         0,
                         int((period_end - emp[PayrollCol.HIRE_DATE]).days / 30),
@@ -204,6 +215,7 @@ def generate_payroll(
                     PayrollCol.IS_ANOMALY: 0,
                     PayrollCol.ANOMALY_CATEGORY: "normal",
                     PayrollCol.ANOMALY_DOLLARS: 0.0,
+                    PayrollCol.OOD_PAY_CODE_CONTEXT: ood_context,
                 },
             )
     payroll = pl.DataFrame(rows, infer_schema_length=None).with_row_index(
@@ -320,6 +332,32 @@ def inject_anomalies(
         labels,
         infer_schema_length=None,
     )
+
+
+def _pay_code_for_row(
+    rng: np.random.Generator,
+    pay_type: str,
+    overtime_hours: float,
+    variable_pay: float,
+    pay_period_index: int,
+    config: PayrollConfig,
+) -> tuple[str, str]:
+    late_period_start = max(config.pay_periods - 3, 1)
+    if pay_period_index >= late_period_start:
+        novelty_rate = 0.055 + 0.015 * (pay_period_index - late_period_start)
+        if rng.random() < novelty_rate:
+            return str(
+                rng.choice(LATE_PERIOD_PAY_CODES),
+            ), "late_period_new_or_rare_pay_code"
+    if variable_pay > 0 and rng.random() < 0.55:
+        return str(rng.choice(["BON", "COM", "RET"])), "standard_pay_code"
+    if pay_type == "salaried":
+        return "SAL", "standard_pay_code"
+    if overtime_hours > 6 and rng.random() < 0.45:
+        return "OT", "standard_pay_code"
+    if rng.random() < 0.01:
+        return "MISC", "rare_pay_code"
+    return "REG", "standard_pay_code"
 
 
 def write_synthetic_data(

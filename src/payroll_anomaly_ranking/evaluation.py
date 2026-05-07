@@ -6,7 +6,9 @@ from sklearn.metrics import average_precision_score
 from payroll_anomaly_ranking.columns import (
     MODEL_FEATURE_COLUMNS,
     AggregateCol,
+    MetricCol,
     PayrollCol,
+    ReviewCol,
     ScoreCol,
 )
 from payroll_anomaly_ranking.config import PayrollConfig
@@ -92,7 +94,14 @@ def ranking_metrics(scored: pl.DataFrame) -> dict[str, float]:
 def evaluate_scores(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
-) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+) -> tuple[
+    pl.DataFrame,
+    pl.DataFrame,
+    pl.DataFrame,
+    pl.DataFrame,
+    pl.DataFrame,
+    pl.DataFrame,
+]:
     rows = []
     for k in config.review_budgets:
         rows.append(
@@ -104,7 +113,89 @@ def evaluate_scores(
         )
     comparison = model_comparison(scored, config)
     category = category_error_analysis(scored)
-    return pl.DataFrame(rows), comparison, category
+    uncertainty = precision_by_uncertainty_bucket(scored)
+    risk_coverage = risk_coverage_analysis(scored, config)
+    interval = expected_gross_pay_interval_evaluation(scored)
+    return (
+        pl.DataFrame(rows),
+        comparison,
+        category,
+        uncertainty,
+        risk_coverage,
+        interval,
+    )
+
+
+def precision_by_uncertainty_bucket(scored: pl.DataFrame) -> pl.DataFrame:
+    if ReviewCol.UNCERTAINTY_BUCKET not in scored.columns:
+        return pl.DataFrame()
+    return (
+        scored.group_by(ReviewCol.UNCERTAINTY_BUCKET)
+        .agg(
+            pl.len().alias(AggregateCol.RECORDS),
+            pl.sum(PayrollCol.IS_ANOMALY).alias(AggregateCol.TRUE_ANOMALIES),
+            pl.mean(PayrollCol.IS_ANOMALY).alias(MetricCol.ANOMALY_RATE),
+            pl.mean(ScoreCol.COMPOSITE_UNCERTAINTY_SCORE).alias(
+                AggregateCol.AVG_UNCERTAINTY,
+            ),
+        )
+        .sort(ReviewCol.UNCERTAINTY_BUCKET)
+    )
+
+
+def risk_coverage_analysis(
+    scored: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+) -> pl.DataFrame:
+    if ScoreCol.COMPOSITE_UNCERTAINTY_SCORE not in scored.columns:
+        return pl.DataFrame()
+    rows = []
+    budget = min(config.review_budgets[0], scored.height)
+    for coverage in [1.0, 0.9, 0.8, 0.7, 0.6]:
+        covered = scored.sort(ScoreCol.COMPOSITE_UNCERTAINTY_SCORE).head(
+            max(int(scored.height * coverage), budget),
+        )
+        top = covered.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(budget)
+        rows.append(
+            {
+                MetricCol.COVERAGE: coverage,
+                AggregateCol.RECORDS: covered.height,
+                MetricCol.ABSTAINED_RECORDS: scored.height - covered.height,
+                MetricCol.REVIEW_PRECISION: _precision(top),
+                "review_budget": budget,
+            },
+        )
+    return pl.DataFrame(rows)
+
+
+def expected_gross_pay_interval_evaluation(scored: pl.DataFrame) -> pl.DataFrame:
+    required = {
+        ScoreCol.EXPECTED_GROSS_PAY_P10,
+        ScoreCol.EXPECTED_GROSS_PAY_P90,
+        ScoreCol.EXPECTED_GROSS_PAY_INTERVAL_WIDTH,
+    }
+    if not required <= set(scored.columns):
+        return pl.DataFrame()
+    normal = scored.filter(pl.col(PayrollCol.IS_ANOMALY) == 0)
+    anomalies = scored.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+    return pl.DataFrame(
+        [
+            {
+                MetricCol.NORMAL_INTERVAL_COVERAGE: _interval_coverage(normal),
+                MetricCol.ANOMALY_EXCEEDS_P90_RATE: _exceeds_p90_rate(anomalies),
+                AggregateCol.AVG_INTERVAL_WIDTH: float(
+                    scored.select(
+                        pl.mean(ScoreCol.EXPECTED_GROSS_PAY_INTERVAL_WIDTH),
+                    ).item()
+                    or 0.0,
+                ),
+                "avg_anomaly_excess_vs_p90": float(
+                    anomalies.select(pl.mean(ScoreCol.GROSS_PAY_EXCESS_VS_P90)).item()
+                    or 0.0,
+                ),
+            },
+        ],
+    )
 
 
 def model_comparison(
@@ -334,6 +425,27 @@ def _recall(all_rows: pl.DataFrame, selected: pl.DataFrame) -> float:
     if total == 0:
         return 0.0
     return selected.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height / total
+
+
+def _interval_coverage(frame: pl.DataFrame) -> float:
+    if frame.height == 0:
+        return 0.0
+    covered = frame.filter(
+        (pl.col(PayrollCol.GROSS_PAY) >= pl.col(ScoreCol.EXPECTED_GROSS_PAY_P10))
+        & (pl.col(PayrollCol.GROSS_PAY) <= pl.col(ScoreCol.EXPECTED_GROSS_PAY_P90)),
+    ).height
+    return covered / frame.height
+
+
+def _exceeds_p90_rate(frame: pl.DataFrame) -> float:
+    if frame.height == 0:
+        return 0.0
+    return (
+        frame.filter(
+            pl.col(PayrollCol.GROSS_PAY) > pl.col(ScoreCol.EXPECTED_GROSS_PAY_P90),
+        ).height
+        / frame.height
+    )
 
 
 def _mean_adjacent_overlap(queue_sets: list[set[int]]) -> float:

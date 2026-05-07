@@ -50,7 +50,7 @@ pl.DataFrame(
         {
             "stage": "4. Scoring",
             "input": "Feature table",
-            "output": "Rule, statistical, ML, estimated exposure, and hybrid scores",
+            "output": "Rule, statistical, ML, estimated exposure, hybrid risk, and uncertainty scores",
             "implementation_status": "Implemented for synthetic data",
         },
         {
@@ -106,7 +106,7 @@ pl.DataFrame(
         {
             "layer": "Scoring service or batch job",
             "responsibility": "Rule, statistical, ML, estimated exposure, and hybrid ranking",
-            "control": "Versioned configuration and validation-selected threshold approval",
+            "control": "Versioned risk, uncertainty, OOD, and threshold configuration",
         },
         {
             "layer": "Review workflow",
@@ -154,6 +154,18 @@ pl.DataFrame(
             "why_it_matters": "Detects ranking distribution changes",
         },
         {
+            "metric": "Uncertainty bucket mix",
+            "why_it_matters": "Shows whether queues are becoming less reliable because context is thinner or signals disagree",
+        },
+        {
+            "metric": "Pay-code OOD rate",
+            "why_it_matters": "Detects new or rare synthetic pay-code patterns that may require payroll configuration review",
+        },
+        {
+            "metric": "Expected gross-pay interval width",
+            "why_it_matters": "Tracks whether recent reference data supports precise expected-pay context",
+        },
+        {
             "metric": "Alert concentration by department/location/job family",
             "why_it_matters": "Surfaces operational concentration and potential review bias",
         },
@@ -177,10 +189,11 @@ pl.DataFrame(
 #
 # - Feature drift in pay amounts, overtime, deductions, locations, departments, job families, or tenure mix.
 # - Score drift that expands or collapses alert volume without business explanation.
+# - Uncertainty drift, including a rising share of medium/high uncertainty records, widening gross-pay intervals, or increasing pay-code OOD context.
 # - Business rule changes such as new overtime policy, deduction policy, bonus cycle, or pay-rate approval process.
 # - Payroll calendar changes, off-cycle payroll, year-end bonus cycles, or acquisition-related workforce changes.
 # - Degraded review outcomes such as falling alert acceptance, rising false positive rate, or missed high-dollar exceptions.
-# - Enough reviewed labels to support supervised calibration of thresholds or score weights.
+# - Enough reviewed labels to support supervised calibration of thresholds, score weights, and future calibration uncertainty.
 
 # %% [markdown]
 # ## Limitations And Risks
@@ -189,6 +202,8 @@ pl.DataFrame(
 # - Legitimate bonuses, commissions, high earners, approved retro pay, or seasonal overtime can be prioritized by unsupervised scores.
 # - Human review is required before payroll action, escalation, or employee-facing conclusions.
 # - Thresholds and hybrid weights require calibration against business capacity, payroll cycle timing, and validated review outcomes.
+# - Composite uncertainty weights are heuristic until analyst feedback labels exist; calibration uncertainty is documented as future work rather than fabricated from synthetic labels.
+# - Pay-code OOD monitoring in this demo uses synthetic pay codes and must be remapped to governed real payroll earning-code dictionaries before production use.
 # - A production system would need access control, audit logging, data retention policy, vendor risk review, model governance, and case-management integration outside this demo.
 
 # %% [markdown]

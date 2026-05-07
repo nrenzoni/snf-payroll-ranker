@@ -29,7 +29,14 @@ def run_pipeline(
     features = build_features(payroll)
     ruled = add_rule_flags(features)
     scored = score_payroll(ruled, config)
-    metrics, comparison, category = evaluate_scores(scored, config)
+    (
+        metrics,
+        comparison,
+        category,
+        uncertainty_metrics,
+        risk_coverage,
+        interval_metrics,
+    ) = evaluate_scores(scored, config)
     category = category.sort(PayrollCol.ANOMALY_CATEGORY)
     backtest = backtest_by_period(scored, config)
     analyst_queue = build_review_queue(scored, top_k=max(config.review_budgets))
@@ -52,6 +59,9 @@ def run_pipeline(
         "metrics": metrics,
         "model_comparison": comparison,
         "category_error_analysis": category,
+        "uncertainty_bucket_metrics": uncertainty_metrics,
+        "risk_coverage_analysis": risk_coverage,
+        "expected_gross_pay_interval_metrics": interval_metrics,
         "backtest": backtest,
         "rolling_origin_metrics": rolling_metrics,
         "validation_selected_settings": validation_settings,
@@ -81,6 +91,15 @@ def write_pipeline_outputs(
     results["model_comparison"].write_csv(evaluation_dir / "model_comparison.csv")
     results["category_error_analysis"].write_csv(
         evaluation_dir / "category_error_analysis.csv",
+    )
+    results["uncertainty_bucket_metrics"].write_csv(
+        evaluation_dir / "uncertainty_bucket_metrics.csv",
+    )
+    results["risk_coverage_analysis"].write_csv(
+        evaluation_dir / "risk_coverage_analysis.csv",
+    )
+    results["expected_gross_pay_interval_metrics"].write_csv(
+        evaluation_dir / "expected_gross_pay_interval_metrics.csv",
     )
     results["backtest"].write_csv(evaluation_dir / "backtest_metrics.csv")
     results["rolling_origin_metrics"].write_csv(

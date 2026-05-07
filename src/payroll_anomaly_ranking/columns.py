@@ -16,6 +16,7 @@ class PayrollCol(StrEnum):
     JOB_LEVEL = "job_level"
     EMPLOYMENT_STATUS = "employment_status"
     PAY_TYPE = "pay_type"
+    PAY_CODE = "pay_code"
     REGULAR_HOURS = "regular_hours"
     OVERTIME_HOURS = "overtime_hours"
     PAY_RATE = "pay_rate"
@@ -33,6 +34,7 @@ class PayrollCol(StrEnum):
     IS_ANOMALY = "is_anomaly"
     ANOMALY_CATEGORY = "anomaly_category"
     ANOMALY_DOLLARS = "anomaly_dollars"
+    OOD_PAY_CODE_CONTEXT = "ood_pay_code_context"
 
 
 class FeatureCol(StrEnum):
@@ -57,6 +59,9 @@ class FeatureCol(StrEnum):
     GROSS_PAY_IQR_OUTLIER = "gross_pay_iqr_outlier"
     GROSS_PAY_PERCENTILE = "gross_pay_percentile"
     GROSS_PAY_DEVIATION_RATIO = "gross_pay_deviation_ratio"
+    STRICT_PEER_GROUP_SIZE = "strict_peer_group_size"
+    EFFECTIVE_PEER_REFERENCE_SIZE = "effective_peer_reference_size"
+    PRIOR_EMPLOYEE_PAY_PERIOD_COUNT = "prior_employee_pay_period_count"
 
 
 class RuleCol(StrEnum):
@@ -84,6 +89,23 @@ class ScoreCol(StrEnum):
     DOLLAR_SCORE = "dollar_score"
     FINAL_ANOMALY_SCORE = "final_anomaly_score"
     PAY_PERIOD_RANK = "pay_period_rank"
+    ENSEMBLE_DISAGREEMENT_UNCERTAINTY = "ensemble_disagreement_uncertainty"
+    BOOTSTRAP_SCORE_P10 = "bootstrap_score_p10"
+    BOOTSTRAP_SCORE_P90 = "bootstrap_score_p90"
+    BOOTSTRAP_SCORE_STD = "bootstrap_score_std"
+    BOOTSTRAP_INTERVAL_UNCERTAINTY = "bootstrap_interval_uncertainty"
+    CONFORMAL_P_VALUE = "conformal_p_value"
+    CONFORMAL_PERCENTILE = "conformal_percentile"
+    EXPECTED_GROSS_PAY_P10 = "expected_gross_pay_p10"
+    EXPECTED_GROSS_PAY_P50 = "expected_gross_pay_p50"
+    EXPECTED_GROSS_PAY_P90 = "expected_gross_pay_p90"
+    EXPECTED_GROSS_PAY_INTERVAL_WIDTH = "expected_gross_pay_interval_width"
+    GROSS_PAY_EXCESS_VS_P90 = "gross_pay_excess_vs_p90"
+    PEER_GROUP_UNCERTAINTY = "peer_group_uncertainty"
+    EMPLOYEE_HISTORY_UNCERTAINTY = "employee_history_uncertainty"
+    DATA_QUALITY_UNCERTAINTY = "data_quality_uncertainty"
+    OOD_UNCERTAINTY = "ood_uncertainty"
+    COMPOSITE_UNCERTAINTY_SCORE = "composite_uncertainty_score"
 
 
 class ReviewCol(StrEnum):
@@ -97,6 +119,12 @@ class ReviewCol(StrEnum):
     PEER_CONTEXT = "peer_context"
     DOLLARS_AT_RISK = "dollars_at_risk"
     ACTUAL_GROSS_PAY = "actual_gross_pay"
+    PAY_PERIOD_LABEL = "pay_period_label"
+    UNCERTAINTY_BUCKET = "uncertainty_bucket"
+    PRIMARY_UNCERTAINTY_REASON = "primary_uncertainty_reason"
+    UNCERTAINTY_DRIVERS = "uncertainty_drivers"
+    WHY_RISKY = "why_risky"
+    WHY_UNCERTAIN = "why_uncertain"
 
 
 class OutputName(StrEnum):
@@ -114,6 +142,13 @@ class MetricCol(StrEnum):
     AVERAGE_ANOMALY_RANK = "average_anomaly_rank"
     MEAN_RECIPROCAL_RANK = "mean_reciprocal_rank"
     PR_AUC = "pr_auc"
+    UNCERTAINTY_BUCKET = "uncertainty_bucket"
+    ANOMALY_RATE = "anomaly_rate"
+    COVERAGE = "coverage"
+    REVIEW_PRECISION = "review_precision"
+    ABSTAINED_RECORDS = "abstained_records"
+    NORMAL_INTERVAL_COVERAGE = "normal_interval_coverage"
+    ANOMALY_EXCEEDS_P90_RATE = "anomaly_exceeds_p90_rate"
 
 
 class AggregateCol(StrEnum):
@@ -145,6 +180,8 @@ class AggregateCol(StrEnum):
     EXPECTED_TOP_10_PER_PERIOD = "expected_top_10_per_period"
     EXPECTED_TOP_25_PER_PERIOD = "expected_top_25_per_period"
     EXPECTED_THRESHOLD_065_PER_PERIOD = "expected_threshold_065_per_period"
+    AVG_UNCERTAINTY = "avg_uncertainty"
+    AVG_INTERVAL_WIDTH = "avg_interval_width"
 
 
 RULE_FLAG_COLUMNS = [
@@ -164,6 +201,7 @@ PEER_GROUP_COLUMNS = [
     PayrollCol.DEPARTMENT,
     PayrollCol.JOB_FAMILY,
     PayrollCol.PAY_TYPE,
+    PayrollCol.PAY_CODE,
     PayrollCol.LOCATION,
     FeatureCol.TENURE_BUCKET,
 ]

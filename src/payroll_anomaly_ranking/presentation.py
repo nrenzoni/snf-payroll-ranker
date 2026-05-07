@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from payroll_anomaly_ranking.columns import PayrollCol, ReviewCol
+from payroll_anomaly_ranking.columns import PayrollCol, ReviewCol, ScoreCol
 
 
 def synthetic_schema_dictionary() -> pl.DataFrame:
@@ -76,6 +76,13 @@ def synthetic_schema_dictionary() -> pl.DataFrame:
             "category",
             "Low",
             "Expected known pay type values",
+        ),
+        (
+            PayrollCol.PAY_CODE,
+            "Synthetic payroll earning or adjustment code",
+            "category",
+            "Low; synthetic code, not real company configuration",
+            "Expected known synthetic codes, with reproducible late-period rarity for OOD diagnostics",
         ),
         (
             PayrollCol.REGULAR_HOURS,
@@ -215,6 +222,15 @@ def data_quality_summary(
         (pl.col(PayrollCol.EMPLOYMENT_STATUS) == "terminated")
         & (pl.col(PayrollCol.GROSS_PAY) > 0),
     ).height
+    late_pay_code_ood = (
+        payroll.filter(
+            pl.col(PayrollCol.OOD_PAY_CODE_CONTEXT).is_in(
+                ["late_period_new_or_rare_pay_code", "rare_pay_code"],
+            ),
+        ).height
+        if PayrollCol.OOD_PAY_CODE_CONTEXT in payroll.columns
+        else 0
+    )
     return pl.DataFrame(
         [
             {"measure": "records", "value": payroll.height},
@@ -231,6 +247,14 @@ def data_quality_summary(
             {"measure": "missing_values", "value": missing_values},
             {"measure": "invalid_lifecycle_rows", "value": invalid_lifecycle},
             {"measure": "terminated_records_with_pay", "value": terminated_with_pay},
+            {
+                "measure": "pay_codes",
+                "value": payroll.select(pl.n_unique(PayrollCol.PAY_CODE)).item(),
+            },
+            {
+                "measure": "late_period_pay_code_ood_contexts",
+                "value": late_pay_code_ood,
+            },
             {"measure": "exception_warning_types", "value": validation_warnings.height},
         ],
     )
@@ -241,14 +265,21 @@ def compact_case_cards(review_queue: pl.DataFrame, limit: int = 5) -> pl.DataFra
         ReviewCol.RANK,
         PayrollCol.EMPLOYEE_ID,
         PayrollCol.PAY_PERIOD_INDEX,
+        ReviewCol.PAY_PERIOD_LABEL,
         ReviewCol.RISK_CATEGORY,
+        ScoreCol.FINAL_ANOMALY_SCORE,
+        ReviewCol.UNCERTAINTY_BUCKET,
+        ScoreCol.COMPOSITE_UNCERTAINTY_SCORE,
         ReviewCol.PRIMARY_REASON,
+        ReviewCol.PRIMARY_UNCERTAINTY_REASON,
         ReviewCol.SECONDARY_REASON,
         ReviewCol.EXPECTED_GROSS_PAY,
         PayrollCol.GROSS_PAY,
         ReviewCol.DIFFERENCE_FROM_EXPECTED,
         ReviewCol.PEER_CONTEXT,
         ReviewCol.DOLLARS_AT_RISK,
+        ReviewCol.WHY_RISKY,
+        ReviewCol.WHY_UNCERTAIN,
         ReviewCol.EXPLANATION,
     ]
     return (

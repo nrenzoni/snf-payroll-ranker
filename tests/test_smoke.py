@@ -2,8 +2,10 @@ import polars as pl
 
 from payroll_anomaly_ranking.columns import (
     MODEL_FEATURE_COLUMNS,
+    FeatureCol,
     OutputName,
     PayrollCol,
+    ReviewCol,
     RuleCol,
     ScoreCol,
 )
@@ -32,7 +34,12 @@ def test_end_to_end_smoke() -> None:
     featured = build_features(payroll)
     ruled = add_rule_flags(featured)
     scored = score_payroll(ruled, config)
-    metrics, comparison, category = evaluate_scores(scored, config)
+    metrics, comparison, category, uncertainty, risk_coverage, interval = (
+        evaluate_scores(
+            scored,
+            config,
+        )
+    )
     queue = build_review_queue(scored, top_k=10)
 
     assert payroll.height > 0
@@ -43,6 +50,9 @@ def test_end_to_end_smoke() -> None:
     assert metrics.height == 2
     assert comparison.height == 4
     assert category.height > 0
+    assert uncertainty.height > 0
+    assert risk_coverage.height > 0
+    assert interval.height == 1
     assert queue.height > 0
     assert not {"name", "email", "bank_account", "ssn"} & set(payroll.columns)
 
@@ -66,6 +76,13 @@ def test_pipeline_writes_outputs_only_when_requested(tmp_path) -> None:
     assert (config.data_dir / "synthetic_payroll.csv").exists()
     assert (config.data_dir / "synthetic_payroll_labels.csv").exists()
     assert (config.output_dir / "evaluation" / "category_error_analysis.csv").exists()
+    assert (
+        config.output_dir / "evaluation" / "uncertainty_bucket_metrics.csv"
+    ).exists()
+    assert (config.output_dir / "evaluation" / "risk_coverage_analysis.csv").exists()
+    assert (
+        config.output_dir / "evaluation" / "expected_gross_pay_interval_metrics.csv"
+    ).exists()
     assert (config.output_dir / "evaluation" / "rolling_origin_metrics.csv").exists()
     assert (
         config.output_dir / "evaluation" / "validation_selected_settings.csv"
@@ -86,6 +103,8 @@ def test_scoring_excludes_injected_evaluation_truth() -> None:
     assert PayrollCol.IS_ANOMALY not in MODEL_FEATURE_COLUMNS
     assert PayrollCol.ANOMALY_CATEGORY not in MODEL_FEATURE_COLUMNS
     assert PayrollCol.ANOMALY_DOLLARS not in MODEL_FEATURE_COLUMNS
+    assert PayrollCol.OOD_PAY_CODE_CONTEXT not in MODEL_FEATURE_COLUMNS
+    assert PayrollCol.PAY_CODE not in MODEL_FEATURE_COLUMNS
     assert _feature_matrix(ruled).shape[1] == len(MODEL_FEATURE_COLUMNS)
 
     scored = score_payroll(ruled, config)
@@ -102,11 +121,13 @@ def test_scoring_excludes_injected_evaluation_truth() -> None:
         ScoreCol.ESTIMATED_EXPOSURE,
         ScoreCol.EXPOSURE_SCORE,
         ScoreCol.FINAL_ANOMALY_SCORE,
+        ScoreCol.COMPOSITE_UNCERTAINTY_SCORE,
     ).equals(
         relabeled_scored.select(
             ScoreCol.ESTIMATED_EXPOSURE,
             ScoreCol.EXPOSURE_SCORE,
             ScoreCol.FINAL_ANOMALY_SCORE,
+            ScoreCol.COMPOSITE_UNCERTAINTY_SCORE,
         ),
     )
 
@@ -121,6 +142,7 @@ def test_period_safe_feature_references_and_early_fallbacks() -> None:
             PayrollCol.JOB_FAMILY: ["Payroll"] * 5,
             PayrollCol.LOCATION: ["Remote"] * 5,
             PayrollCol.PAY_TYPE: ["salaried"] * 5,
+            PayrollCol.PAY_CODE: ["SAL"] * 5,
             PayrollCol.TENURE_MONTHS: [12] * 5,
             PayrollCol.GROSS_PAY: [1000.0, 3000.0, 2000.0, 4000.0, 5000.0],
             PayrollCol.DEDUCTIONS: [200.0, 600.0, 400.0, 800.0, 1000.0],
@@ -132,6 +154,8 @@ def test_period_safe_feature_references_and_early_fallbacks() -> None:
     featured = build_features(payroll).sort(PayrollCol.RECORD_ID)
 
     assert featured.row(0, named=True)["gross_pay_rolling_median"] is None
+    assert featured.row(0, named=True)[FeatureCol.PRIOR_EMPLOYEE_PAY_PERIOD_COUNT] == 0
+    assert featured.row(2, named=True)[FeatureCol.PRIOR_EMPLOYEE_PAY_PERIOD_COUNT] == 1
     assert featured.row(2, named=True)["gross_pay_rolling_median"] == 1000.0
     assert featured.row(0, named=True)["peer_gross_median"] == 1000.0
     assert featured.row(2, named=True)["peer_gross_median"] == 2000.0
@@ -142,9 +166,11 @@ def test_period_safe_feature_references_and_early_fallbacks() -> None:
 def test_missing_deduction_rule_and_explanation() -> None:
     config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
     payroll, _ = generate_payroll(config)
-    missing_record_id = payroll.filter(pl.col(PayrollCol.GROSS_PAY) > 0).get_column(
-        PayrollCol.RECORD_ID,
-    )[0]
+    latest_period = payroll.select(pl.max(PayrollCol.PAY_PERIOD_INDEX)).item()
+    missing_record_id = payroll.filter(
+        (pl.col(PayrollCol.PAY_PERIOD_INDEX) == latest_period)
+        & (pl.col(PayrollCol.GROSS_PAY) > 0),
+    ).get_column(PayrollCol.RECORD_ID)[0]
     payroll = payroll.with_columns(
         pl.when(pl.col(PayrollCol.RECORD_ID) == missing_record_id)
         .then(0.0)
@@ -188,9 +214,17 @@ def test_review_queue_field_separation_sort_order_and_safe_language() -> None:
         PayrollCol.ANOMALY_DOLLARS,
     }
     assert not leaked & set(analyst_queue.columns)
+    assert PayrollCol.OOD_PAY_CODE_CONTEXT not in analyst_queue.columns
     assert leaked <= set(evaluation_queue.columns)
+    assert analyst_queue.get_column(PayrollCol.PAY_PERIOD_INDEX).n_unique() == 1
+    assert (
+        analyst_queue.get_column(PayrollCol.PAY_PERIOD_INDEX)[0]
+        == scored.select(
+            pl.max(PayrollCol.PAY_PERIOD_INDEX),
+        ).item()
+    )
     assert analyst_queue.select(PayrollCol.PAY_PERIOD_INDEX, "rank").equals(
-        analyst_queue.sort([PayrollCol.PAY_PERIOD_INDEX, "rank"]).select(
+        analyst_queue.sort("rank").select(
             PayrollCol.PAY_PERIOD_INDEX,
             "rank",
         ),
@@ -222,3 +256,60 @@ def test_rolling_origin_validation_stability_and_leakage_checks() -> None:
     assert settings.select("selected_threshold").height == rolling_metrics.height
     assert stability.row(0, named=True)["origin_count"] == rolling_metrics.height
     assert checks.get_column("passed").all()
+
+
+def test_pay_code_generation_and_late_period_ood_drift() -> None:
+    config = PayrollConfig(employee_count=120, pay_periods=12, review_budgets=(5, 10))
+    payroll, _ = generate_payroll(config)
+    late_start = config.pay_periods - 3
+
+    assert PayrollCol.PAY_CODE in payroll.columns
+    assert PayrollCol.OOD_PAY_CODE_CONTEXT in payroll.columns
+    assert payroll.get_column(PayrollCol.PAY_CODE).null_count() == 0
+    assert (
+        payroll.filter(
+            (pl.col(PayrollCol.PAY_PERIOD_INDEX) >= late_start)
+            & (
+                pl.col(PayrollCol.OOD_PAY_CODE_CONTEXT)
+                == "late_period_new_or_rare_pay_code"
+            ),
+        ).height
+        > 0
+    )
+
+
+def test_uncertainty_outputs_intervals_and_conformal_context() -> None:
+    config = PayrollConfig(employee_count=120, pay_periods=12, review_budgets=(5, 10))
+    scored = score_payroll(
+        add_rule_flags(build_features(generate_payroll(config)[0])),
+        config,
+    )
+    late = scored.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) == config.pay_periods)
+
+    required = {
+        ScoreCol.ENSEMBLE_DISAGREEMENT_UNCERTAINTY,
+        ScoreCol.BOOTSTRAP_INTERVAL_UNCERTAINTY,
+        ScoreCol.CONFORMAL_P_VALUE,
+        ScoreCol.CONFORMAL_PERCENTILE,
+        ScoreCol.EXPECTED_GROSS_PAY_P10,
+        ScoreCol.EXPECTED_GROSS_PAY_P50,
+        ScoreCol.EXPECTED_GROSS_PAY_P90,
+        ScoreCol.EXPECTED_GROSS_PAY_INTERVAL_WIDTH,
+        ScoreCol.GROSS_PAY_EXCESS_VS_P90,
+        ScoreCol.COMPOSITE_UNCERTAINTY_SCORE,
+        ReviewCol.UNCERTAINTY_BUCKET,
+        ReviewCol.PRIMARY_UNCERTAINTY_REASON,
+    }
+    assert required <= set(scored.columns)
+    assert late.select(ScoreCol.EXPECTED_GROSS_PAY_P90).drop_nulls().height > 0
+    assert (
+        scored.select(ReviewCol.UNCERTAINTY_BUCKET).drop_nulls().height == scored.height
+    )
+
+    relabeled = scored.with_columns(
+        pl.lit(0.0).alias(ScoreCol.CONFORMAL_P_VALUE),
+        pl.lit(0.0).alias(ScoreCol.CONFORMAL_PERCENTILE),
+    )
+    assert scored.select(ScoreCol.COMPOSITE_UNCERTAINTY_SCORE).equals(
+        relabeled.select(ScoreCol.COMPOSITE_UNCERTAINTY_SCORE),
+    )

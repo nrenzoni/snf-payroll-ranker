@@ -20,7 +20,6 @@
 
 # %%
 import polars as pl
-from IPython.display import Markdown
 from lets_plot import (
     LetsPlot,
     aes,
@@ -41,6 +40,7 @@ from payroll_anomaly_ranking.columns import (
     AggregateCol,
     MetricCol,
     PayrollCol,
+    ReviewCol,
     ScoreCol,
 )
 from payroll_anomaly_ranking.config import PayrollConfig
@@ -61,6 +61,9 @@ validation_settings = results["validation_selected_settings"]
 stability = results["stability_summary"]
 leakage = results["leakage_checks"]
 scored = results["scored"]
+uncertainty_bucket_metrics = results["uncertainty_bucket_metrics"]
+risk_coverage = results["risk_coverage_analysis"]
+interval_metrics = results["expected_gross_pay_interval_metrics"]
 review_budget = 25
 
 # %% [markdown]
@@ -146,6 +149,48 @@ category.sort(AggregateCol.FALSE_NEGATIVES, descending=True)
 # Reviewing more records generally improves recall and dollar capture but can reduce precision as lower-ranked items enter the queue. The practical review budget is the point where additional review effort still captures meaningful dollars at risk without overwhelming payroll analysts with too many low-confidence exceptions.
 #
 # Category-level false negatives are useful for rule tuning and analyst feedback: a missed high-exposure category may justify more weight, a new deterministic rule, or a lower threshold during sensitive payroll periods.
+
+# %% [markdown]
+# ## Uncertainty Diagnostics
+#
+# Uncertainty is tracked separately from the final anomaly score. The composite score summarizes model-signal disagreement, bootstrap interval width, expected gross-pay interval width, thin peer or employee history, data quality issues, and out-of-distribution context. Conformal percentile is shown as recent-history anomaly context, not as a composite uncertainty component.
+
+# %%
+scored.select(
+    ScoreCol.ENSEMBLE_DISAGREEMENT_UNCERTAINTY,
+    ScoreCol.BOOTSTRAP_INTERVAL_UNCERTAINTY,
+    ScoreCol.EXPECTED_GROSS_PAY_INTERVAL_WIDTH,
+    ScoreCol.PEER_GROUP_UNCERTAINTY,
+    ScoreCol.EMPLOYEE_HISTORY_UNCERTAINTY,
+    ScoreCol.DATA_QUALITY_UNCERTAINTY,
+    ScoreCol.OOD_UNCERTAINTY,
+    ScoreCol.COMPOSITE_UNCERTAINTY_SCORE,
+).describe()
+
+# %%
+uncertainty_bucket_metrics
+
+# %%
+risk_coverage
+
+# %% [markdown]
+# ## Expected Gross-Pay Interval Diagnostics
+#
+# Expected gross-pay intervals are estimated from the rolling prior-period reference window. Normal-record coverage checks whether typical records fall between p10 and p90; anomaly exceedance over p90 shows whether synthetic exceptions tend to sit above recent expected pay.
+
+# %%
+interval_metrics
+
+# %%
+scored.group_by(ReviewCol.UNCERTAINTY_BUCKET).agg(
+    pl.mean(ScoreCol.EXPECTED_GROSS_PAY_INTERVAL_WIDTH).alias(
+        AggregateCol.AVG_INTERVAL_WIDTH,
+    ),
+    pl.mean(ScoreCol.CONFORMAL_PERCENTILE).alias(
+        f"avg_{ScoreCol.CONFORMAL_PERCENTILE}",
+    ),
+    pl.len().alias(AggregateCol.RECORDS),
+).sort(ReviewCol.UNCERTAINTY_BUCKET)
 
 # %% [markdown]
 # ## Common Evaluation Mistakes To Avoid
@@ -243,13 +288,6 @@ def dollars_for_anomalies(frame: pl.DataFrame) -> float:
     )
 
 
-def markdown_table(headers: list[str], rows: list[list[object]]) -> Markdown:
-    header = "| " + " | ".join(headers) + " |"
-    divider = "| " + " | ".join(["---"] * len(headers)) + " |"
-    body = ["| " + " | ".join(str(value) for value in row) + " |" for row in rows]
-    return Markdown("\n".join([header, divider, *body]))
-
-
 # %% [markdown]
 # ### Mistake 1: Random Train/Test Split
 #
@@ -345,13 +383,6 @@ test_period_distribution = pl.concat(
 # **Anti-pattern:** fit a default Isolation Forest on all available rows and interpret the score without documenting review capacity, contamination, seed stability, or temporal training assumptions.
 #
 # **Corrected method:** train on prior periods, set the contamination assumption to the expected review/anomaly rate, fix the seed for reproducibility, and evaluate on later periods with review metrics.
-#
-# | Choice | Anti-pattern: default-only | Corrected: configured temporal |
-# | :--- | :--- | :--- |
-# | Fit boundary | All rows, including evaluation-era rows | Prior payroll periods only |
-# | Contamination | Implicit default | Explicit 3% review/anomaly assumption |
-# | Review objective | Generic outlier score | Precision, PR-AUC, false positives, dollar capture |
-# | Reproducibility | Usually undocumented | Fixed seed and documented assumptions |
 
 # %%
 default_model = IsolationForest(random_state=config.seed)

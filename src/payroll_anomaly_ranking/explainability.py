@@ -14,6 +14,14 @@ from payroll_anomaly_ranking.rules import RULE_COLUMNS
 
 def add_explanations(scored: pl.DataFrame) -> pl.DataFrame:
     return scored.with_columns(
+        pl.concat_str(
+            [
+                pl.lit("Pay period "),
+                pl.col(PayrollCol.PAY_PERIOD_INDEX).cast(pl.String),
+                pl.lit(" ending "),
+                pl.col(PayrollCol.PAY_PERIOD_END).cast(pl.String),
+            ],
+        ).alias(ReviewCol.PAY_PERIOD_LABEL),
         pl.struct(scored.columns)
         .map_elements(_primary_reason, return_dtype=pl.String)
         .alias(ReviewCol.PRIMARY_REASON),
@@ -23,6 +31,12 @@ def add_explanations(scored: pl.DataFrame) -> pl.DataFrame:
         pl.struct(scored.columns)
         .map_elements(_risk_category, return_dtype=pl.String)
         .alias(ReviewCol.RISK_CATEGORY),
+        pl.struct(scored.columns)
+        .map_elements(_why_risky, return_dtype=pl.String)
+        .alias(ReviewCol.WHY_RISKY),
+        pl.struct(scored.columns)
+        .map_elements(_why_uncertain, return_dtype=pl.String)
+        .alias(ReviewCol.WHY_UNCERTAIN),
         (
             pl.col(PayrollCol.GROSS_PAY)
             - pl.col(FeatureCol.GROSS_PAY_ROLLING_MEDIAN)
@@ -44,7 +58,19 @@ def build_review_queue(scored: pl.DataFrame, top_k: int = 25) -> pl.DataFrame:
         ScoreCol.PAY_PERIOD_RANK,
         PayrollCol.EMPLOYEE_ID,
         PayrollCol.PAY_PERIOD_INDEX,
+        ReviewCol.PAY_PERIOD_LABEL,
         ScoreCol.FINAL_ANOMALY_SCORE,
+        ReviewCol.UNCERTAINTY_BUCKET,
+        ScoreCol.COMPOSITE_UNCERTAINTY_SCORE,
+        ReviewCol.PRIMARY_UNCERTAINTY_REASON,
+        ReviewCol.UNCERTAINTY_DRIVERS,
+        ScoreCol.CONFORMAL_P_VALUE,
+        ScoreCol.CONFORMAL_PERCENTILE,
+        ScoreCol.EXPECTED_GROSS_PAY_P10,
+        ScoreCol.EXPECTED_GROSS_PAY_P50,
+        ScoreCol.EXPECTED_GROSS_PAY_P90,
+        ScoreCol.EXPECTED_GROSS_PAY_INTERVAL_WIDTH,
+        ScoreCol.GROSS_PAY_EXCESS_VS_P90,
         ReviewCol.RISK_CATEGORY,
         ReviewCol.PRIMARY_REASON,
         ReviewCol.SECONDARY_REASON,
@@ -54,11 +80,17 @@ def build_review_queue(scored: pl.DataFrame, top_k: int = 25) -> pl.DataFrame:
         FeatureCol.PEER_GROSS_MEDIAN,
         RuleCol.REASON_CODES,
         ScoreCol.ESTIMATED_EXPOSURE,
+        ReviewCol.WHY_RISKY,
+        ReviewCol.WHY_UNCERTAIN,
         ReviewCol.EXPLANATION,
         *RULE_COLUMNS,
     ]
+    latest_period = explained.select(pl.max(PayrollCol.PAY_PERIOD_INDEX)).item()
     return (
-        explained.filter(pl.col(ScoreCol.PAY_PERIOD_RANK) <= top_k)
+        explained.filter(
+            (pl.col(PayrollCol.PAY_PERIOD_INDEX) == latest_period)
+            & (pl.col(ScoreCol.PAY_PERIOD_RANK) <= top_k),
+        )
         .select(fields)
         .rename(
             {
@@ -68,7 +100,7 @@ def build_review_queue(scored: pl.DataFrame, top_k: int = 25) -> pl.DataFrame:
                 ScoreCol.ESTIMATED_EXPOSURE: ReviewCol.DOLLARS_AT_RISK,
             },
         )
-        .sort([PayrollCol.PAY_PERIOD_INDEX, ReviewCol.RANK])
+        .sort(ReviewCol.RANK)
     )
 
 
@@ -126,3 +158,25 @@ def _risk_category(row: dict[str, object]) -> str:
 
 def _explanation(row: dict[str, object]) -> str:
     return f"Synthetic payroll record requires review: {row.get(ReviewCol.PRIMARY_REASON)}. {row.get(ReviewCol.SECONDARY_REASON)}. This is an exception triage signal, not a misconduct conclusion."
+
+
+def _why_risky(row: dict[str, object]) -> str:
+    parts = [
+        str(
+            row.get(ReviewCol.PRIMARY_REASON)
+            or "Combined payroll anomaly score is elevated",
+        ),
+    ]
+    if float(row.get(ScoreCol.GROSS_PAY_EXCESS_VS_P90) or 0.0) > 0:
+        parts.append("gross pay is above the recent expected p90")
+    percentile = row.get(ScoreCol.CONFORMAL_PERCENTILE)
+    if percentile is not None and float(percentile) >= 0.9:
+        parts.append("score is unusually high versus recent payroll history")
+    return "; ".join(parts)
+
+
+def _why_uncertain(row: dict[str, object]) -> str:
+    drivers = row.get(ReviewCol.UNCERTAINTY_DRIVERS)
+    if drivers and drivers != "none":
+        return str(drivers)
+    return "Recent payroll context is comparatively stable for this score"

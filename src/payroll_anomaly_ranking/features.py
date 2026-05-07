@@ -30,6 +30,14 @@ def add_history_features(payroll: pl.DataFrame) -> pl.DataFrame:
             .rolling_median(window_size=4, min_samples=1)
             .over(PayrollCol.EMPLOYEE_ID)
             .alias(FeatureCol.OVERTIME_ROLLING_MEDIAN),
+            (
+                pl.col(PayrollCol.PAY_PERIOD_INDEX)
+                .cum_count()
+                .over(PayrollCol.EMPLOYEE_ID)
+                - 1
+            )
+            .clip(0, None)
+            .alias(FeatureCol.PRIOR_EMPLOYEE_PAY_PERIOD_COUNT),
         )
         .with_columns(
             (
@@ -74,6 +82,7 @@ def add_peer_features(payroll: pl.DataFrame) -> pl.DataFrame:
         for row in period_rows:
             key = _peer_key(row)
             references = prior_by_group.get(key, [])
+            strict_peer_group_size = len(references)
             if len(references) < 3:
                 references = prior_rows
             gross_values = [
@@ -92,6 +101,8 @@ def add_peer_features(payroll: pl.DataFrame) -> pl.DataFrame:
                     FeatureCol.PEER_GROSS_STD: _std(gross_values),
                     FeatureCol.PEER_OVERTIME_MEDIAN: _median(overtime_values)
                     or float(row[PayrollCol.OVERTIME_HOURS]),
+                    FeatureCol.STRICT_PEER_GROUP_SIZE: strict_peer_group_size,
+                    FeatureCol.EFFECTIVE_PEER_REFERENCE_SIZE: len(references),
                 },
             )
         for row in period_rows:

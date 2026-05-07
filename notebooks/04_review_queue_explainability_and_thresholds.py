@@ -16,7 +16,7 @@
 # %% [markdown]
 # # 04 Review Queue, Explainability, And Thresholds
 #
-# **Executive takeaway:** The analyst-safe review queue turns model outputs into triage: risk category, reason codes, expected versus actual pay context, estimated dollars at risk, and review-safe explanations without synthetic evaluation labels.
+# **Executive takeaway:** The analyst-safe review queue turns latest-period model outputs into triage: risk, uncertainty, reason codes, expected versus actual pay context, estimated dollars at risk, and review-safe explanations without synthetic evaluation labels.
 
 # %%
 import polars as pl
@@ -51,24 +51,39 @@ sample_review_language()
 # %% [markdown]
 # ## Analyst-Readable Review Queue
 #
-# The fields below are intended for triage: rank, cycle, risk category, reason codes, expected gross pay, actual gross pay, peer context, dollars at risk, and an explanation.
+# The fields below are intended for latest-cycle triage: rank, cycle label, risk, uncertainty, reason codes, expected gross-pay interval context, dollars at risk, and review-safe explanations.
 
 # %%
 queue.select(
     ReviewCol.RANK,
     PayrollCol.EMPLOYEE_ID,
     PayrollCol.PAY_PERIOD_INDEX,
+    ReviewCol.PAY_PERIOD_LABEL,
+    ScoreCol.FINAL_ANOMALY_SCORE,
     ReviewCol.RISK_CATEGORY,
+    ReviewCol.UNCERTAINTY_BUCKET,
+    ScoreCol.COMPOSITE_UNCERTAINTY_SCORE,
     ReviewCol.PRIMARY_REASON,
+    ReviewCol.PRIMARY_UNCERTAINTY_REASON,
     ReviewCol.SECONDARY_REASON,
+    ScoreCol.CONFORMAL_PERCENTILE,
+    ScoreCol.EXPECTED_GROSS_PAY_P10,
+    ScoreCol.EXPECTED_GROSS_PAY_P50,
+    ScoreCol.EXPECTED_GROSS_PAY_P90,
+    ScoreCol.GROSS_PAY_EXCESS_VS_P90,
     ReviewCol.EXPECTED_GROSS_PAY,
     PayrollCol.GROSS_PAY,
     ReviewCol.DIFFERENCE_FROM_EXPECTED,
     ReviewCol.PEER_CONTEXT,
     ReviewCol.DOLLARS_AT_RISK,
     RuleCol.REASON_CODES,
+    ReviewCol.WHY_RISKY,
+    ReviewCol.WHY_UNCERTAIN,
     ReviewCol.EXPLANATION,
 ).head(15)
+
+# %%
+queue.select(pl.min(PayrollCol.PAY_PERIOD_INDEX), pl.max(PayrollCol.PAY_PERIOD_INDEX))
 
 # %% [markdown]
 # ## Evaluation-Labeled Queue
@@ -80,6 +95,7 @@ evaluation_queue.select(
     ReviewCol.RANK,
     PayrollCol.EMPLOYEE_ID,
     PayrollCol.PAY_PERIOD_INDEX,
+    ReviewCol.UNCERTAINTY_BUCKET,
     ReviewCol.DOLLARS_AT_RISK,
     PayrollCol.IS_ANOMALY,
     PayrollCol.ANOMALY_CATEGORY,
@@ -89,7 +105,7 @@ evaluation_queue.select(
 # %% [markdown]
 # ## Compact Case Cards
 #
-# Case cards summarize the evidence an analyst needs before deciding whether the record is an expected exception, a correction, or an item requiring escalation.
+# Case cards summarize both why the record is risky and why its score may be uncertain before an analyst decides whether the record is an expected exception, a correction, or an item requiring escalation.
 
 # %%
 compact_case_cards(queue, limit=5)
@@ -137,11 +153,17 @@ queue.group_by(ReviewCol.RISK_CATEGORY).agg(
     pl.sum(ReviewCol.DOLLARS_AT_RISK).alias(ReviewCol.DOLLARS_AT_RISK),
 ).sort(ReviewCol.RISK_CATEGORY)
 
+# %%
+queue.group_by(ReviewCol.UNCERTAINTY_BUCKET).agg(
+    pl.len().alias(AggregateCol.RECORDS),
+    pl.mean(ScoreCol.COMPOSITE_UNCERTAINTY_SCORE).alias(AggregateCol.AVG_UNCERTAINTY),
+).sort(ReviewCol.UNCERTAINTY_BUCKET)
+
 # %% [markdown]
 # ## Payroll Analyst Operating Model
 #
 # 1. Triage the top-K or threshold queue for each payroll cycle.
-# 2. Review the explanation, reason codes, source payroll fields, and supporting HRIS or timekeeping extracts outside this demo.
+# 2. Review the risk explanation, uncertainty drivers, source payroll fields, and supporting HRIS or timekeeping extracts outside this demo.
 # 3. Approve known exceptions such as planned bonus, retro adjustment, or authorized overtime.
 # 4. Escalate unreconciled high-risk records to payroll leadership or internal controls before finalization.
 # 5. Capture review outcome, reason, analyst notes, and final disposition for future calibration.
