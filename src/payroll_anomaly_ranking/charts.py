@@ -3,7 +3,7 @@ from __future__ import annotations
 import polars as pl
 from lets_plot import (
     aes,
-    geom_bar,
+    geom_errorbar,
     geom_histogram,
     geom_line,
     geom_point,
@@ -128,18 +128,56 @@ def credible_interval_chart(intervals: pl.DataFrame, metric_col: str = "metric")
 
 
 def posterior_comparison_chart(comparison: pl.DataFrame):
+    return pairwise_superiority_heatmap(comparison)
+
+
+def pairwise_superiority_heatmap(comparison: pl.DataFrame):
+    fill_col = (
+        "win_probability"
+        if "win_probability" in comparison.columns
+        else "superiority_probability"
+    )
     return (
-        ggplot(_plot_data(comparison), aes("left_signal", "superiority_probability"))
-        + geom_bar(stat="identity")
-        + ggtitle("Component Superiority Probability")
+        ggplot(
+            _plot_data(comparison),
+            aes("left_signal", "right_signal", fill=fill_col),
+        )
+        + geom_tile()
+        + ggtitle("Pairwise Component Superiority")
+        + theme_minimal()
+    )
+
+
+def effect_size_interval_chart(
+    intervals: pl.DataFrame,
+    x: str = "left_signal",
+    y: str = "mean_delta",
+):
+    return (
+        ggplot(_plot_data(intervals), aes(x, y))
+        + geom_point(aes(size="samples"))
+        + geom_errorbar(aes(ymin="lower_95", ymax="upper_95"), width=0.2)
+        + ggtitle("Effect-Size Intervals")
+        + theme_minimal()
+    )
+
+
+def review_budget_interval_chart(intervals: pl.DataFrame):
+    return (
+        ggplot(_plot_data(intervals), aes("metric", "mean"))
+        + geom_point()
+        + geom_errorbar(aes(ymin="lower_95", ymax="upper_95"), width=0.2)
+        + ggtitle("Review-Budget Uncertainty Intervals")
         + theme_minimal()
     )
 
 
 def subgroup_forest_chart(subgroups: pl.DataFrame):
+    data = _sort_if_present(subgroups, "pooled_anomaly_rate")
     return (
-        ggplot(_plot_data(subgroups), aes("subgroup", "pooled_anomaly_rate"))
-        + geom_point()
+        ggplot(_plot_data(data), aes("subgroup", "pooled_anomaly_rate"))
+        + geom_point(aes(size="records"))
+        + geom_errorbar(aes(ymin="lower_95", ymax="upper_95"), width=0.2)
         + ggtitle("Subgroup Pooled Anomaly Rates")
         + theme_minimal()
     )
@@ -151,7 +189,8 @@ def subgroup_caterpillar_chart(subgroups: pl.DataFrame):
             _plot_data(subgroups.sort("pooled_anomaly_rate")),
             aes("subgroup", "pooled_anomaly_rate"),
         )
-        + geom_point()
+        + geom_point(aes(size="records"))
+        + geom_errorbar(aes(ymin="lower_95", ymax="upper_95"), width=0.2)
         + ggtitle("Subgroup Caterpillar View")
         + theme_minimal()
     )
@@ -160,7 +199,7 @@ def subgroup_caterpillar_chart(subgroups: pl.DataFrame):
 def subgroup_shrinkage_chart(subgroups: pl.DataFrame):
     return (
         ggplot(_plot_data(subgroups), aes("raw_anomaly_rate", "pooled_anomaly_rate"))
-        + geom_point()
+        + geom_point(aes(size="records"))
         + ggtitle("Raw vs Pooled Subgroup Rates")
         + theme_minimal()
     )
@@ -187,7 +226,7 @@ def expected_pay_actual_vs_expected_chart(calibration: pl.DataFrame):
 def expected_pay_coverage_chart(calibration: pl.DataFrame):
     return _simple_point_chart(
         calibration,
-        "records",
+        "subgroup" if "subgroup" in calibration.columns else "records",
         "coverage",
         "Expected Pay Coverage",
     )
@@ -196,7 +235,7 @@ def expected_pay_coverage_chart(calibration: pl.DataFrame):
 def expected_pay_residual_chart(calibration: pl.DataFrame):
     return _simple_point_chart(
         calibration,
-        "records",
+        "subgroup" if "subgroup" in calibration.columns else "records",
         "avg_residual",
         "Expected Pay Residuals",
     )
@@ -208,6 +247,15 @@ def expected_pay_percentile_chart(calibration: pl.DataFrame):
         "avg_interval_width",
         "coverage",
         "Interval Width vs Coverage",
+    )
+
+
+def calibration_interval_width_chart(calibration: pl.DataFrame):
+    return _simple_point_chart(
+        calibration,
+        "avg_interval_width",
+        "avg_excess_over_p90",
+        "Calibration Interval Width vs Tail Excess",
     )
 
 
@@ -295,8 +343,32 @@ def stress_test_heatmap(comparison: pl.DataFrame):
     )
 
 
+def queue_demand_chart(summary: pl.DataFrame):
+    return _simple_point_chart(
+        summary,
+        PayrollCol.PAY_PERIOD_INDEX,
+        "avg_candidate_queue_size"
+        if "avg_candidate_queue_size" in summary.columns
+        else "avg_queue_size",
+        "Scenario Queue Demand",
+    )
+
+
+def missed_exposure_chart(summary: pl.DataFrame):
+    return _simple_point_chart(
+        summary,
+        "avg_missed_estimated_exposure",
+        "avg_missed_synthetic_anomaly_dollars",
+        "Missed Exposure vs Synthetic Dollars",
+    )
+
+
 def _plot_data(frame: pl.DataFrame) -> dict[str, list[object]]:
     return frame.to_dict(as_series=False)
+
+
+def _sort_if_present(frame: pl.DataFrame, column: str) -> pl.DataFrame:
+    return frame.sort(column) if column in frame.columns else frame
 
 
 def _simple_point_chart(frame: pl.DataFrame, x: str, y: str, title: str):

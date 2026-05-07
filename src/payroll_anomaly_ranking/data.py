@@ -12,6 +12,7 @@ from payroll_anomaly_ranking.scenarios import (
     ChangePointEvent,
     DriftPlan,
     ScenarioSpec,
+    TargetedAnomalyControl,
 )
 
 DEPARTMENTS = ["Operations", "Sales", "Engineering", "Finance", "Support", "HR"]
@@ -269,27 +270,15 @@ def inject_anomalies(
         if anomaly_plan is not None and anomaly_plan.target_count is not None
         else default_target
     )
-    anomaly_indices = rng.choice(payroll.height, target_count, replace=False)
-    category_values = ANOMALY_CATEGORIES
-    probabilities = None
-    if anomaly_plan is not None and anomaly_plan.category_weights:
-        category_values = [
-            cat for cat in ANOMALY_CATEGORIES if cat in anomaly_plan.category_weights
-        ]
-        weights = np.array(
-            [anomaly_plan.category_weights[cat] for cat in category_values],
-            dtype=float,
-        )
-        probabilities = weights / weights.sum() if weights.sum() > 0 else None
-    categories = rng.choice(category_values, target_count, p=probabilities)
     rows = payroll.to_dicts()
+    selected = _select_anomaly_assignments(rows, target_count, anomaly_plan, rng)
     labels: list[dict[str, object]] = []
     department_spike_period = int(rng.integers(8, max(9, config.pay_periods - 2)))
     department_spike_department = str(rng.choice(DEPARTMENTS))
-    for idx, category in zip(anomaly_indices, categories, strict=False):
+    for idx, category, severity_overrides in selected:
         row = rows[int(idx)]
         original = float(row[PayrollCol.GROSS_PAY])
-        severity = _severity_multiplier(anomaly_plan, str(category))
+        severity = _severity_multiplier(anomaly_plan, str(category), severity_overrides)
         if category == "duplicate_payment":
             row[PayrollCol.GROSS_PAY] = round(original * (1 + severity), 2)
             row[PayrollCol.NET_PAY] = round(
@@ -392,10 +381,89 @@ def inject_anomalies(
     )
 
 
-def _severity_multiplier(plan: AnomalyPlan | None, category: str) -> float:
-    if plan is None:
-        return 1.0
-    return max(float(plan.severity_multipliers.get(category, 1.0)), 0.0)
+def _select_anomaly_assignments(
+    rows: list[dict[str, object]],
+    target_count: int,
+    plan: AnomalyPlan | None,
+    rng: np.random.Generator,
+) -> list[tuple[int, str, dict[str, float]]]:
+    available = set(range(len(rows)))
+    assignments: list[tuple[int, str, dict[str, float]]] = []
+    controls = plan.targeted_controls if plan is not None else ()
+    for control in controls:
+        if len(assignments) >= target_count:
+            break
+        candidates = [
+            idx
+            for idx in available
+            if _matches_period_and_subgroup(
+                rows[idx],
+                control.start_period,
+                control.end_period,
+                control.subgroup_filters,
+            )
+        ]
+        if not candidates:
+            continue
+        count = _control_target_count(control, len(candidates), target_count)
+        count = min(count, len(candidates), target_count - len(assignments))
+        if count <= 0:
+            continue
+        chosen = rng.choice(candidates, count, replace=False)
+        categories = _choose_categories(control.category_weights, count, rng)
+        for idx, category in zip(chosen, categories, strict=False):
+            int_idx = int(idx)
+            assignments.append((int_idx, str(category), control.severity_multipliers))
+            available.remove(int_idx)
+    remaining_count = min(target_count - len(assignments), len(available))
+    if remaining_count > 0:
+        chosen = rng.choice(list(available), remaining_count, replace=False)
+        weights = plan.category_weights if plan is not None else {}
+        categories = _choose_categories(weights, remaining_count, rng)
+        for idx, category in zip(chosen, categories, strict=False):
+            assignments.append((int(idx), str(category), {}))
+    return assignments
+
+
+def _control_target_count(
+    control: TargetedAnomalyControl,
+    candidates: int,
+    global_target: int,
+) -> int:
+    if control.target_count is not None:
+        return control.target_count
+    base_rate = min(global_target / max(candidates * 8, 1), 0.35)
+    return max(int(round(candidates * base_rate * control.propensity_multiplier)), 1)
+
+
+def _choose_categories(
+    category_weights: dict[str, float],
+    count: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    category_values = ANOMALY_CATEGORIES
+    probabilities = None
+    if category_weights:
+        category_values = [cat for cat in ANOMALY_CATEGORIES if cat in category_weights]
+        weights = np.array(
+            [category_weights[cat] for cat in category_values],
+            dtype=float,
+        )
+        probabilities = weights / weights.sum() if weights.sum() > 0 else None
+    return rng.choice(category_values, count, p=probabilities)
+
+
+def _severity_multiplier(
+    plan: AnomalyPlan | None,
+    category: str,
+    overrides: dict[str, float] | None = None,
+) -> float:
+    multiplier = 1.0
+    if plan is not None:
+        multiplier = float(plan.severity_multipliers.get(category, multiplier))
+    if overrides:
+        multiplier = float(overrides.get(category, multiplier))
+    return max(multiplier, 0.0)
 
 
 def _apply_drift_plan(
@@ -535,3 +603,99 @@ def write_synthetic_data(
     payroll.write_csv(config.data_dir / "synthetic_payroll.csv")
     labels.write_csv(config.data_dir / "synthetic_payroll_labels.csv")
     return payroll, labels
+
+
+def scenario_summary(
+    payroll: pl.DataFrame,
+    scenario: str = "default",
+    subgroup_dimension: str = PayrollCol.DEPARTMENT,
+) -> pl.DataFrame:
+    anomalies = payroll.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+    total_anomalies = anomalies.height
+    total_dollars = float(
+        payroll.select(pl.sum(PayrollCol.ANOMALY_DOLLARS)).item() or 0.0,
+    )
+    rows: list[dict[str, object]] = [
+        {
+            "scenario": scenario,
+            "scope": "overall",
+            "subgroup_dimension": "all",
+            "subgroup": "all",
+            PayrollCol.PAY_PERIOD_INDEX: None,
+            "records": payroll.height,
+            "anomalies": total_anomalies,
+            "anomaly_rate": total_anomalies / max(payroll.height, 1),
+            "anomaly_dollars": total_dollars,
+            "anomaly_share": 1.0 if total_anomalies else 0.0,
+        },
+    ]
+    if subgroup_dimension in payroll.columns:
+        grouped = payroll.group_by(subgroup_dimension).agg(
+            pl.len().alias("records"),
+            pl.sum(PayrollCol.IS_ANOMALY).alias("anomalies"),
+            pl.sum(PayrollCol.ANOMALY_DOLLARS).alias("anomaly_dollars"),
+        )
+        for row in grouped.to_dicts():
+            anomalies_count = int(row["anomalies"] or 0)
+            rows.append(
+                {
+                    "scenario": scenario,
+                    "scope": "subgroup",
+                    "subgroup_dimension": subgroup_dimension,
+                    "subgroup": str(row[subgroup_dimension]),
+                    PayrollCol.PAY_PERIOD_INDEX: None,
+                    "records": row["records"],
+                    "anomalies": anomalies_count,
+                    "anomaly_rate": anomalies_count / max(float(row["records"]), 1.0),
+                    "anomaly_dollars": float(row["anomaly_dollars"] or 0.0),
+                    "anomaly_share": anomalies_count / max(total_anomalies, 1),
+                },
+            )
+    if subgroup_dimension in payroll.columns:
+        concentration = payroll.group_by(
+            [subgroup_dimension, PayrollCol.PAY_PERIOD_INDEX],
+        ).agg(
+            pl.len().alias("records"),
+            pl.sum(PayrollCol.IS_ANOMALY).alias("anomalies"),
+            pl.sum(PayrollCol.ANOMALY_DOLLARS).alias("anomaly_dollars"),
+        )
+        for row in concentration.to_dicts():
+            anomalies_count = int(row["anomalies"] or 0)
+            if anomalies_count == 0:
+                continue
+            rows.append(
+                {
+                    "scenario": scenario,
+                    "scope": "subgroup_period",
+                    "subgroup_dimension": subgroup_dimension,
+                    "subgroup": str(row[subgroup_dimension]),
+                    PayrollCol.PAY_PERIOD_INDEX: row[PayrollCol.PAY_PERIOD_INDEX],
+                    "records": row["records"],
+                    "anomalies": anomalies_count,
+                    "anomaly_rate": anomalies_count / max(float(row["records"]), 1.0),
+                    "anomaly_dollars": float(row["anomaly_dollars"] or 0.0),
+                    "anomaly_share": anomalies_count / max(total_anomalies, 1),
+                },
+            )
+    mix = payroll.group_by(PayrollCol.ANOMALY_CATEGORY).agg(
+        pl.len().alias("records"),
+        pl.sum(PayrollCol.IS_ANOMALY).alias("anomalies"),
+        pl.sum(PayrollCol.ANOMALY_DOLLARS).alias("anomaly_dollars"),
+    )
+    for row in mix.to_dicts():
+        anomalies_count = int(row["anomalies"] or 0)
+        rows.append(
+            {
+                "scenario": scenario,
+                "scope": "category_mix",
+                "subgroup_dimension": PayrollCol.ANOMALY_CATEGORY,
+                "subgroup": str(row[PayrollCol.ANOMALY_CATEGORY]),
+                PayrollCol.PAY_PERIOD_INDEX: None,
+                "records": row["records"],
+                "anomalies": anomalies_count,
+                "anomaly_rate": anomalies_count / max(float(row["records"]), 1.0),
+                "anomaly_dollars": float(row["anomaly_dollars"] or 0.0),
+                "anomaly_share": anomalies_count / max(total_anomalies, 1),
+            },
+        )
+    return pl.DataFrame(rows, infer_schema_length=None)

@@ -61,7 +61,7 @@ uv run jupytext --to ipynb notebooks/01_problem_framing_and_data_maturity.py
 uv run jupyter nbconvert --to notebook --execute notebooks/01_problem_framing_and_data_maturity.ipynb --output 01_problem_framing_and_data_maturity.executed.ipynb --output-dir notebooks
 ```
 
-Internal notebooks use bounded local defaults: `06` runs small bootstrap/posterior simulations, and `07` uses `QueueSimulationSpec(iterations=40)` by default. Reduce the `samples` arguments in notebook `06` or `QueueSimulationSpec.iterations` in notebook `07` for faster local execution.
+Internal notebooks use bounded local defaults: `06` runs four internal diagnostic scenarios (`baseline`, `rule-friendly`, `statistical-friendly`, `subgroup-drift`) across two seeds with `samples=50` for review-budget intervals, and `07` runs three queue scenarios (`baseline`, `queue-stress`, `calendar-drift`) with `QueueSimulationSpec(iterations=40)`, `review_budget=10`, and threshold-demand at `score_threshold=0.55`. For faster local execution, reduce `DIAGNOSTIC_SCENARIOS`, `DIAGNOSTIC_SEEDS`, or `samples=50` in notebook `06`, and reduce `QUEUE_SCENARIOS` or `QueueSimulationSpec.iterations` in notebook `07`.
 
 ## What The Workflow Covers
 

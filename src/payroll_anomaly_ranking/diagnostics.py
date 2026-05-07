@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
 import numpy as np
 import polars as pl
 
 from payroll_anomaly_ranking.columns import PayrollCol, ScoreCol
+from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.evaluation import (
     dollars_captured_at_k,
     precision_recall_at_k,
 )
+from payroll_anomaly_ranking.scenarios import ScenarioSpec, diagnostic_scenario_presets
 
 SCORE_SIGNALS = {
     "hybrid": ScoreCol.FINAL_ANOMALY_SCORE,
@@ -91,18 +94,118 @@ def component_superiority_summary(
                     performance[left] > performance[right],
                 )
                 totals[key] = totals.get(key, 0) + 1
-    return pl.DataFrame(
-        [
+    rows = []
+    for left, right in sorted(totals):
+        probability = wins[(left, right)] / totals[(left, right)]
+        rows.append(
             {
                 "left_signal": left,
                 "right_signal": right,
                 "metric": f"precision_at_{k}",
-                "superiority_probability": wins[(left, right)] / totals[(left, right)],
+                "scenario": "single_world_bootstrap",
+                "scope": "single_world_bootstrap",
+                "superiority_probability": probability,
+                "win_probability": probability,
+                "win_frequency": wins[(left, right)],
                 "samples": totals[(left, right)],
-            }
-            for left, right in sorted(totals)
-        ],
+                "mean_delta": None,
+                "lower_95": None,
+                "upper_95": None,
+            },
+        )
+    return pl.DataFrame(rows)
+
+
+def run_diagnostic_comparison_units(
+    config: PayrollConfig = PayrollConfig(),
+    scenarios: dict[str, ScenarioSpec | None] | None = None,
+    seeds: tuple[int, ...] = (42, 43),
+    origins: tuple[str, ...] = ("default",),
+    k: int | None = None,
+) -> pl.DataFrame:
+    from payroll_anomaly_ranking.pipeline import run_pipeline
+
+    scenario_map = scenarios or diagnostic_scenario_presets(
+        ("baseline", "rule-friendly", "statistical-friendly", "subgroup-drift"),
     )
+    budget = k or config.review_budgets[0]
+    rows: list[dict[str, object]] = []
+    for scenario_name, scenario in scenario_map.items():
+        for seed in seeds:
+            seed_config = replace(config, seed=seed)
+            results = run_pipeline(seed_config, scenario=scenario)
+            scored = results["scored"]
+            for origin in origins:
+                unit = f"{scenario_name}|seed={seed}|origin={origin}"
+                for signal_name, signal_column in SCORE_SIGNALS.items():
+                    if signal_column not in scored.columns:
+                        continue
+                    metrics = _metrics_for_signal(scored, signal_column, budget)
+                    rows.append(
+                        {
+                            "scenario": scenario_name,
+                            "seed": seed,
+                            "origin": origin,
+                            "unit": unit,
+                            "signal": signal_name,
+                            **metrics,
+                        },
+                    )
+    return pl.DataFrame(rows, infer_schema_length=None)
+
+
+def pairwise_component_superiority(
+    unit_metrics: pl.DataFrame,
+    metric: str = "precision_at_k",
+    by_scenario: bool = True,
+) -> pl.DataFrame:
+    if unit_metrics.is_empty() or metric not in unit_metrics.columns:
+        return pl.DataFrame()
+    scopes: list[tuple[str, pl.DataFrame]] = [("aggregate", unit_metrics)]
+    if by_scenario and "scenario" in unit_metrics.columns:
+        scopes.extend(
+            (str(scenario), unit_metrics.filter(pl.col("scenario") == scenario))
+            for scenario in unit_metrics.get_column("scenario").unique().to_list()
+        )
+    rows: list[dict[str, object]] = []
+    signals = sorted(unit_metrics.get_column("signal").unique().to_list())
+    for scope, frame in scopes:
+        for left in signals:
+            for right in signals:
+                if left == right:
+                    continue
+                deltas = []
+                for unit in frame.get_column("unit").unique().to_list():
+                    unit_rows = frame.filter(pl.col("unit") == unit)
+                    left_rows = unit_rows.filter(pl.col("signal") == left)
+                    right_rows = unit_rows.filter(pl.col("signal") == right)
+                    if left_rows.is_empty() or right_rows.is_empty():
+                        continue
+                    deltas.append(
+                        float(left_rows.select(metric).item())
+                        - float(right_rows.select(metric).item()),
+                    )
+                if not deltas:
+                    continue
+                values = np.array(deltas, dtype=float)
+                wins = int((values > 0).sum())
+                rows.append(
+                    {
+                        "left_signal": left,
+                        "right_signal": right,
+                        "metric": metric,
+                        "scenario": scope,
+                        "scope": scope,
+                        "superiority_probability": wins / len(values),
+                        "win_probability": wins / len(values),
+                        "win_frequency": wins,
+                        "samples": len(values),
+                        "mean_delta": float(values.mean()),
+                        "lower_95": float(np.quantile(values, 0.025)),
+                        "upper_95": float(np.quantile(values, 0.975)),
+                    },
+                )
+    return pl.DataFrame(rows, infer_schema_length=None)
 
 
 def subgroup_diagnostics(
@@ -116,6 +219,7 @@ def subgroup_diagnostics(
         PayrollCol.JOB_LEVEL,
     ),
     k: int = 25,
+    scenario: str = "default",
 ) -> pl.DataFrame:
     rows = []
     global_rate = scored.select(pl.mean(PayrollCol.IS_ANOMALY)).item() or 0.0
@@ -150,7 +254,9 @@ def subgroup_diagnostics(
                 {
                     "dimension": str(dimension),
                     "subgroup": str(row[dimension]),
+                    "scenario": scenario,
                     **{key: row[key] for key in row if key != dimension},
+                    "anomaly_count": row["true_anomalies"],
                     "raw_anomaly_rate": raw_rate,
                     "pooled_anomaly_rate": pooled,
                     "shrinkage": pooled - raw_rate,
@@ -172,6 +278,7 @@ def subgroup_diagnostics(
 def expected_pay_calibration(
     scored: pl.DataFrame,
     by: str | None = None,
+    scenario: str = "default",
 ) -> pl.DataFrame:
     required = {
         ScoreCol.EXPECTED_GROSS_PAY_P10,
@@ -197,12 +304,27 @@ def expected_pay_calibration(
         ),
     )
     group_cols = [by] if by and by in frame.columns else []
-    return frame.group_by(group_cols).agg(
+    result = frame.group_by(group_cols).agg(
         pl.len().alias("records"),
         pl.mean("covered").alias("coverage"),
         pl.mean("interval_width").alias("avg_interval_width"),
         pl.mean("excess_over_p90").alias("avg_excess_over_p90"),
         pl.mean("residual").alias("avg_residual"),
+    )
+    if by and by in frame.columns:
+        result = result.rename({by: "subgroup"}).with_columns(
+            pl.lit(by).alias("subgroup_dimension"),
+        )
+    else:
+        result = result.with_columns(
+            pl.lit("all").alias("subgroup"),
+            pl.lit("all").alias("subgroup_dimension"),
+        )
+    return result.with_columns(
+        pl.lit(scenario).alias("scenario"),
+        pl.col("avg_interval_width").alias("interval_width"),
+        pl.col("avg_excess_over_p90").alias("excess_over_p90"),
+        pl.col("avg_residual").alias("residual"),
     )
 
 
@@ -218,7 +340,19 @@ def robustness_summary(frames: dict[str, pl.DataFrame], k: int = 25) -> pl.DataF
             .to_list(),
         )
         queues[name] = queue
-        rows.append({"setting": name, **metrics, "queue_size": len(queue)})
+        scenario, seed, origin = _parse_setting_name(name)
+        rows.append(
+            {
+                "setting": name,
+                "scenario": scenario,
+                "seed": seed,
+                "origin": origin,
+                **metrics,
+                "mean_performance": metrics["precision_at_k"],
+                "performance_variability": 0.0,
+                "queue_size": len(queue),
+            },
+        )
     for row in rows:
         overlaps = [
             _jaccard(queues[row["setting"]], other)
@@ -226,6 +360,7 @@ def robustness_summary(frames: dict[str, pl.DataFrame], k: int = 25) -> pl.DataF
             if name != row["setting"]
         ]
         row["mean_queue_overlap"] = sum(overlaps) / len(overlaps) if overlaps else 1.0
+        row["queue_overlap"] = row["mean_queue_overlap"]
         row["performance_instability"] = 1.0 - row["mean_queue_overlap"]
     return pl.DataFrame(rows)
 
@@ -291,6 +426,34 @@ def _precision_for_signal(scored: pl.DataFrame, signal: str, k: int) -> float:
         ranked.height,
         1,
     )
+
+
+def _metrics_for_signal(scored: pl.DataFrame, signal: str, k: int) -> dict[str, float]:
+    ranked = scored.with_columns(
+        pl.col(signal).alias(ScoreCol.FINAL_ANOMALY_SCORE),
+    ).with_columns(
+        pl.col(ScoreCol.FINAL_ANOMALY_SCORE)
+        .rank("ordinal", descending=True)
+        .over(PayrollCol.PAY_PERIOD_INDEX)
+        .alias(ScoreCol.PAY_PERIOD_RANK),
+    )
+    return {
+        **precision_recall_at_k(ranked, k),
+        **dollars_captured_at_k(ranked, k),
+    }
+
+
+def _parse_setting_name(name: str) -> tuple[str, int | None, str]:
+    parts = name.split("|")
+    scenario = parts[0]
+    seed = None
+    origin = "default"
+    for part in parts[1:]:
+        if part.startswith("seed="):
+            seed = int(part.removeprefix("seed="))
+        elif part.startswith("origin="):
+            origin = part.removeprefix("origin=")
+    return scenario, seed, origin
 
 
 def _jaccard(left: set[int], right: set[int]) -> float:

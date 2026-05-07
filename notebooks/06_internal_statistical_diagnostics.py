@@ -24,6 +24,7 @@ from lets_plot import LetsPlot
 
 from payroll_anomaly_ranking.charts import (
     credible_interval_chart,
+    effect_size_interval_chart,
     expected_pay_coverage_chart,
     expected_pay_residual_chart,
     performance_instability_pareto_chart,
@@ -34,30 +35,49 @@ from payroll_anomaly_ranking.charts import (
 )
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.diagnostics import (
-    component_superiority_summary,
     expected_pay_calibration,
     exposure_calibration,
+    pairwise_component_superiority,
     perturbation_sensitivity,
     review_budget_interval_summary,
     robustness_summary,
+    run_diagnostic_comparison_units,
     subgroup_diagnostics,
 )
 from payroll_anomaly_ranking.models import score_payroll
 from payroll_anomaly_ranking.pipeline import run_pipeline
+from payroll_anomaly_ranking.scenarios import diagnostic_scenario_presets
 
 LetsPlot.setup_html()
 
 # %%
 config = PayrollConfig(employee_count=160, pay_periods=12, review_budgets=(10, 25))
-results = run_pipeline(config)
+DIAGNOSTIC_SCENARIOS = (
+    "baseline",
+    "rule-friendly",
+    "statistical-friendly",
+    "subgroup-drift",
+)
+DIAGNOSTIC_SEEDS = (42, 43)
+FAST_MODE_NOTE = "Reduce DIAGNOSTIC_SCENARIOS, DIAGNOSTIC_SEEDS, or samples=50 for faster local execution."
+scenarios = diagnostic_scenario_presets(DIAGNOSTIC_SCENARIOS)
+results = run_pipeline(config, scenario=scenarios["subgroup-drift"])
 scored = results["scored"]
 
 # %% [markdown]
-# ## Bayesian-Style Review Budget Intervals And Component Superiority
+# ## Review Budget Intervals And Multi-Regime Component Superiority
+#
+# Diagnostic question: which ranking signal wins when the synthetic world changes? These scenario regimes are internal stress tests, not estimates of real payroll frequencies.
 
 # %%
 intervals = review_budget_interval_summary(scored, k=10, samples=50, seed=config.seed)
-superiority = component_superiority_summary(scored, k=10, samples=30, seed=config.seed)
+unit_metrics = run_diagnostic_comparison_units(
+    config,
+    scenarios=scenarios,
+    seeds=DIAGNOSTIC_SEEDS,
+    k=10,
+)
+superiority = pairwise_component_superiority(unit_metrics, metric="precision_at_k")
 intervals
 
 # %%
@@ -66,11 +86,16 @@ credible_interval_chart(intervals)
 # %%
 posterior_comparison_chart(superiority)
 
+# %%
+effect_size_interval_chart(superiority)
+
 # %% [markdown]
 # ## Hierarchical Subgroup Diagnostics
+#
+# Diagnostic question: where do raw subgroup anomaly rates differ from pooled estimates after targeted subgroup drift?
 
 # %%
-subgroups = subgroup_diagnostics(scored, k=10)
+subgroups = subgroup_diagnostics(scored, k=10, scenario="subgroup-drift")
 subgroups.head(10)
 
 # %%
@@ -81,9 +106,15 @@ subgroup_shrinkage_chart(subgroups)
 
 # %% [markdown]
 # ## Expected-Pay And Exposure Calibration
+#
+# Diagnostic question: are expected-pay intervals covering normal variation, and where do residuals or p90 excess concentrate?
 
 # %%
-calibration = expected_pay_calibration(scored, by="department")
+calibration = expected_pay_calibration(
+    scored,
+    by="department",
+    scenario="subgroup-drift",
+)
 exposure = exposure_calibration(scored)
 calibration
 
@@ -98,6 +129,8 @@ exposure
 
 # %% [markdown]
 # ## Robustness And Perturbation Sensitivity
+#
+# Diagnostic question: which scenario/seed units are unstable enough to affect review queues?
 
 # %%
 alt_results = run_pipeline(
@@ -109,7 +142,10 @@ alt_results = run_pipeline(
     ),
 )
 robustness = robustness_summary(
-    {"seed_42": scored, "seed_43": alt_results["scored"]},
+    {
+        "subgroup-drift|seed=42|origin=default": scored,
+        "baseline|seed=43|origin=default": alt_results["scored"],
+    },
     k=10,
 )
 robustness
