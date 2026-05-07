@@ -2,44 +2,64 @@ schema: spec-driven
 
 # Project context
 context: |
-  Tech Stack: Python, Polars, Lets-plot, Jupytext, UV.
-  Workflow: Jupytext script files (.py) written to repo; user can use jupyter lab to view the .py files.
-  Architecture: Follow a "Notebook-Library" pattern. Shared definitions, complex logic, and data schemas reside in a sibling file prefixed with an underscore (e.g., research_task.py uses _research_task-lib.py).
-  Coding Standard: High-performance data processing with a focus on type safety and maintainable schema references.
+  Tech Stack: Python 3.13, Polars, NumPy, scikit-learn, Lets-Plot, Jupytext, UV, Ruff, Pyrefly.
+  Workflow: Jupytext script files (.py) are source of truth for notebooks; do not edit .ipynb artifacts directly.
+  Architecture: Synthetic payroll anomaly ranking pipeline with typed result objects, Polars-first data processing, leakage-safe feature engineering, model scoring, diagnostics, review queues, and notebook narratives.
+  Coding Standard: Prefer strict type safety, named dataclass result objects, explicit schema references, and high-performance Polars/NumPy operations over loose dicts, tuples, or row-wise Python callbacks.
 
 # Per-artifact rules
-# Ensure all strings containing colons are wrapped in double quotes.
 rules:
-  python_files:
+  design:
+    - "Architecture: Keep pipeline stages explicit: data generation, validation, features, rules, scoring, evaluation, explainability, diagnostics, queue simulation, and presentation."
+    - "API Boundaries: Public functions that return multiple values must return named dataclass result objects, not raw tuples or dict[str, object]."
+    - "Compatibility: Do not add backward-compatible mapping or tuple-unpack shims unless the user explicitly asks for compatibility."
+    - "DataFrames: Keep tabular payloads as Polars DataFrames. Use typed dataclasses to group related DataFrames."
+    - "Performance: Push transformations into Polars expressions or NumPy batch operations. Avoid to_dicts(), iter_rows(), map_elements(), and row-wise Python loops in hot paths unless unavoidable and justified."
+    - "Typing: New code must pass Pyrefly with zero errors. Prefer attribute access such as results.scored and generated.payroll over results['scored'] or positional unpacking."
+    - "Schema: Use column enums/constants from columns.py for all payroll, feature, rule, score, metric, aggregate, and review columns."
+
+  specs:
+    - "Documentation: Maintain RESEARCH_LOG.md at the root when research decisions or benchmark findings influence implementation."
+    - "Behavior: Specs should describe typed return contracts for new public APIs."
+    - "Validation: Specs should include expected prek verification, plus pytest when behavior or test-covered code changes."
+
+  tasks:
+    # --- Python & Type Safety Rules ---
+    - "Use Python 3.13 syntax and modern type annotations."
+    - "Return named dataclass result objects for multi-value returns; do not return untyped dict[str, object] or raw positional tuples from public APIs."
+    - "Do not implement __getitem__, keys(), __contains__, or __iter__ compatibility on result dataclasses unless explicitly requested."
+    - "Use result.attribute access consistently, e.g. results.scored, generated.labels, validation.failures, rolling.metrics."
+    - "Use TypedDict only when mapping semantics are required; otherwise prefer dataclasses."
+    - "Avoid Any except at unavoidable third-party or dynamic-library boundaries, and keep it localized."
+    - "Run prek run --all-files after code or notebook changes and resolve all reported issues before completion."
+
+    # --- Polars & Data Processing Rules ---
     - "Never use pandas. If a snippet requires dataframes, use Polars (pl)."
-    - "Never use matplotlib. Use Lets-plot (from lets_plot import *) for all visualizations."
-    - "Target changes: Always apply code modifications to the Jupytext .py files, not the .ipynb artifacts."
+    - "Column Name Enforcement: Do not use raw strings for project schema columns. Use enums/constants from columns.py."
+    - "Prefer Polars expressions, group_by, joins, windows, and vectorized NumPy over Python row loops."
+    - "Avoid DataFrame.to_dicts(), iter_rows(named=True), and pl.map_elements() in performance-sensitive paths."
+    - "If row dict processing is unavoidable, isolate it in small helpers with typed casts and explain why."
+    - "Construct DataFrames with explicit schemas or immediate casts when records are heterogeneous or exported."
+    - "Do not parse semicolon-delimited strings as structured data. Preserve structured values until final presentation/export boundaries."
 
-  data_manipulation:
-    - "Column Name Enforcement: Raw strings must not be used for column selection or transformations within method chains."
-    - "Define all column names as UPPER_CASE constants at the top of the file or in src library."
-    - "Example: Use pl_df.select(USER_ID) instead of pl_df.select('user_id')."
+    # --- Visualization Rules ---
+    - "Never use matplotlib. Use Lets-Plot for visualizations."
+    - "Prefer the Grammar of Graphics approach, e.g. ggplot(data, aes(...)) + geom_point()."
+    - "Keep Lets-Plot conversion isolated at presentation boundaries. If Lets-Plot typing is incomplete, use localized import adapters rather than weakening project-wide typing."
+    - "Standardize plot themes with theme_minimal() unless a specific notebook narrative requires otherwise."
 
-  project_structure:
-    - "When creating new research modules, automatically suggest or create the corresponding _name-lib.py for helper functions and constants."
+    # --- File & System Rules ---
+    - "Target changes: Always apply code modifications to the Jupytext .py files, not .ipynb artifacts."
+    - "Do not commit generated __pycache__, notebook outputs, or transient benchmark artifacts."
+    - "Use prek run --all-files as the standard post-change verification gate; it runs YAML checks, file fixers, Ruff, formatting, and Pyrefly."
+    - "Run uv run pytest when changes affect runtime behavior, pipeline logic, diagnostics, or test-covered code paths."
 
-  performance:
-    - "Prefer LazyFrames (.lazy()) for complex pipelines to optimize the query plan."
-    - "Minimize collect() calls; keep data in the Polars engine as long as possible."
+    # --- Documentation/Style Rules ---
+    - "Docstrings: Use numpydoc style for public functions and dataclasses when behavior is not self-evident."
+    - "Use clear, descriptive variable names for intermediate steps."
+    - "Keep comments rare and focused on non-obvious business logic, leakage prevention, or performance tradeoffs."
 
-  documentation:
-    - "Sibling library files must use explicit type hints for all function signatures."
-    - "Use clear, descriptive variable names for intermediate transformation steps (e.g., filtered_df instead of df2)."
-    - "Maintain a RESEARCH_LOG.md at the root."
-    - "Every time a new .py file is created, add an entry with the hypothesis and the primary Polars transformations used."
-    - "Docstrings: Use the numpydoc style to ensure compatibility with scientific documentation tools."
-
-  visualizations:
-    - "When using Lets-plot, prioritize the 'Grammar of Graphics' approach (e.g., ggplot(df) + geom_point())."
-    - "Standardize plot themes across the project for visual consistency (e.g., theme_minimal())."
-    - "Do not convert Polars DataFrames to pandas for Lets-plot. Pass Polars DataFrames directly to ggplot; avoid .to_pandas() unless a specific API requires pandas and the reason is documented."
-
-  file_organization:
-    - "Pathing: Use pathlib.Path for all file system interactions. No hardcoded string paths."
-    - "Imports: Logic in research/ files should prioritize imports from their local _*-lib.py first, then the global common/ directory."
-    - "Naming: Sibling files must always start with an underscore to visually distinguish them from the primary Jupytext scripts."
+  proposal:
+    - "Focus on typed API contracts, schema safety, leakage prevention, and estimated performance impact."
+    - "Call out whether a proposed change intentionally breaks compatibility."
+    - "Include verification tasks for prek run --all-files, and pytest when relevant."

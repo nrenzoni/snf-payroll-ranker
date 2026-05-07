@@ -28,6 +28,7 @@ dev = [
     "jupytext>=1.19.1",
     "lets-plot>=4.9.0",
     "pre-commit>=4.6.0",
+    "pyrefly>=0.64.0",
     "pytest>=9.0.1",
     "ruff>=0.15.12",
 ]
