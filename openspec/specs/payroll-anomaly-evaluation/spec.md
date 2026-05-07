@@ -97,4 +97,3 @@ The system SHALL report stability or uncertainty summaries and explicit leakage 
 #### Scenario: Leakage checks are reported
 - **WHEN** evaluation runs on synthetic labels
 - **THEN** the output verifies that label columns and injected anomaly dollar impacts are not used as scoring features or analyst queue inputs
-

@@ -76,4 +76,3 @@ The notebooks SHALL demonstrate hard validation failures separately from payroll
 #### Scenario: Validation outputs are separated
 - **WHEN** validation results are shown in the data maturity notebook
 - **THEN** hard failures are presented as pipeline-stopping data issues and warnings are presented as payroll exceptions that may require analyst review
-

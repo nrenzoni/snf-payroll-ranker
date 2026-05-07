@@ -21,7 +21,13 @@
 # %%
 import polars as pl
 
-from payroll_anomaly_ranking.columns import AggregateCol, PayrollCol, ReviewCol, RuleCol, ScoreCol
+from payroll_anomaly_ranking.columns import (
+    AggregateCol,
+    PayrollCol,
+    ReviewCol,
+    RuleCol,
+    ScoreCol,
+)
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.explainability import sample_review_language
 from payroll_anomaly_ranking.pipeline import run_pipeline
@@ -94,18 +100,26 @@ compact_case_cards(queue, limit=5)
 # Teams can choose a fixed top-K review budget per pay period or a score threshold. Top-K gives predictable workload; thresholds adapt to risk concentration but can produce variable queue sizes.
 
 # %%
-budget_sizes = scored.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(
-    (pl.col(ScoreCol.PAY_PERIOD_RANK) <= 10).sum().alias(AggregateCol.TOP_10_QUEUE),
-    (pl.col(ScoreCol.PAY_PERIOD_RANK) <= 25).sum().alias(AggregateCol.TOP_25_QUEUE),
-    (pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= 0.65).sum().alias(AggregateCol.SCORE_THRESHOLD_065_QUEUE),
-).sort(PayrollCol.PAY_PERIOD_INDEX)
+budget_sizes = (
+    scored.group_by(PayrollCol.PAY_PERIOD_INDEX)
+    .agg(
+        (pl.col(ScoreCol.PAY_PERIOD_RANK) <= 10).sum().alias(AggregateCol.TOP_10_QUEUE),
+        (pl.col(ScoreCol.PAY_PERIOD_RANK) <= 25).sum().alias(AggregateCol.TOP_25_QUEUE),
+        (pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= 0.65)
+        .sum()
+        .alias(AggregateCol.SCORE_THRESHOLD_065_QUEUE),
+    )
+    .sort(PayrollCol.PAY_PERIOD_INDEX)
+)
 budget_sizes.head(12)
 
 # %%
 budget_sizes.select(
     pl.mean(AggregateCol.TOP_10_QUEUE).alias(AggregateCol.EXPECTED_TOP_10_PER_PERIOD),
     pl.mean(AggregateCol.TOP_25_QUEUE).alias(AggregateCol.EXPECTED_TOP_25_PER_PERIOD),
-    pl.mean(AggregateCol.SCORE_THRESHOLD_065_QUEUE).alias(AggregateCol.EXPECTED_THRESHOLD_065_PER_PERIOD),
+    pl.mean(AggregateCol.SCORE_THRESHOLD_065_QUEUE).alias(
+        AggregateCol.EXPECTED_THRESHOLD_065_PER_PERIOD,
+    ),
 )
 
 # %% [markdown]
@@ -118,7 +132,10 @@ budget_sizes.select(
 # | Low | Monitor trends, sample for quality assurance, or leave unreviewed if capacity is constrained. |
 
 # %%
-queue.group_by(ReviewCol.RISK_CATEGORY).agg(pl.len().alias(AggregateCol.RECORDS), pl.sum(ReviewCol.DOLLARS_AT_RISK).alias(ReviewCol.DOLLARS_AT_RISK)).sort(ReviewCol.RISK_CATEGORY)
+queue.group_by(ReviewCol.RISK_CATEGORY).agg(
+    pl.len().alias(AggregateCol.RECORDS),
+    pl.sum(ReviewCol.DOLLARS_AT_RISK).alias(ReviewCol.DOLLARS_AT_RISK),
+).sort(ReviewCol.RISK_CATEGORY)
 
 # %% [markdown]
 # ## Payroll Analyst Operating Model

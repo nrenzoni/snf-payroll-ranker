@@ -52,12 +52,19 @@
 import polars as pl
 from lets_plot import LetsPlot
 
-
-from payroll_anomaly_ranking.charts import department_heatmap_data, overtime_distribution_chart, pay_distribution_chart, payroll_trend_chart
+from payroll_anomaly_ranking.charts import (
+    department_heatmap_data,
+    overtime_distribution_chart,
+    pay_distribution_chart,
+    payroll_trend_chart,
+)
 from payroll_anomaly_ranking.columns import AggregateCol, PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.pipeline import run_pipeline
-from payroll_anomaly_ranking.presentation import data_quality_summary, synthetic_schema_dictionary
+from payroll_anomaly_ranking.presentation import (
+    data_quality_summary,
+    synthetic_schema_dictionary,
+)
 from payroll_anomaly_ranking.validation import validate_payroll
 
 LetsPlot.setup_html()
@@ -121,7 +128,12 @@ pay_distribution_chart(payroll)
 overtime_distribution_chart(payroll)
 
 # %%
-department_heatmap_data(payroll).pivot(index=PayrollCol.PAY_PERIOD_INDEX, on=PayrollCol.DEPARTMENT, values=AggregateCol.DEPARTMENT_GROSS_PAY, aggregate_function="sum").sort(PayrollCol.PAY_PERIOD_INDEX).head(10)
+department_heatmap_data(payroll).pivot(
+    index=PayrollCol.PAY_PERIOD_INDEX,
+    on=PayrollCol.DEPARTMENT,
+    values=AggregateCol.DEPARTMENT_GROSS_PAY,
+    aggregate_function="sum",
+).sort(PayrollCol.PAY_PERIOD_INDEX).head(10)
 
 # %% [markdown]
 # ## What This Proves

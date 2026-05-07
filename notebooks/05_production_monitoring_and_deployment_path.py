@@ -29,15 +29,55 @@ import polars as pl
 # %%
 pl.DataFrame(
     [
-        {"stage": "1. Source extracts", "input": "Payroll, HRIS, and timekeeping extracts", "output": "Governed batch files or tables", "implementation_status": "Deployment concept only"},
-        {"stage": "2. Validation", "input": "Required schema, lifecycle dates, pay values", "output": "Hard failures and warning-level payroll exceptions", "implementation_status": "Analytical checks implemented for synthetic data"},
-        {"stage": "3. Feature generation", "input": "Validated employee-pay-period records", "output": "History, peer, rule, robust statistical, and ML features", "implementation_status": "Implemented for synthetic data"},
-        {"stage": "4. Scoring", "input": "Feature table", "output": "Rule, statistical, ML, estimated exposure, and hybrid scores", "implementation_status": "Implemented for synthetic data"},
-        {"stage": "5. Review queue export", "input": "Ranked records", "output": "Analyst-safe queue and separate evaluation-labeled queue", "implementation_status": "CSV export implemented"},
-        {"stage": "6. Analyst feedback", "input": "Review outcomes and dispositions", "output": "Calibration and monitoring labels", "implementation_status": "Conceptual only"},
-        {"stage": "7. Monitoring", "input": "Scores, alerts, validation results, feedback", "output": "Operational and model-risk indicators", "implementation_status": "Conceptual only"},
-        {"stage": "8. Retraining", "input": "Drift, rule changes, reviewed labels", "output": "Updated thresholds or calibrated models", "implementation_status": "Conceptual only"},
-    ]
+        {
+            "stage": "1. Source extracts",
+            "input": "Payroll, HRIS, and timekeeping extracts",
+            "output": "Governed batch files or tables",
+            "implementation_status": "Deployment concept only",
+        },
+        {
+            "stage": "2. Validation",
+            "input": "Required schema, lifecycle dates, pay values",
+            "output": "Hard failures and warning-level payroll exceptions",
+            "implementation_status": "Analytical checks implemented for synthetic data",
+        },
+        {
+            "stage": "3. Feature generation",
+            "input": "Validated employee-pay-period records",
+            "output": "History, peer, rule, robust statistical, and ML features",
+            "implementation_status": "Implemented for synthetic data",
+        },
+        {
+            "stage": "4. Scoring",
+            "input": "Feature table",
+            "output": "Rule, statistical, ML, estimated exposure, and hybrid scores",
+            "implementation_status": "Implemented for synthetic data",
+        },
+        {
+            "stage": "5. Review queue export",
+            "input": "Ranked records",
+            "output": "Analyst-safe queue and separate evaluation-labeled queue",
+            "implementation_status": "CSV export implemented",
+        },
+        {
+            "stage": "6. Analyst feedback",
+            "input": "Review outcomes and dispositions",
+            "output": "Calibration and monitoring labels",
+            "implementation_status": "Conceptual only",
+        },
+        {
+            "stage": "7. Monitoring",
+            "input": "Scores, alerts, validation results, feedback",
+            "output": "Operational and model-risk indicators",
+            "implementation_status": "Conceptual only",
+        },
+        {
+            "stage": "8. Retraining",
+            "input": "Drift, rule changes, reviewed labels",
+            "output": "Updated thresholds or calibrated models",
+            "implementation_status": "Conceptual only",
+        },
+    ],
 )
 
 # %% [markdown]
@@ -48,13 +88,37 @@ pl.DataFrame(
 # %%
 pl.DataFrame(
     [
-        {"layer": "Sources", "responsibility": "Payroll register, HR lifecycle, timekeeping, approved adjustments", "control": "Access-controlled extracts; no direct live integration in this demo"},
-        {"layer": "Data quality", "responsibility": "Schema, lifecycle, pay, deduction, and exception checks", "control": "Stop on hard failures; route warnings to review context"},
-        {"layer": "Feature store or batch table", "responsibility": "Leakage-safe history and peer features", "control": "Period-aware feature windows"},
-        {"layer": "Scoring service or batch job", "responsibility": "Rule, statistical, ML, estimated exposure, and hybrid ranking", "control": "Versioned configuration and validation-selected threshold approval"},
-        {"layer": "Review workflow", "responsibility": "Queue export, triage, approval, escalation, disposition capture", "control": "Human review before action"},
-        {"layer": "Monitoring", "responsibility": "Operational, drift, concentration, and outcome metrics", "control": "Alerts for quality, fairness, and operational degradation"},
-    ]
+        {
+            "layer": "Sources",
+            "responsibility": "Payroll register, HR lifecycle, timekeeping, approved adjustments",
+            "control": "Access-controlled extracts; no direct live integration in this demo",
+        },
+        {
+            "layer": "Data quality",
+            "responsibility": "Schema, lifecycle, pay, deduction, and exception checks",
+            "control": "Stop on hard failures; route warnings to review context",
+        },
+        {
+            "layer": "Feature store or batch table",
+            "responsibility": "Leakage-safe history and peer features",
+            "control": "Period-aware feature windows",
+        },
+        {
+            "layer": "Scoring service or batch job",
+            "responsibility": "Rule, statistical, ML, estimated exposure, and hybrid ranking",
+            "control": "Versioned configuration and validation-selected threshold approval",
+        },
+        {
+            "layer": "Review workflow",
+            "responsibility": "Queue export, triage, approval, escalation, disposition capture",
+            "control": "Human review before action",
+        },
+        {
+            "layer": "Monitoring",
+            "responsibility": "Operational, drift, concentration, and outcome metrics",
+            "control": "Alerts for quality, fairness, and operational degradation",
+        },
+    ],
 )
 
 # %% [markdown]
@@ -65,17 +129,47 @@ pl.DataFrame(
 # %%
 pl.DataFrame(
     [
-        {"metric": "Alert count per cycle", "why_it_matters": "Controls analyst workload and sudden queue expansion"},
-        {"metric": "Alert acceptance rate", "why_it_matters": "Shows whether analysts find alerts useful"},
-        {"metric": "False positive rate from reviews", "why_it_matters": "Identifies threshold or feature calibration issues"},
-        {"metric": "Dollars at risk flagged and confirmed", "why_it_matters": "Connects review effort to payroll exposure"},
-        {"metric": "Feature drift", "why_it_matters": "Detects changes in pay, hours, deductions, or workforce mix"},
-        {"metric": "Score drift", "why_it_matters": "Detects ranking distribution changes"},
-        {"metric": "Alert concentration by department/location/job family", "why_it_matters": "Surfaces operational concentration and potential review bias"},
-        {"metric": "Latency", "why_it_matters": "Ensures queues arrive before payroll finalization"},
-        {"metric": "Data freshness", "why_it_matters": "Confirms extracts match the current pay cycle"},
-        {"metric": "Failed validation count", "why_it_matters": "Separates broken data feeds from payroll exceptions"},
-    ]
+        {
+            "metric": "Alert count per cycle",
+            "why_it_matters": "Controls analyst workload and sudden queue expansion",
+        },
+        {
+            "metric": "Alert acceptance rate",
+            "why_it_matters": "Shows whether analysts find alerts useful",
+        },
+        {
+            "metric": "False positive rate from reviews",
+            "why_it_matters": "Identifies threshold or feature calibration issues",
+        },
+        {
+            "metric": "Dollars at risk flagged and confirmed",
+            "why_it_matters": "Connects review effort to payroll exposure",
+        },
+        {
+            "metric": "Feature drift",
+            "why_it_matters": "Detects changes in pay, hours, deductions, or workforce mix",
+        },
+        {
+            "metric": "Score drift",
+            "why_it_matters": "Detects ranking distribution changes",
+        },
+        {
+            "metric": "Alert concentration by department/location/job family",
+            "why_it_matters": "Surfaces operational concentration and potential review bias",
+        },
+        {
+            "metric": "Latency",
+            "why_it_matters": "Ensures queues arrive before payroll finalization",
+        },
+        {
+            "metric": "Data freshness",
+            "why_it_matters": "Confirms extracts match the current pay cycle",
+        },
+        {
+            "metric": "Failed validation count",
+            "why_it_matters": "Separates broken data feeds from payroll exceptions",
+        },
+    ],
 )
 
 # %% [markdown]

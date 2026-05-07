@@ -93,4 +93,3 @@ The system SHALL compute peer-relative and robust reference features using basel
 #### Scenario: Robust distribution references are period-aware
 - **WHEN** robust z-scores, median absolute deviation scores, interquartile outlier flags, percentiles, or deviation ratios are computed
 - **THEN** the reference distribution is derived from prior or otherwise scoring-time-available records rather than all future records
-

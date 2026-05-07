@@ -19,7 +19,7 @@ class PayrollConfig:
             ScoreCol.PEER_SCORE: 0.18,
             ScoreCol.ML_SCORE: 0.20,
             ScoreCol.EXPOSURE_SCORE: 0.10,
-        }
+        },
     )
     data_dir: Path = Path("data/synthetic")
     output_dir: Path = Path("outputs")

@@ -2,18 +2,39 @@ from __future__ import annotations
 
 import polars as pl
 
-from payroll_anomaly_ranking.columns import FeatureCol, PayrollCol, ReviewCol, RuleCol, ScoreCol
+from payroll_anomaly_ranking.columns import (
+    FeatureCol,
+    PayrollCol,
+    ReviewCol,
+    RuleCol,
+    ScoreCol,
+)
 from payroll_anomaly_ranking.rules import RULE_COLUMNS
 
 
 def add_explanations(scored: pl.DataFrame) -> pl.DataFrame:
     return scored.with_columns(
-        pl.struct(scored.columns).map_elements(_primary_reason, return_dtype=pl.String).alias(ReviewCol.PRIMARY_REASON),
-        pl.struct(scored.columns).map_elements(_secondary_reason, return_dtype=pl.String).alias(ReviewCol.SECONDARY_REASON),
-        pl.struct(scored.columns).map_elements(_risk_category, return_dtype=pl.String).alias(ReviewCol.RISK_CATEGORY),
-        (pl.col(PayrollCol.GROSS_PAY) - pl.col(FeatureCol.GROSS_PAY_ROLLING_MEDIAN).fill_null(pl.col(FeatureCol.PEER_GROSS_MEDIAN)).fill_null(pl.col(PayrollCol.GROSS_PAY))).alias(ReviewCol.DIFFERENCE_FROM_EXPECTED),
+        pl.struct(scored.columns)
+        .map_elements(_primary_reason, return_dtype=pl.String)
+        .alias(ReviewCol.PRIMARY_REASON),
+        pl.struct(scored.columns)
+        .map_elements(_secondary_reason, return_dtype=pl.String)
+        .alias(ReviewCol.SECONDARY_REASON),
+        pl.struct(scored.columns)
+        .map_elements(_risk_category, return_dtype=pl.String)
+        .alias(ReviewCol.RISK_CATEGORY),
+        (
+            pl.col(PayrollCol.GROSS_PAY)
+            - pl.col(FeatureCol.GROSS_PAY_ROLLING_MEDIAN)
+            .fill_null(pl.col(FeatureCol.PEER_GROSS_MEDIAN))
+            .fill_null(pl.col(PayrollCol.GROSS_PAY))
+        ).alias(ReviewCol.DIFFERENCE_FROM_EXPECTED),
     ).with_columns(
-        pl.struct(scored.columns + [ReviewCol.PRIMARY_REASON, ReviewCol.SECONDARY_REASON]).map_elements(_explanation, return_dtype=pl.String).alias(ReviewCol.EXPLANATION)
+        pl.struct(
+            scored.columns + [ReviewCol.PRIMARY_REASON, ReviewCol.SECONDARY_REASON],
+        )
+        .map_elements(_explanation, return_dtype=pl.String)
+        .alias(ReviewCol.EXPLANATION),
     )
 
 
@@ -36,14 +57,33 @@ def build_review_queue(scored: pl.DataFrame, top_k: int = 25) -> pl.DataFrame:
         ReviewCol.EXPLANATION,
         *RULE_COLUMNS,
     ]
-    return explained.filter(pl.col(ScoreCol.PAY_PERIOD_RANK) <= top_k).select(fields).rename(
-        {ScoreCol.PAY_PERIOD_RANK: ReviewCol.RANK, FeatureCol.GROSS_PAY_ROLLING_MEDIAN: ReviewCol.EXPECTED_GROSS_PAY, FeatureCol.PEER_GROSS_MEDIAN: ReviewCol.PEER_CONTEXT, ScoreCol.ESTIMATED_EXPOSURE: ReviewCol.DOLLARS_AT_RISK}
-    ).sort([PayrollCol.PAY_PERIOD_INDEX, ReviewCol.RANK])
+    return (
+        explained.filter(pl.col(ScoreCol.PAY_PERIOD_RANK) <= top_k)
+        .select(fields)
+        .rename(
+            {
+                ScoreCol.PAY_PERIOD_RANK: ReviewCol.RANK,
+                FeatureCol.GROSS_PAY_ROLLING_MEDIAN: ReviewCol.EXPECTED_GROSS_PAY,
+                FeatureCol.PEER_GROSS_MEDIAN: ReviewCol.PEER_CONTEXT,
+                ScoreCol.ESTIMATED_EXPOSURE: ReviewCol.DOLLARS_AT_RISK,
+            },
+        )
+        .sort([PayrollCol.PAY_PERIOD_INDEX, ReviewCol.RANK])
+    )
 
 
-def build_evaluation_review_queue(scored: pl.DataFrame, top_k: int = 25) -> pl.DataFrame:
+def build_evaluation_review_queue(
+    scored: pl.DataFrame,
+    top_k: int = 25,
+) -> pl.DataFrame:
     return build_review_queue(scored, top_k).join(
-        scored.select(PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX, PayrollCol.IS_ANOMALY, PayrollCol.ANOMALY_CATEGORY, PayrollCol.ANOMALY_DOLLARS),
+        scored.select(
+            PayrollCol.EMPLOYEE_ID,
+            PayrollCol.PAY_PERIOD_INDEX,
+            PayrollCol.IS_ANOMALY,
+            PayrollCol.ANOMALY_CATEGORY,
+            PayrollCol.ANOMALY_DOLLARS,
+        ),
         on=[PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX],
         how="left",
     )

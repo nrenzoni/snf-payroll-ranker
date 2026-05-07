@@ -36,7 +36,9 @@
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.pipeline import run_pipeline
 
-results = run_pipeline(PayrollConfig(employee_count=120, pay_periods=12, review_budgets=(5, 10)))
+results = run_pipeline(
+    PayrollConfig(employee_count=120, pay_periods=12, review_budgets=(5, 10)),
+)
 sorted(results.keys())
 
 # %% [markdown]

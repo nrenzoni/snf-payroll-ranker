@@ -22,7 +22,10 @@
 import polars as pl
 from lets_plot import LetsPlot
 
-from payroll_anomaly_ranking.charts import employee_history_chart, score_distribution_chart
+from payroll_anomaly_ranking.charts import (
+    employee_history_chart,
+    score_distribution_chart,
+)
 from payroll_anomaly_ranking.columns import FeatureCol, PayrollCol, RuleCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.pipeline import run_pipeline
@@ -42,7 +45,9 @@ queue = results["analyst_review_queue"]
 
 # %%
 example_ids = queue.select(PayrollCol.EMPLOYEE_ID).head(8)
-scored.join(example_ids, on=PayrollCol.EMPLOYEE_ID, how="semi").sort([PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX]).select(
+scored.join(example_ids, on=PayrollCol.EMPLOYEE_ID, how="semi").sort(
+    [PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX],
+).select(
     PayrollCol.EMPLOYEE_ID,
     PayrollCol.PAY_PERIOD_INDEX,
     PayrollCol.GROSS_PAY,
@@ -97,7 +102,13 @@ scored.select(
 # Existing outputs contain the core score comparison. This lightweight table adds a business-intuitive gross-pay-change reference for reviewers who want to see how far a pure change-based baseline would get without rule, peer, ML, or dollar context.
 
 # %%
-scored.with_columns(pl.col(FeatureCol.GROSS_PAY_PCT_CHANGE).abs().rank("ordinal", descending=True).over(PayrollCol.PAY_PERIOD_INDEX).alias(FeatureCol.GROSS_PAY_CHANGE_RANK)).select(
+scored.with_columns(
+    pl.col(FeatureCol.GROSS_PAY_PCT_CHANGE)
+    .abs()
+    .rank("ordinal", descending=True)
+    .over(PayrollCol.PAY_PERIOD_INDEX)
+    .alias(FeatureCol.GROSS_PAY_CHANGE_RANK),
+).select(
     PayrollCol.EMPLOYEE_ID,
     PayrollCol.PAY_PERIOD_INDEX,
     PayrollCol.GROSS_PAY,

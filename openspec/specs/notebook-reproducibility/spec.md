@@ -27,4 +27,3 @@ The project SHALL include verification for key notebook and generated-output rep
 #### Scenario: Reproducibility checks run locally
 - **WHEN** the project test or verification command is run
 - **THEN** it verifies that required generated output files can be produced and that analyst-facing outputs exclude synthetic evaluation labels
-

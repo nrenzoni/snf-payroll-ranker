@@ -116,4 +116,3 @@ The system SHALL include enough component-score and reason-code context for anal
 #### Scenario: Review context is explainable
 - **WHEN** a record appears in the analyst-safe queue
 - **THEN** the row includes reason codes, risk category, estimated exposure or dollars-at-risk estimate, expected-vs-actual context, peer context, and relevant component scores or score-driver fields
-

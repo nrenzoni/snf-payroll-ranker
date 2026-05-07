@@ -20,16 +20,30 @@
 
 # %%
 import polars as pl
-from IPython.display import Markdown, display
-from lets_plot import LetsPlot, aes, geom_histogram, geom_line, geom_point, ggplot, ggtitle, theme_minimal
+from IPython.display import Markdown
+from lets_plot import (
+    LetsPlot,
+    aes,
+    geom_histogram,
+    geom_line,
+    geom_point,
+    ggplot,
+    ggtitle,
+    theme_minimal,
+)
 from sklearn.ensemble import IsolationForest
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from payroll_anomaly_ranking.charts import dollars_captured_chart, precision_at_k_chart
-from payroll_anomaly_ranking.columns import AggregateCol, MODEL_FEATURE_COLUMNS, MetricCol, PayrollCol, ScoreCol
+from payroll_anomaly_ranking.columns import (
+    MODEL_FEATURE_COLUMNS,
+    AggregateCol,
+    MetricCol,
+    PayrollCol,
+    ScoreCol,
+)
 from payroll_anomaly_ranking.config import PayrollConfig
-from payroll_anomaly_ranking.evaluation import dollars_captured_at_k, precision_recall_at_k
 from payroll_anomaly_ranking.models import temporal_split
 from payroll_anomaly_ranking.pipeline import run_pipeline
 
@@ -93,7 +107,13 @@ comparison
 backtest
 
 # %%
-ggplot(backtest, aes(PayrollCol.PAY_PERIOD_INDEX, MetricCol.PRECISION_AT_K)) + geom_line() + geom_point() + ggtitle("Backtest Precision@K Over Time") + theme_minimal()
+(
+    ggplot(backtest, aes(PayrollCol.PAY_PERIOD_INDEX, MetricCol.PRECISION_AT_K))
+    + geom_line()
+    + geom_point()
+    + ggtitle("Backtest Precision@K Over Time")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # ## Rolling-Origin Validation And Leakage Checks
@@ -141,12 +161,21 @@ random_train_indices, random_row_indices = train_test_split(
     stratify=scored.get_column(PayrollCol.IS_ANOMALY).to_list(),
 )
 indexed_scored = scored.with_row_index("demo_row_index")
-random_train = indexed_scored.filter(pl.col("demo_row_index").is_in(random_train_indices)).drop("demo_row_index")
-random_test = indexed_scored.filter(pl.col("demo_row_index").is_in(random_row_indices)).drop("demo_row_index")
+random_train = indexed_scored.filter(
+    pl.col("demo_row_index").is_in(random_train_indices),
+).drop("demo_row_index")
+random_test = indexed_scored.filter(
+    pl.col("demo_row_index").is_in(random_row_indices),
+).drop("demo_row_index")
 temporal_train = temporal_split(scored)["train"]
 
 
-def demo_metrics(frame: pl.DataFrame, score_column: str, method: str, k: int = review_budget) -> dict[str, float | str]:
+def demo_metrics(
+    frame: pl.DataFrame,
+    score_column: str,
+    method: str,
+    k: int = review_budget,
+) -> dict[str, float | str]:
     labels = frame.get_column(PayrollCol.IS_ANOMALY).to_numpy()
     scores = frame.get_column(score_column).to_numpy()
     try:
@@ -160,9 +189,21 @@ def demo_metrics(frame: pl.DataFrame, score_column: str, method: str, k: int = r
     top = frame.sort(score_column, descending=True).head(k)
     true_positives = top.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height
     false_positives = top.filter(pl.col(PayrollCol.IS_ANOMALY) == 0).height
-    false_negatives = frame.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height - true_positives
-    dollars_captured = top.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).select(pl.sum(PayrollCol.ANOMALY_DOLLARS)).item() or 0.0
-    total_dollars = frame.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).select(pl.sum(PayrollCol.ANOMALY_DOLLARS)).item() or 0.0
+    false_negatives = (
+        frame.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height - true_positives
+    )
+    dollars_captured = (
+        top.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+        .select(pl.sum(PayrollCol.ANOMALY_DOLLARS))
+        .item()
+        or 0.0
+    )
+    total_dollars = (
+        frame.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+        .select(pl.sum(PayrollCol.ANOMALY_DOLLARS))
+        .item()
+        or 0.0
+    )
     return {
         "method": method,
         "roc_auc": roc_auc,
@@ -170,22 +211,36 @@ def demo_metrics(frame: pl.DataFrame, score_column: str, method: str, k: int = r
         "precision_at_k": true_positives / max(k, 1),
         "false_positives": float(false_positives),
         "false_negatives": float(false_negatives),
-        "dollar_capture_rate": float(dollars_captured / total_dollars) if total_dollars else 0.0,
+        "dollar_capture_rate": float(dollars_captured / total_dollars)
+        if total_dollars
+        else 0.0,
     }
 
 
 def model_matrix(frame: pl.DataFrame):
-    return frame.select([pl.col(column).cast(pl.Float64).fill_null(0) for column in MODEL_FEATURE_COLUMNS]).to_numpy()
+    return frame.select(
+        [
+            pl.col(column).cast(pl.Float64).fill_null(0)
+            for column in MODEL_FEATURE_COLUMNS
+        ],
+    ).to_numpy()
 
 
 def minmax(values):
     minimum = values.min()
     maximum = values.max()
-    return values * 0 if maximum == minimum else (values - minimum) / (maximum - minimum)
+    return (
+        values * 0 if maximum == minimum else (values - minimum) / (maximum - minimum)
+    )
 
 
 def dollars_for_anomalies(frame: pl.DataFrame) -> float:
-    return frame.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).select(pl.sum(PayrollCol.ANOMALY_DOLLARS)).item() or 0.0
+    return (
+        frame.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+        .select(pl.sum(PayrollCol.ANOMALY_DOLLARS))
+        .item()
+        or 0.0
+    )
 
 
 def markdown_table(headers: list[str], rows: list[list[object]]) -> Markdown:
@@ -193,6 +248,7 @@ def markdown_table(headers: list[str], rows: list[list[object]]) -> Markdown:
     divider = "| " + " | ".join(["---"] * len(headers)) + " |"
     body = ["| " + " | ".join(str(value) for value in row) + " |" for row in rows]
     return Markdown("\n".join([header, divider, *body]))
+
 
 # %% [markdown]
 # ### Mistake 1: Random Train/Test Split
@@ -204,15 +260,30 @@ def markdown_table(headers: list[str], rows: list[list[object]]) -> Markdown:
 # %%
 random_split_summary = pl.DataFrame(
     [
-        demo_metrics(random_test, ScoreCol.FINAL_ANOMALY_SCORE, "Anti-pattern: random row split"),
-        demo_metrics(temporal_test, ScoreCol.FINAL_ANOMALY_SCORE, "Corrected: temporal holdout"),
-    ]
+        demo_metrics(
+            random_test,
+            ScoreCol.FINAL_ANOMALY_SCORE,
+            "Anti-pattern: random row split",
+        ),
+        demo_metrics(
+            temporal_test,
+            ScoreCol.FINAL_ANOMALY_SCORE,
+            "Corrected: temporal holdout",
+        ),
+    ],
 )
 random_split_summary
 
+
 # %%
-def split_leakage_profile(method: str, train: pl.DataFrame, test: pl.DataFrame) -> dict[str, float | str]:
-    train_periods = set(train.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list())
+def split_leakage_profile(
+    method: str,
+    train: pl.DataFrame,
+    test: pl.DataFrame,
+) -> dict[str, float | str]:
+    train_periods = set(
+        train.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list(),
+    )
     test_periods = set(test.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list())
     train_employees = set(train.get_column(PayrollCol.EMPLOYEE_ID).unique().to_list())
     test_employees = set(test.get_column(PayrollCol.EMPLOYEE_ID).unique().to_list())
@@ -229,20 +300,41 @@ def split_leakage_profile(method: str, train: pl.DataFrame, test: pl.DataFrame) 
 
 split_leakage_summary = pl.DataFrame(
     [
-        split_leakage_profile("Anti-pattern: random row split", random_train, random_test),
-        split_leakage_profile("Corrected: temporal holdout", temporal_train, temporal_test),
-    ]
+        split_leakage_profile(
+            "Anti-pattern: random row split",
+            random_train,
+            random_test,
+        ),
+        split_leakage_profile(
+            "Corrected: temporal holdout",
+            temporal_train,
+            temporal_test,
+        ),
+    ],
 )
 split_leakage_summary
 
 # %%
 test_period_distribution = pl.concat(
     [
-        random_test.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(pl.len().alias("test_rows")).with_columns(pl.lit("Anti-pattern: random row split").alias("method")),
-        temporal_test.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(pl.len().alias("test_rows")).with_columns(pl.lit("Corrected: temporal holdout").alias("method")),
-    ]
+        random_test.group_by(PayrollCol.PAY_PERIOD_INDEX)
+        .agg(pl.len().alias("test_rows"))
+        .with_columns(pl.lit("Anti-pattern: random row split").alias("method")),
+        temporal_test.group_by(PayrollCol.PAY_PERIOD_INDEX)
+        .agg(pl.len().alias("test_rows"))
+        .with_columns(pl.lit("Corrected: temporal holdout").alias("method")),
+    ],
 ).sort(["method", PayrollCol.PAY_PERIOD_INDEX])
-ggplot(test_period_distribution.to_dict(as_series=False), aes(PayrollCol.PAY_PERIOD_INDEX, "test_rows", color="method")) + geom_point(size=4) + geom_line() + ggtitle("Random Test Rows Mix Historical And Future Pay Periods") + theme_minimal()
+(
+    ggplot(
+        test_period_distribution.to_dict(as_series=False),
+        aes(PayrollCol.PAY_PERIOD_INDEX, "test_rows", color="method"),
+    )
+    + geom_point(size=4)
+    + geom_line()
+    + ggtitle("Random Test Rows Mix Historical And Future Pay Periods")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # Random row splits can look attractive in review metrics, but the leakage table shows why they are not valid future-cycle evaluation: the random test sample shares pay periods with training data, while the temporal holdout keeps evaluation in later periods only.
@@ -265,20 +357,41 @@ ggplot(test_period_distribution.to_dict(as_series=False), aes(PayrollCol.PAY_PER
 default_model = IsolationForest(random_state=config.seed)
 default_model.fit(model_matrix(scored))
 default_scores = minmax(-default_model.decision_function(model_matrix(scored)))
-default_test = scored.with_columns(pl.Series("demo_default_iforest_score", default_scores)).filter(
-    pl.col(PayrollCol.PAY_PERIOD_INDEX).is_in(temporal_test.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list())
+default_test = scored.with_columns(
+    pl.Series("demo_default_iforest_score", default_scores),
+).filter(
+    pl.col(PayrollCol.PAY_PERIOD_INDEX).is_in(
+        temporal_test.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list(),
+    ),
 )
 
 temporal_train = temporal_split(scored)["train"]
-configured_model = IsolationForest(n_estimators=200, contamination=0.03, random_state=config.seed)
+configured_model = IsolationForest(
+    n_estimators=200,
+    contamination=0.03,
+    random_state=config.seed,
+)
 configured_model.fit(model_matrix(temporal_train))
-configured_test = temporal_test.with_columns(pl.Series("demo_configured_iforest_score", minmax(-configured_model.decision_function(model_matrix(temporal_test)))))
+configured_test = temporal_test.with_columns(
+    pl.Series(
+        "demo_configured_iforest_score",
+        minmax(-configured_model.decision_function(model_matrix(temporal_test))),
+    ),
+)
 
 iforest_summary = pl.DataFrame(
     [
-        demo_metrics(default_test, "demo_default_iforest_score", "Anti-pattern: defaults fit on all rows"),
-        demo_metrics(configured_test, "demo_configured_iforest_score", "Corrected: configured temporal model"),
-    ]
+        demo_metrics(
+            default_test,
+            "demo_default_iforest_score",
+            "Anti-pattern: defaults fit on all rows",
+        ),
+        demo_metrics(
+            configured_test,
+            "demo_configured_iforest_score",
+            "Corrected: configured temporal model",
+        ),
+    ],
 )
 iforest_summary
 
@@ -288,40 +401,88 @@ top_by_method_seed = {}
 for seed in [3, 11, 23, 42, 97]:
     default_seed_model = IsolationForest(random_state=seed)
     default_seed_model.fit(model_matrix(scored))
-    default_seed_scores = minmax(-default_seed_model.decision_function(model_matrix(scored)))
-    default_seed_test = scored.with_columns(pl.Series("demo_seed_score", default_seed_scores)).filter(
-        pl.col(PayrollCol.PAY_PERIOD_INDEX).is_in(temporal_test.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list())
+    default_seed_scores = minmax(
+        -default_seed_model.decision_function(model_matrix(scored)),
+    )
+    default_seed_test = scored.with_columns(
+        pl.Series("demo_seed_score", default_seed_scores),
+    ).filter(
+        pl.col(PayrollCol.PAY_PERIOD_INDEX).is_in(
+            temporal_test.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list(),
+        ),
     )
 
-    configured_seed_model = IsolationForest(n_estimators=200, contamination=0.03, random_state=seed)
+    configured_seed_model = IsolationForest(
+        n_estimators=200,
+        contamination=0.03,
+        random_state=seed,
+    )
     configured_seed_model.fit(model_matrix(temporal_train))
-    configured_seed_test = temporal_test.with_columns(pl.Series("demo_seed_score", minmax(-configured_seed_model.decision_function(model_matrix(temporal_test)))))
+    configured_seed_test = temporal_test.with_columns(
+        pl.Series(
+            "demo_seed_score",
+            minmax(
+                -configured_seed_model.decision_function(model_matrix(temporal_test)),
+            ),
+        ),
+    )
 
     for method, frame in [
         ("Anti-pattern: default-only", default_seed_test),
         ("Corrected: configured temporal", configured_seed_test),
     ]:
-        top_ids = set(frame.sort("demo_seed_score", descending=True).head(review_budget).get_column(PayrollCol.RECORD_ID).to_list())
+        top_ids = set(
+            frame.sort("demo_seed_score", descending=True)
+            .head(review_budget)
+            .get_column(PayrollCol.RECORD_ID)
+            .to_list(),
+        )
         top_by_method_seed[(method, seed)] = top_ids
         metric = demo_metrics(frame, "demo_seed_score", method)
-        seed_rows.append({"seed": seed, "method": method, "precision_at_k": metric["precision_at_k"], "dollar_capture_rate": metric["dollar_capture_rate"]})
+        seed_rows.append(
+            {
+                "seed": seed,
+                "method": method,
+                "precision_at_k": metric["precision_at_k"],
+                "dollar_capture_rate": metric["dollar_capture_rate"],
+            },
+        )
 
 seed_stability = pl.DataFrame(seed_rows).with_columns(
-    pl.struct(["method", "seed"]).map_elements(
-        lambda row: len(top_by_method_seed[(row["method"], row["seed"])] & top_by_method_seed[(row["method"], 42)]) / review_budget,
+    pl.struct(["method", "seed"])
+    .map_elements(
+        lambda row: (
+            len(
+                top_by_method_seed[(row["method"], row["seed"])]
+                & top_by_method_seed[(row["method"], 42)],
+            )
+            / review_budget
+        ),
         return_dtype=pl.Float64,
-    ).alias("top_25_overlap_with_seed_42")
+    )
+    .alias("top_25_overlap_with_seed_42"),
 )
 seed_stability
 
 # %%
 iforest_distribution = pl.concat(
     [
-        default_test.select(pl.lit("Anti-pattern: default").alias("method"), pl.col("demo_default_iforest_score").alias("score")),
-        configured_test.select(pl.lit("Corrected: configured").alias("method"), pl.col("demo_configured_iforest_score").alias("score")),
-    ]
+        default_test.select(
+            pl.lit("Anti-pattern: default").alias("method"),
+            pl.col("demo_default_iforest_score").alias("score"),
+        ),
+        configured_test.select(
+            pl.lit("Corrected: configured").alias("method"),
+            pl.col("demo_configured_iforest_score").alias("score"),
+        ),
+    ],
 )
-ggplot(iforest_distribution.to_dict(as_series=False), aes("score", fill="method")) + geom_histogram(bins=30, alpha=0.55) + ggtitle("Isolation Forest Score Distributions Depend On Assumptions") + theme_minimal()
+(
+    ggplot(iforest_distribution.to_dict(as_series=False), aes("score", fill="method"))
+    + geom_histogram(bins=30, alpha=0.55)
+    + ggtitle("Isolation Forest Score Distributions Depend On Assumptions")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # ### Mistake 3: ROC-AUC-Only Reporting
@@ -331,36 +492,78 @@ ggplot(iforest_distribution.to_dict(as_series=False), aes("score", fill="method"
 # **Corrected method:** pair ROC-AUC with PR-AUC, Precision@K, and dollar capture so evaluation matches the payroll review workflow.
 
 # %%
-roc_only_metric = demo_metrics(temporal_test, ScoreCol.FINAL_ANOMALY_SCORE, "Corrected: operational metrics")
-anomaly_prevalence = temporal_test.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height / max(temporal_test.height, 1)
+roc_only_metric = demo_metrics(
+    temporal_test,
+    ScoreCol.FINAL_ANOMALY_SCORE,
+    "Corrected: operational metrics",
+)
+anomaly_prevalence = temporal_test.filter(
+    pl.col(PayrollCol.IS_ANOMALY) == 1,
+).height / max(temporal_test.height, 1)
 metric_comparison = pl.DataFrame(
     [
-        {"metric": "Anomaly prevalence baseline", "value": anomaly_prevalence, "metric_group": "baseline"},
-        {"metric": "Anti-pattern: ROC-AUC only", "value": roc_only_metric["roc_auc"], "metric_group": "generic"},
-        {"metric": "Corrected: PR-AUC", "value": roc_only_metric["pr_auc"], "metric_group": "imbalance-aware"},
-        {"metric": "Corrected: Precision@25", "value": roc_only_metric["precision_at_k"], "metric_group": "review queue"},
-        {"metric": "Corrected: lift over prevalence", "value": roc_only_metric["precision_at_k"] / max(anomaly_prevalence, 1e-9), "metric_group": "review queue"},
-        {"metric": "Corrected: dollar capture", "value": roc_only_metric["dollar_capture_rate"], "metric_group": "business impact"},
-    ]
+        {
+            "metric": "Anomaly prevalence baseline",
+            "value": anomaly_prevalence,
+            "metric_group": "baseline",
+        },
+        {
+            "metric": "Anti-pattern: ROC-AUC only",
+            "value": roc_only_metric["roc_auc"],
+            "metric_group": "generic",
+        },
+        {
+            "metric": "Corrected: PR-AUC",
+            "value": roc_only_metric["pr_auc"],
+            "metric_group": "imbalance-aware",
+        },
+        {
+            "metric": "Corrected: Precision@25",
+            "value": roc_only_metric["precision_at_k"],
+            "metric_group": "review queue",
+        },
+        {
+            "metric": "Corrected: lift over prevalence",
+            "value": roc_only_metric["precision_at_k"] / max(anomaly_prevalence, 1e-9),
+            "metric_group": "review queue",
+        },
+        {
+            "metric": "Corrected: dollar capture",
+            "value": roc_only_metric["dollar_capture_rate"],
+            "metric_group": "business impact",
+        },
+    ],
 )
 metric_comparison
 
 # %%
 capture_rows = []
 for budget in [5, 10, 25, 50, 100]:
-    ranked = temporal_test.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(budget)
+    ranked = temporal_test.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(
+        budget,
+    )
     capture_rows.append(
         {
             "budget": budget,
-            "anomaly_capture_rate": ranked.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height / max(temporal_test.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height, 1),
-            "dollar_capture_rate": dollars_for_anomalies(ranked) / max(dollars_for_anomalies(temporal_test), 1),
-        }
+            "anomaly_capture_rate": ranked.filter(
+                pl.col(PayrollCol.IS_ANOMALY) == 1,
+            ).height
+            / max(temporal_test.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height, 1),
+            "dollar_capture_rate": dollars_for_anomalies(ranked)
+            / max(dollars_for_anomalies(temporal_test), 1),
+        },
     )
 cumulative_capture = pl.DataFrame(capture_rows)
 cumulative_capture
 
 # %%
-ggplot(cumulative_capture, aes("budget", "dollar_capture_rate")) + geom_point(size=5) + geom_line() + ggtitle("Ranked Review Budgets Capture Dollar Exposure") + theme_minimal()
+(
+    ggplot(cumulative_capture, aes("budget", "dollar_capture_rate"))
+    + geom_point(size=5)
+    + geom_line()
+    + ggtitle("Ranked Review Budgets Capture Dollar Exposure")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # ROC-AUC is a generic ranking measure. For payroll review, the stronger evidence is the gap between anomaly prevalence and Precision@K, plus the cumulative dollars captured inside realistic analyst budgets.
@@ -375,10 +578,14 @@ ggplot(cumulative_capture, aes("budget", "dollar_capture_rate")) + geom_point(si
 # %%
 queue_rows = []
 for budget in config.review_budgets:
-    ranked = temporal_test.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(budget)
+    ranked = temporal_test.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(
+        budget,
+    )
     true_positives = ranked.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height
     false_positives = ranked.filter(pl.col(PayrollCol.IS_ANOMALY) == 0).height
-    false_negatives = temporal_test.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height - true_positives
+    false_negatives = (
+        temporal_test.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height - true_positives
+    )
     queue_rows.append(
         {
             "budget": budget,
@@ -387,7 +594,7 @@ for budget in config.review_budgets:
             "false_negatives": false_negatives,
             "queue_false_positive_rate": false_positives / max(budget, 1),
             "estimated_false_positive_review_minutes": false_positives * 10,
-        }
+        },
     )
 queue_error_summary = pl.DataFrame(queue_rows)
 queue_error_summary
@@ -399,7 +606,13 @@ queue_plot = queue_error_summary.unpivot(
     variable_name="outcome",
     value_name="records",
 )
-ggplot(queue_plot, aes("budget", "records", color="outcome")) + geom_point(size=4) + geom_line() + ggtitle("Review Budgets Trade Off False Positives And Missed Anomalies") + theme_minimal()
+(
+    ggplot(queue_plot, aes("budget", "records", color="outcome"))
+    + geom_point(size=4)
+    + geom_line()
+    + ggtitle("Review Budgets Trade Off False Positives And Missed Anomalies")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # False positives are not just model errors; they consume analyst capacity. At 10 minutes per review, the queue table converts false positives into approximate operational load.
@@ -415,30 +628,50 @@ ggplot(queue_plot, aes("budget", "records", color="outcome")) + geom_point(size=
 importance_rows = []
 for budget in config.review_budgets:
     equal_queue = temporal_test.sort(ScoreCol.ML_SCORE, descending=True).head(budget)
-    impact_queue = temporal_test.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(budget)
+    impact_queue = temporal_test.sort(
+        ScoreCol.FINAL_ANOMALY_SCORE,
+        descending=True,
+    ).head(budget)
     for method, queue in [
         ("Anti-pattern: likelihood-only ranking", equal_queue),
         ("Corrected: impact-aware hybrid ranking", impact_queue),
     ]:
         dollars_captured = dollars_for_anomalies(queue)
         reviewed_ids = set(queue.get_column(PayrollCol.RECORD_ID))
-        missed_anomalies = temporal_test.filter((pl.col(PayrollCol.IS_ANOMALY) == 1) & (~pl.col(PayrollCol.RECORD_ID).is_in(reviewed_ids)))
-        max_missed_anomaly_dollars = missed_anomalies.select(pl.col(PayrollCol.ANOMALY_DOLLARS).max()).item() or 0.0
+        missed_anomalies = temporal_test.filter(
+            (pl.col(PayrollCol.IS_ANOMALY) == 1)
+            & (~pl.col(PayrollCol.RECORD_ID).is_in(reviewed_ids)),
+        )
+        max_missed_anomaly_dollars = (
+            missed_anomalies.select(pl.col(PayrollCol.ANOMALY_DOLLARS).max()).item()
+            or 0.0
+        )
         importance_rows.append(
             {
                 "budget": budget,
                 "method": method,
-                "anomaly_count_captured": queue.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height,
+                "anomaly_count_captured": queue.filter(
+                    pl.col(PayrollCol.IS_ANOMALY) == 1,
+                ).height,
                 "dollars_captured": dollars_captured,
                 "dollars_captured_per_review": dollars_captured / budget,
                 "max_missed_anomaly_dollars": max_missed_anomaly_dollars,
-            }
+            },
         )
 importance_summary = pl.DataFrame(importance_rows)
 importance_summary
 
 # %%
-ggplot(importance_summary, aes("budget", "dollars_captured_per_review", color="method")) + geom_point(size=5) + geom_line() + ggtitle("Review Budget Tradeoff: Likelihood vs Dollar Exposure") + theme_minimal()
+(
+    ggplot(
+        importance_summary,
+        aes("budget", "dollars_captured_per_review", color="method"),
+    )
+    + geom_point(size=5)
+    + geom_line()
+    + ggtitle("Review Budget Tradeoff: Likelihood vs Dollar Exposure")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # The corrected ranking is evaluated on exposure captured under fixed review capacity, not on anomaly count alone. `max_missed_anomaly_dollars` remains an evaluation-only synthetic diagnostic for residual risk; it is not an analyst-facing scoring input.
