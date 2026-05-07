@@ -27,9 +27,23 @@ dev = [
     "jupyterlab>=4.5.7",
     "jupytext>=1.19.1",
     "lets-plot>=4.9.0",
+    "pre-commit>=4.6.0",
     "pytest>=9.0.1",
+    "ruff>=0.15.12",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"] # Error, Pyflakes, Isort, Upgrade
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
