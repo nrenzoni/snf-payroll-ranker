@@ -35,6 +35,7 @@ Expected generated files:
 - `outputs/evaluation/leakage_checks.csv`
 - `outputs/evaluation/analyst_review_queue.csv`
 - `outputs/evaluation/evaluation_labeled_review_queue.csv`
+- `outputs/evaluation/scenario_metadata.json` when a scenario-controlled run is written
 
 ## Notebook Sequence
 
@@ -46,12 +47,21 @@ The Jupytext-paired notebook index is `notebooks/payroll_anomaly_detection.py`. 
 - `notebooks/04_review_queue_explainability_and_thresholds.py`: analyst-safe review queue, separate evaluation-labeled queue, review-safe explanations, compact case cards, top-K and threshold workload views, risk categories, operating model, and conceptual feedback capture.
 - `notebooks/05_production_monitoring_and_deployment_path.py`: realistic deployment path, architecture table, monitoring metrics, retraining triggers, limitations, and governance controls without claiming live integrations.
 
+Internal diagnostic notebooks are separate from the business-facing sequence:
+
+- `notebooks/06_internal_statistical_diagnostics.py`: Bayesian-style review-budget intervals, component superiority diagnostics, subgroup shrinkage summaries, expected-pay calibration, exposure calibration, robustness checks, and perturbation sensitivity.
+- `notebooks/07_simulation_and_stress_testing.py`: Monte Carlo queue-capacity outcomes, drift scenario comparisons, anomaly-mix stress tests, change-point diagnostics, and stress-test heatmaps.
+
+The internal notebooks use synthetic evaluation labels and injected anomaly dollar impacts for diagnostics only. Those fields do not alter model feature columns or analyst-safe review queue outputs.
+
 Run a notebook from a clean checkout with:
 
 ```bash
 uv run jupytext --to ipynb notebooks/01_problem_framing_and_data_maturity.py
 uv run jupyter nbconvert --to notebook --execute notebooks/01_problem_framing_and_data_maturity.ipynb --output 01_problem_framing_and_data_maturity.executed.ipynb --output-dir notebooks
 ```
+
+Internal notebooks use bounded local defaults: `06` runs small bootstrap/posterior simulations, and `07` uses `QueueSimulationSpec(iterations=40)` by default. Reduce the `samples` arguments in notebook `06` or `QueueSimulationSpec.iterations` in notebook `07` for faster local execution.
 
 ## What The Workflow Covers
 

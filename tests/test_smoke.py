@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import polars as pl
 
 from payroll_anomaly_ranking.columns import (
@@ -11,6 +13,11 @@ from payroll_anomaly_ranking.columns import (
 )
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.data import generate_payroll
+from payroll_anomaly_ranking.diagnostics import (
+    expected_pay_calibration,
+    review_budget_interval_summary,
+    subgroup_diagnostics,
+)
 from payroll_anomaly_ranking.evaluation import (
     evaluate_scores,
     leakage_checks,
@@ -23,7 +30,18 @@ from payroll_anomaly_ranking.explainability import (
 from payroll_anomaly_ranking.features import build_features
 from payroll_anomaly_ranking.models import _feature_matrix, score_payroll
 from payroll_anomaly_ranking.pipeline import run_pipeline
+from payroll_anomaly_ranking.queue_simulation import (
+    simulate_queue_capacity,
+    summarize_queue_simulation,
+)
 from payroll_anomaly_ranking.rules import add_rule_flags
+from payroll_anomaly_ranking.scenarios import (
+    AnomalyPlan,
+    ChangePointEvent,
+    DriftPlan,
+    QueueSimulationSpec,
+    ScenarioSpec,
+)
 from payroll_anomaly_ranking.validation import validate_payroll
 
 
@@ -93,6 +111,178 @@ def test_pipeline_writes_outputs_only_when_requested(tmp_path) -> None:
     assert (
         config.output_dir / "evaluation" / OutputName.EVALUATION_LABELED_REVIEW_QUEUE
     ).exists()
+
+
+def test_default_payroll_generation_reproducible_and_schema_compatible() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+
+    payroll_a, labels_a = generate_payroll(config)
+    payroll_b, labels_b = generate_payroll(config)
+    failures, _ = validate_payroll(payroll_a)
+
+    assert payroll_a.equals(payroll_b)
+    assert labels_a.equals(labels_b)
+    assert failures.height == 0
+    assert {
+        PayrollCol.IS_ANOMALY,
+        PayrollCol.ANOMALY_CATEGORY,
+        PayrollCol.ANOMALY_DOLLARS,
+    } <= set(payroll_a.columns)
+
+
+def test_scenario_generation_is_reproducible_with_same_seed() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    scenario = ScenarioSpec(
+        name="mix_shift",
+        anomaly_plan=AnomalyPlan(
+            category_weights={"overtime_spike": 1.0},
+            target_count=12,
+        ),
+    )
+
+    payroll_a, labels_a = generate_payroll(config, scenario=scenario)
+    payroll_b, labels_b = generate_payroll(config, scenario=scenario)
+
+    assert payroll_a.equals(payroll_b)
+    assert labels_a.equals(labels_b)
+    assert labels_a.get_column(PayrollCol.ANOMALY_CATEGORY).unique().to_list() == [
+        "overtime_spike",
+    ]
+
+
+def test_drift_and_change_points_affect_only_configured_scope() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    baseline, _ = generate_payroll(config)
+    scenario = ScenarioSpec(
+        name="scoped_shift",
+        drift_plans=(
+            DriftPlan(
+                start_period=6,
+                subgroup_filters={PayrollCol.DEPARTMENT: "Operations"},
+                overtime_multiplier=1.5,
+            ),
+        ),
+        change_points=(
+            ChangePointEvent(
+                name="gross_shift",
+                start_period=7,
+                subgroup_filters={PayrollCol.DEPARTMENT: "Operations"},
+                field=PayrollCol.GROSS_PAY,
+                multiplier=1.2,
+            ),
+        ),
+    )
+    shifted, _ = generate_payroll(config, scenario=scenario)
+    joined = baseline.select(
+        PayrollCol.RECORD_ID,
+        PayrollCol.DEPARTMENT,
+        PayrollCol.PAY_PERIOD_INDEX,
+        PayrollCol.OVERTIME_HOURS,
+        PayrollCol.GROSS_PAY,
+    ).join(
+        shifted.select(
+            PayrollCol.RECORD_ID,
+            pl.col(PayrollCol.OVERTIME_HOURS).alias("shifted_overtime"),
+            pl.col(PayrollCol.GROSS_PAY).alias("shifted_gross"),
+        ),
+        on=PayrollCol.RECORD_ID,
+    )
+    outside_scope = joined.filter(
+        (pl.col(PayrollCol.DEPARTMENT) != "Operations")
+        | (pl.col(PayrollCol.PAY_PERIOD_INDEX) < 6),
+    )
+
+    assert outside_scope.select(
+        (pl.col(PayrollCol.OVERTIME_HOURS) == pl.col("shifted_overtime")).all(),
+    ).item()
+    assert (
+        joined.filter(
+            (pl.col(PayrollCol.DEPARTMENT) == "Operations")
+            & (pl.col(PayrollCol.PAY_PERIOD_INDEX) >= 7)
+            & (pl.col("shifted_gross") > pl.col(PayrollCol.GROSS_PAY)),
+        ).height
+        > 0
+    )
+
+
+def test_anomaly_mix_controls_and_label_separation() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    scenario = ScenarioSpec(
+        name="deduction_stress",
+        anomaly_plan=AnomalyPlan(
+            category_weights={"missing_deduction": 1.0},
+            target_count=10,
+        ),
+    )
+    payroll, labels = generate_payroll(config, scenario=scenario)
+    results = run_pipeline(config, scenario=scenario)
+
+    assert labels.get_column(PayrollCol.ANOMALY_CATEGORY).unique().to_list() == [
+        "missing_deduction",
+    ]
+    assert PayrollCol.IS_ANOMALY not in MODEL_FEATURE_COLUMNS
+    assert PayrollCol.ANOMALY_DOLLARS not in MODEL_FEATURE_COLUMNS
+    assert PayrollCol.IS_ANOMALY not in results["analyst_review_queue"].columns
+    assert "scenario_metadata" in results
+    assert payroll.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height == 10
+
+
+def test_queue_simulation_output_shape_and_sanity() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    scored = run_pipeline(config)["scored"]
+    simulation = simulate_queue_capacity(
+        scored,
+        QueueSimulationSpec(
+            iterations=5,
+            review_budget=5,
+            fixed_capacity=3,
+            capacity_sd=0,
+            seed=7,
+        ),
+    )
+    summary = summarize_queue_simulation(simulation)
+
+    assert (
+        simulation.height
+        == scored.get_column(PayrollCol.PAY_PERIOD_INDEX).n_unique() * 5
+    )
+    assert {
+        "overload",
+        "missed_estimated_exposure",
+        "missed_synthetic_anomaly_dollars",
+    } <= set(simulation.columns)
+    assert summary.get_column("overload_probability").min() >= 0
+    assert summary.get_column("avg_dollars_captured").min() >= 0
+
+
+def test_statistical_diagnostics_output_schemas_non_empty() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    scored = run_pipeline(config)["scored"]
+
+    intervals = review_budget_interval_summary(scored, k=5, samples=10, seed=1)
+    subgroups = subgroup_diagnostics(scored, k=5)
+    calibration = expected_pay_calibration(scored, by=PayrollCol.DEPARTMENT)
+
+    assert intervals.height == 4
+    assert {"metric", "lower_95", "upper_95", "scope"} <= set(intervals.columns)
+    assert subgroups.height > 0
+    assert {"raw_anomaly_rate", "pooled_anomaly_rate", "shrinkage"} <= set(
+        subgroups.columns,
+    )
+    assert calibration.height > 0
+    assert {"coverage", "avg_interval_width", "avg_residual"} <= set(
+        calibration.columns,
+    )
+
+
+def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
+    notebook_06 = Path("notebooks/06_internal_statistical_diagnostics.py").read_text()
+    notebook_07 = Path("notebooks/07_simulation_and_stress_testing.py").read_text()
+
+    assert "LetsPlot.setup_html()" in notebook_06
+    assert "LetsPlot.setup_html()" in notebook_07
+    assert "samples=50" in notebook_06
+    assert "iterations=40" in notebook_07
 
 
 def test_scoring_excludes_injected_evaluation_truth() -> None:

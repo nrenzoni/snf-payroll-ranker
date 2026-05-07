@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import polars as pl
+
 from payroll_anomaly_ranking.columns import OutputName, PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.data import generate_payroll
@@ -16,15 +18,17 @@ from payroll_anomaly_ranking.explainability import (
 from payroll_anomaly_ranking.features import build_features
 from payroll_anomaly_ranking.models import score_payroll
 from payroll_anomaly_ranking.rules import add_rule_flags
+from payroll_anomaly_ranking.scenarios import ScenarioSpec
 from payroll_anomaly_ranking.validation import payroll_aggregations, validate_payroll
 
 
 def run_pipeline(
     config: PayrollConfig = PayrollConfig(),
     *,
+    scenario: ScenarioSpec | None = None,
     write_outputs: bool = False,
 ) -> dict[str, object]:
-    payroll, labels = generate_payroll(config)
+    payroll, labels = generate_payroll(config, scenario=scenario)
     failures, warnings = validate_payroll(payroll)
     features = build_features(payroll)
     ruled = add_rule_flags(features)
@@ -69,6 +73,7 @@ def run_pipeline(
         "leakage_checks": leakage,
         "analyst_review_queue": analyst_queue,
         "evaluation_labeled_review_queue": evaluation_queue,
+        "scenario_metadata": _scenario_metadata(scenario),
     }
     if write_outputs:
         write_pipeline_outputs(results, config)
@@ -116,6 +121,21 @@ def write_pipeline_outputs(
     results["evaluation_labeled_review_queue"].write_csv(
         evaluation_dir / OutputName.EVALUATION_LABELED_REVIEW_QUEUE,
     )
+    scenario_metadata = results.get("scenario_metadata")
+    if scenario_metadata:
+        pl.DataFrame([scenario_metadata]).write_json(
+            evaluation_dir / "scenario_metadata.json",
+        )
+
+
+def _scenario_metadata(scenario: ScenarioSpec | None) -> dict[str, object]:
+    if scenario is None:
+        return {"name": "default", "controls_applied": False}
+    metadata = scenario.to_metadata()
+    metadata["controls_applied"] = bool(
+        scenario.anomaly_plan or scenario.drift_plans or scenario.change_points,
+    )
+    return metadata
 
 
 if __name__ == "__main__":
