@@ -83,7 +83,10 @@ queue.select(
 ).head(15)
 
 # %%
-queue.select(pl.min(PayrollCol.PAY_PERIOD_INDEX), pl.max(PayrollCol.PAY_PERIOD_INDEX))
+queue.select(
+    pl.min(PayrollCol.PAY_PERIOD_INDEX).name.prefix("min"),
+    pl.max(PayrollCol.PAY_PERIOD_INDEX).name.prefix("max"),
+)
 
 # %% [markdown]
 # ## Evaluation-Labeled Queue
@@ -127,7 +130,7 @@ budget_sizes = (
     )
     .sort(PayrollCol.PAY_PERIOD_INDEX)
 )
-budget_sizes.head(12)
+budget_sizes
 
 # %%
 budget_sizes.select(
@@ -150,7 +153,7 @@ budget_sizes.select(
 # %%
 queue.group_by(ReviewCol.RISK_CATEGORY).agg(
     pl.len().alias(AggregateCol.RECORDS),
-    pl.sum(ReviewCol.DOLLARS_AT_RISK).alias(ReviewCol.DOLLARS_AT_RISK),
+    pl.sum(ReviewCol.DOLLARS_AT_RISK).name.suffix("_sum"),
 ).sort(ReviewCol.RISK_CATEGORY)
 
 # %%
