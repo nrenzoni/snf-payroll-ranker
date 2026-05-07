@@ -27,3 +27,24 @@ The project SHALL include verification for key notebook and generated-output rep
 #### Scenario: Reproducibility checks run locally
 - **WHEN** the project test or verification command is run
 - **THEN** it verifies that required generated output files can be produced and that analyst-facing outputs exclude synthetic evaluation labels
+
+### Requirement: Rich internal diagnostic notebooks with bounded defaults
+The internal diagnostic notebooks SHALL provide rich diagnostic coverage while using bounded defaults suitable for local execution.
+
+#### Scenario: Rich diagnostics run with bounded defaults
+- **WHEN** internal diagnostic notebooks are executed with default settings
+- **THEN** they generate rich scenario, evaluation, queue simulation, and plot-input diagnostics without requiring excessive runtime or memory
+
+### Requirement: Dense internal notebook defaults with fast mode
+The internal diagnostic notebooks SHALL support dense diagnostic defaults and an explicit fast mode for quicker refreshes.
+
+#### Scenario: Fast mode limits diagnostic workload
+- **WHEN** notebook fast mode is enabled
+- **THEN** scenario counts, Monte Carlo repetitions, plot density, and expensive diagnostics are reduced while preserving representative outputs
+
+### Requirement: Paired notebook outputs are refreshable
+The internal diagnostic notebooks SHALL produce paired outputs that can be regenerated reproducibly.
+
+#### Scenario: Paired outputs refresh reproducibly
+- **WHEN** paired internal diagnostic notebooks or notebook-output refresh commands are run with a fixed seed
+- **THEN** paired tables, plot inputs, scenario summaries, and generated artifacts are refreshed consistently and documented as reproducible outputs

@@ -102,3 +102,52 @@ The system SHALL generate reproducible late-period pay-code novelty and rarity f
 #### Scenario: Pay-code data dictionary is updated
 - **WHEN** the data maturity notebook displays the synthetic schema dictionary
 - **THEN** it includes `pay_code`, its business meaning, its synthetic nature, and its validation or OOD expectation
+
+### Requirement: Scenario-controlled payroll simulation
+The system SHALL support configurable synthetic payroll simulation scenarios for internal statistical diagnostics.
+
+#### Scenario: Scenario controls are applied
+- **WHEN** synthetic payroll data is generated with a diagnostic scenario configuration
+- **THEN** the generated records reflect the configured scenario controls while retaining reproducibility for a fixed seed
+
+### Requirement: Drift and change-point controls
+The system SHALL generate synthetic payroll datasets with controlled temporal drift and change-point patterns for diagnostic evaluation.
+
+#### Scenario: Temporal drift is generated
+- **WHEN** drift or change-point controls are enabled
+- **THEN** later pay periods include reproducible shifts in payroll, workforce, pay-code, department, or anomaly behavior suitable for temporal diagnostic analysis
+
+### Requirement: Anomaly-mix scenario controls
+The system SHALL support configurable anomaly mixes across synthetic payroll scenarios.
+
+#### Scenario: Anomaly mix is controlled
+- **WHEN** a scenario specifies anomaly category prevalence, severity, or concentration
+- **THEN** injected anomaly labels reflect the configured mix and remain excluded from scoring features and analyst-facing outputs
+
+### Requirement: Diagnostic scenario catalog
+The system SHALL provide a catalog of named internal diagnostic scenarios for synthetic payroll generation.
+
+#### Scenario: Named diagnostic scenarios are available
+- **WHEN** diagnostic generation is requested
+- **THEN** users can select documented scenarios covering baseline, drift, targeted anomaly, subgroup, and review-capacity stress conditions
+
+### Requirement: Targeted anomaly generation controls
+The system SHALL support targeted anomaly generation controls for internal diagnostic signal analysis.
+
+#### Scenario: Targeted anomalies are injected
+- **WHEN** targeted anomaly controls specify categories, employee groups, periods, or dollar impact ranges
+- **THEN** the synthetic data includes matching injected anomalies with evaluation-only labels and impacts
+
+### Requirement: Plot-calibrated internal diagnostic scenarios
+The system SHALL generate internal diagnostic scenarios calibrated to produce informative plots without excessive runtime.
+
+#### Scenario: Plot-calibrated scenario is generated
+- **WHEN** plot-calibrated diagnostics are enabled
+- **THEN** generated data includes sufficient contrasts, subgroup coverage, and temporal variation for dense internal diagnostic plots
+
+### Requirement: Scenario contrast summaries
+The system SHALL produce scenario contrast summaries for internal diagnostics.
+
+#### Scenario: Scenario contrasts are summarized
+- **WHEN** multiple synthetic diagnostic scenarios are generated or compared
+- **THEN** outputs summarize key differences in population mix, temporal drift, anomaly mix, severity, and expected diagnostic behavior

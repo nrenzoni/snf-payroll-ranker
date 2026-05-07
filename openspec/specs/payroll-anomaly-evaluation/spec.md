@@ -149,3 +149,87 @@ The notebooks SHALL explain how uncertainty diagnostics fit into the payroll ano
 #### Scenario: Production monitoring notebook documents uncertainty limits
 - **WHEN** the production monitoring and deployment path notebook is reviewed
 - **THEN** it documents uncertainty monitoring, calibration uncertainty as dependent on future analyst feedback labels, OOD monitoring for pay-code drift, and limitations of synthetic-label uncertainty evaluation
+
+### Requirement: Internal Bayesian-style review-budget diagnostics
+The system SHALL provide internal Bayesian-style diagnostics for review-budget performance using synthetic evaluation labels.
+
+#### Scenario: Review-budget uncertainty is summarized
+- **WHEN** internal review-budget diagnostics run
+- **THEN** outputs summarize uncertainty for precision, recall, dollar capture, and queue yield at configured review budgets
+
+### Requirement: Hierarchical subgroup diagnostics
+The system SHALL evaluate anomaly-ranking performance across hierarchical payroll subgroups.
+
+#### Scenario: Subgroup diagnostics are reported
+- **WHEN** subgroup fields such as department, location, job family, pay type, tenure band, or anomaly category are available
+- **THEN** diagnostic outputs report performance, volume, and dollar-impact summaries at overall and subgroup levels
+
+### Requirement: Expected-pay calibration diagnostics
+The system SHALL evaluate calibration of expected-pay estimates and intervals.
+
+#### Scenario: Expected-pay calibration is reported
+- **WHEN** expected-pay predictions, intervals, and evaluation labels are available
+- **THEN** outputs report interval coverage, exceedance behavior, residual distribution, and calibration quality overall and by relevant subgroup
+
+### Requirement: Robustness and perturbation diagnostics
+The system SHALL evaluate whether anomaly-ranking behavior is stable under reproducible perturbations.
+
+#### Scenario: Perturbation results are summarized
+- **WHEN** diagnostic perturbations vary seeds, scenario parameters, thresholds, review budgets, or input noise
+- **THEN** outputs summarize metric stability, rank stability, queue overlap, and sensitivity to perturbations
+
+### Requirement: Monte Carlo queue capacity simulation
+The system SHALL simulate review-queue capacity outcomes across repeated synthetic scenarios.
+
+#### Scenario: Queue capacity distribution is reported
+- **WHEN** Monte Carlo queue capacity simulation runs
+- **THEN** outputs report distributions for workload, anomaly yield, dollar capture, missed dollar impact, and capacity shortfall at configured review budgets
+
+### Requirement: Internal statistical notebook coverage
+The notebooks SHALL cover internal statistical diagnostics for synthetic payroll anomaly evaluation.
+
+#### Scenario: Internal statistical diagnostics are shown
+- **WHEN** internal diagnostic notebooks run
+- **THEN** they display review-budget uncertainty, subgroup diagnostics, expected-pay calibration, perturbation robustness, and Monte Carlo queue capacity results
+
+### Requirement: Multi-regime component superiority diagnostics
+The system SHALL compare anomaly score components across multiple synthetic diagnostic regimes.
+
+#### Scenario: Component performance varies by regime
+- **WHEN** diagnostic scenarios represent different anomaly mixes, drift patterns, or subgroup concentrations
+- **THEN** outputs compare component-level and hybrid ranking performance by regime and identify where components are superior or weaker
+
+### Requirement: Informative internal diagnostic plot inputs
+The system SHALL produce internal diagnostic outputs suitable for informative plots.
+
+#### Scenario: Plot inputs are produced
+- **WHEN** internal diagnostics run
+- **THEN** outputs include tidy data for score distributions, calibration curves, subgroup summaries, queue trade-offs, component comparisons, and temporal contrasts
+
+### Requirement: Scenario-dependent queue simulation diagnostics
+The system SHALL evaluate review-queue capacity under scenario-dependent synthetic conditions.
+
+#### Scenario: Queue simulation is stratified by scenario
+- **WHEN** queue simulation runs across diagnostic scenarios
+- **THEN** outputs report capacity, yield, dollar capture, and missed-risk metrics separately by scenario
+
+### Requirement: Dense internal diagnostic plot inputs
+The system SHALL produce dense internal diagnostic plot inputs for high-signal exploratory evaluation.
+
+#### Scenario: Dense plot data is available
+- **WHEN** dense diagnostics are enabled
+- **THEN** outputs include sufficiently granular records for paired plots, subgroup facets, temporal panels, threshold curves, component contrasts, and queue-capacity distributions
+
+### Requirement: Adaptive threshold-demand queue diagnostics
+The system SHALL evaluate how adaptive thresholds affect review demand and anomaly yield.
+
+#### Scenario: Adaptive threshold demand is reported
+- **WHEN** adaptive threshold diagnostics run
+- **THEN** outputs report threshold levels, queue sizes, anomaly yield, dollar capture, missed-risk estimates, and capacity exceedance across periods or scenarios
+
+### Requirement: Plot-usefulness validation
+The system SHALL validate whether internal diagnostic plots provide useful signal for evaluation decisions.
+
+#### Scenario: Plot usefulness is assessed
+- **WHEN** internal diagnostic plot outputs are generated
+- **THEN** validation outputs identify whether plots contain adequate variation, contrasts, sample sizes, and non-empty series for interpretation
