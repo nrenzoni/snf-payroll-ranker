@@ -56,6 +56,8 @@ class QueueSimulationSpec:
     iterations: int = 100
     review_budget: int = 25
     score_threshold: float | None = None
+    score_thresholds: tuple[float, ...] = ()
+    adaptive_threshold_quantile: float | None = None
     fixed_capacity: int | None = None
     period_capacity: dict[int, int] = field(default_factory=dict)
     period_capacity_multipliers: dict[int, float] = field(default_factory=dict)
@@ -93,7 +95,7 @@ def diagnostic_scenario_catalog() -> dict[str, ScenarioSpec]:
                     "pay_after_termination": 0.20,
                     "duplicate_payment": 0.10,
                 },
-                target_count=130,
+                target_count=150,
             ),
             metadata={"regime": "rule-friendly"},
         ),
@@ -106,11 +108,11 @@ def diagnostic_scenario_catalog() -> dict[str, ScenarioSpec]:
                     "retro_pay_outlier": 0.30,
                     "overtime_spike": 0.25,
                 },
-                target_count=130,
+                target_count=150,
                 severity_multipliers={
-                    "gross_pay_spike": 1.6,
-                    "retro_pay_outlier": 1.5,
-                    "overtime_spike": 1.4,
+                    "gross_pay_spike": 1.9,
+                    "retro_pay_outlier": 1.8,
+                    "overtime_spike": 1.6,
                 },
             ),
             metadata={"regime": "statistical-friendly"},
@@ -124,7 +126,7 @@ def diagnostic_scenario_catalog() -> dict[str, ScenarioSpec]:
                     "department_payroll_spike": 0.35,
                     "incorrect_pay_rate": 0.20,
                 },
-                target_count=120,
+                target_count=140,
             ),
             drift_plans=(
                 DriftPlan(
@@ -132,7 +134,7 @@ def diagnostic_scenario_catalog() -> dict[str, ScenarioSpec]:
                     start_period=8,
                     subgroup_filters={PayrollCol.LOCATION: "Remote"},
                     pay_code_mix_shift={"SPEC": 0.7, "ADJX": 0.3},
-                    gross_pay_multiplier=1.10,
+                    gross_pay_multiplier=1.18,
                 ),
             ),
             metadata={"regime": "ml-friendly"},
@@ -147,12 +149,12 @@ def diagnostic_scenario_catalog() -> dict[str, ScenarioSpec]:
                     "incorrect_pay_rate": 0.20,
                     "retro_pay_outlier": 0.15,
                 },
-                target_count=100,
+                target_count=125,
                 severity_multipliers={
-                    "duplicate_payment": 1.8,
-                    "gross_pay_spike": 2.0,
-                    "incorrect_pay_rate": 1.7,
-                    "retro_pay_outlier": 1.8,
+                    "duplicate_payment": 2.2,
+                    "gross_pay_spike": 2.4,
+                    "incorrect_pay_rate": 2.0,
+                    "retro_pay_outlier": 2.1,
                 },
             ),
             metadata={"regime": "exposure-heavy"},
@@ -161,7 +163,7 @@ def diagnostic_scenario_catalog() -> dict[str, ScenarioSpec]:
             name="subgroup-drift",
             seed_offset=50,
             anomaly_plan=AnomalyPlan(
-                target_count=100,
+                target_count=125,
                 targeted_controls=(
                     TargetedAnomalyControl(
                         name="operations-late-drift",
@@ -172,8 +174,8 @@ def diagnostic_scenario_catalog() -> dict[str, ScenarioSpec]:
                             "gross_pay_spike": 0.30,
                             "missing_deduction": 0.15,
                         },
-                        target_count=55,
-                        severity_multipliers={"overtime_spike": 1.5},
+                        target_count=75,
+                        severity_multipliers={"overtime_spike": 1.8},
                     ),
                 ),
             ),
@@ -183,7 +185,7 @@ def diagnostic_scenario_catalog() -> dict[str, ScenarioSpec]:
             name="calendar-drift",
             seed_offset=60,
             anomaly_plan=AnomalyPlan(
-                target_count=105,
+                target_count=130,
                 targeted_controls=(
                     TargetedAnomalyControl(
                         name="late-calendar-outliers",
@@ -193,8 +195,8 @@ def diagnostic_scenario_catalog() -> dict[str, ScenarioSpec]:
                             "department_payroll_spike": 0.35,
                             "gross_pay_spike": 0.20,
                         },
-                        propensity_multiplier=2.5,
-                        severity_multipliers={"department_payroll_spike": 1.5},
+                        propensity_multiplier=3.0,
+                        severity_multipliers={"department_payroll_spike": 1.8},
                     ),
                 ),
             ),
@@ -203,7 +205,7 @@ def diagnostic_scenario_catalog() -> dict[str, ScenarioSpec]:
                     name="late-period-special-pay-code",
                     start_period=9,
                     field=PayrollCol.GROSS_PAY,
-                    multiplier=1.08,
+                    multiplier=1.14,
                     pay_code="ADJX",
                 ),
             ),
@@ -213,7 +215,7 @@ def diagnostic_scenario_catalog() -> dict[str, ScenarioSpec]:
             name="queue-stress",
             seed_offset=70,
             anomaly_plan=AnomalyPlan(
-                target_count=170,
+                target_count=210,
                 category_weights={
                     "duplicate_payment": 0.25,
                     "gross_pay_spike": 0.25,
@@ -221,8 +223,9 @@ def diagnostic_scenario_catalog() -> dict[str, ScenarioSpec]:
                     "missing_deduction": 0.25,
                 },
                 severity_multipliers={
-                    "duplicate_payment": 1.5,
-                    "gross_pay_spike": 1.5,
+                    "duplicate_payment": 1.8,
+                    "gross_pay_spike": 1.8,
+                    "overtime_spike": 1.6,
                 },
             ),
             metadata={

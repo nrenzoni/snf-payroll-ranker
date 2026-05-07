@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import numpy as np
 import polars as pl
 
-from payroll_anomaly_ranking.columns import PayrollCol
+from payroll_anomaly_ranking.columns import PayrollCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.scenarios import (
     AnomalyPlan,
@@ -699,3 +699,122 @@ def scenario_summary(
             },
         )
     return pl.DataFrame(rows, infer_schema_length=None)
+
+
+def scenario_sanity_summary(
+    scored: pl.DataFrame,
+    scenario: str = "default",
+    *,
+    score_column: str = ScoreCol.FINAL_ANOMALY_SCORE,
+    score_thresholds: tuple[float, ...] = (0.45, 0.55, 0.65),
+    subgroup_dimension: str = PayrollCol.DEPARTMENT,
+    concentration_min_share: float = 0.20,
+) -> pl.DataFrame:
+    total_rows = scored.height
+    total_anomalies = int(_scalar(scored, pl.sum(PayrollCol.IS_ANOMALY)) or 0)
+    total_dollars = float(_scalar(scored, pl.sum(PayrollCol.ANOMALY_DOLLARS)) or 0.0)
+    score_exprs = []
+    if score_column in scored.columns:
+        score_exprs = [
+            pl.col(score_column).quantile(0.50).alias("score_p50"),
+            pl.col(score_column).quantile(0.75).alias("score_p75"),
+            pl.col(score_column).quantile(0.90).alias("score_p90"),
+            pl.col(score_column).quantile(0.95).alias("score_p95"),
+        ]
+    score_stats = scored.select(score_exprs).row(0, named=True) if score_exprs else {}
+    threshold_counts = {
+        f"candidates_at_{threshold:.2f}": _candidate_count(
+            scored,
+            score_column,
+            threshold,
+        )
+        for threshold in score_thresholds
+    }
+    category_rows = _category_mix_rows(scored, total_anomalies)
+    concentration = _subgroup_period_concentration(scored, subgroup_dimension)
+    max_concentration = float(
+        concentration.get("max_subgroup_period_anomaly_share", 0.0),
+    )
+    zero_thresholds = [
+        f"{threshold:.2f}"
+        for threshold in score_thresholds
+        if threshold_counts[f"candidates_at_{threshold:.2f}"] == 0
+    ]
+    return pl.DataFrame(
+        [
+            {
+                "scenario": scenario,
+                "row_count": total_rows,
+                "anomaly_count": total_anomalies,
+                "anomaly_rate": total_anomalies / max(total_rows, 1),
+                "anomaly_dollars": total_dollars,
+                **score_stats,
+                **threshold_counts,
+                "category_mix": category_rows,
+                **concentration,
+                "zero_threshold_candidates": ",".join(zero_thresholds),
+                "has_zero_threshold_candidates": bool(zero_thresholds),
+                "insufficient_subgroup_concentration": max_concentration
+                < concentration_min_share,
+                "sparse_condition": bool(zero_thresholds)
+                or max_concentration < concentration_min_share,
+            },
+        ],
+        infer_schema_length=None,
+    )
+
+
+def _candidate_count(scored: pl.DataFrame, score_column: str, threshold: float) -> int:
+    if score_column not in scored.columns:
+        return 0
+    return scored.filter(pl.col(score_column) >= threshold).height
+
+
+def _category_mix_rows(scored: pl.DataFrame, total_anomalies: int) -> str:
+    if PayrollCol.ANOMALY_CATEGORY not in scored.columns:
+        return ""
+    rows = (
+        scored.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+        .group_by(PayrollCol.ANOMALY_CATEGORY)
+        .agg(pl.len().alias("count"))
+        .sort("count", descending=True)
+    )
+    return ";".join(
+        f"{row[PayrollCol.ANOMALY_CATEGORY]}={int(row['count']) / max(total_anomalies, 1):.2f}"
+        for row in rows.to_dicts()
+    )
+
+
+def _subgroup_period_concentration(
+    scored: pl.DataFrame,
+    subgroup_dimension: str,
+) -> dict[str, object]:
+    if subgroup_dimension not in scored.columns or scored.is_empty():
+        return {
+            "max_subgroup_period": "",
+            "max_subgroup_period_anomalies": 0,
+            "max_subgroup_period_anomaly_share": 0.0,
+        }
+    total_anomalies = int(_scalar(scored, pl.sum(PayrollCol.IS_ANOMALY)) or 0)
+    grouped = (
+        scored.group_by([subgroup_dimension, PayrollCol.PAY_PERIOD_INDEX])
+        .agg(pl.sum(PayrollCol.IS_ANOMALY).alias("anomalies"))
+        .sort("anomalies", descending=True)
+    )
+    if grouped.is_empty():
+        return {
+            "max_subgroup_period": "",
+            "max_subgroup_period_anomalies": 0,
+            "max_subgroup_period_anomaly_share": 0.0,
+        }
+    row = grouped.row(0, named=True)
+    anomalies = int(row["anomalies"] or 0)
+    return {
+        "max_subgroup_period": f"{row[subgroup_dimension]}|period={row[PayrollCol.PAY_PERIOD_INDEX]}",
+        "max_subgroup_period_anomalies": anomalies,
+        "max_subgroup_period_anomaly_share": anomalies / max(total_anomalies, 1),
+    }
+
+
+def _scalar(frame: pl.DataFrame, expr: pl.Expr) -> object:
+    return frame.select(expr).item()

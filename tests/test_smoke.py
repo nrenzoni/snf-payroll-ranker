@@ -12,13 +12,19 @@ from payroll_anomaly_ranking.columns import (
     ScoreCol,
 )
 from payroll_anomaly_ranking.config import PayrollConfig
-from payroll_anomaly_ranking.data import generate_payroll, scenario_summary
+from payroll_anomaly_ranking.data import (
+    generate_payroll,
+    scenario_sanity_summary,
+    scenario_summary,
+)
 from payroll_anomaly_ranking.diagnostics import (
+    calibration_plot_inputs,
     expected_pay_calibration,
     pairwise_component_superiority,
     review_budget_interval_summary,
     run_diagnostic_comparison_units,
     subgroup_diagnostics,
+    top_subgroup_diagnostics,
 )
 from payroll_anomaly_ranking.evaluation import (
     evaluate_scores,
@@ -314,6 +320,78 @@ def test_scenario_summary_and_component_regimes_differ() -> None:
     )
 
 
+def test_diagnostic_scenario_presets_produce_observable_contrast() -> None:
+    config = PayrollConfig(employee_count=100, pay_periods=10, review_budgets=(5, 10))
+    scenarios = diagnostic_scenario_presets(
+        (
+            "baseline",
+            "rule-friendly",
+            "statistical-friendly",
+            "ml-friendly",
+            "exposure-heavy",
+            "subgroup-drift",
+            "calendar-drift",
+            "queue-stress",
+        ),
+    )
+    summaries = pl.concat(
+        [
+            scenario_sanity_summary(
+                run_pipeline(config, scenario=scenario)["scored"],
+                scenario=name,
+                score_thresholds=(0.35, 0.45, 0.55),
+            )
+            for name, scenario in scenarios.items()
+        ],
+    )
+    baseline = summaries.filter(pl.col("scenario") == "baseline").row(0, named=True)
+    non_baseline = summaries.filter(pl.col("scenario") != "baseline")
+
+    assert non_baseline.select(pl.max("score_p90")).item() != baseline["score_p90"]
+    assert (
+        non_baseline.select(pl.max("anomaly_dollars")).item()
+        > baseline["anomaly_dollars"]
+    )
+    assert non_baseline.select(pl.max("max_subgroup_period_anomaly_share")).item() > 0
+    assert (
+        summaries.filter(pl.col("scenario") == "queue-stress")
+        .select(
+            pl.col("candidates_at_0.35"),
+        )
+        .item()
+        > 0
+    )
+
+
+def test_scenario_sanity_summary_includes_sparse_condition_context() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    scored = run_pipeline(
+        config,
+        scenario=diagnostic_scenario_presets(("queue-stress",))["queue-stress"],
+    )["scored"]
+    summary = scenario_sanity_summary(
+        scored,
+        scenario="queue-stress",
+        score_thresholds=(0.35, 0.99),
+    )
+
+    assert {
+        "scenario",
+        "row_count",
+        "anomaly_count",
+        "anomaly_dollars",
+        "score_p50",
+        "score_p90",
+        "candidates_at_0.35",
+        "candidates_at_0.99",
+        "category_mix",
+        "max_subgroup_period_anomaly_share",
+        "zero_threshold_candidates",
+        "sparse_condition",
+    } <= set(summary.columns)
+    assert summary.select("zero_threshold_candidates").item() == "0.99"
+
+
 def test_queue_simulation_output_shape_and_sanity() -> None:
     config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
     scored = run_pipeline(config)["scored"]
@@ -383,6 +461,59 @@ def test_threshold_demand_queue_shape_and_capacity_shock_behavior() -> None:
     )
 
 
+def test_threshold_grid_and_adaptive_queue_demand_outputs() -> None:
+    config = PayrollConfig(employee_count=90, pay_periods=10, review_budgets=(5, 10))
+    scored = run_pipeline(
+        config,
+        scenario=diagnostic_scenario_presets(("queue-stress",))["queue-stress"],
+    )["scored"]
+    grid = simulate_queue_capacity(
+        scored,
+        QueueSimulationSpec(
+            iterations=2,
+            review_budget=5,
+            score_thresholds=(0.35, 0.45),
+            fixed_capacity=4,
+            capacity_sd=0,
+            seed=11,
+            scenario="queue-stress",
+        ),
+    )
+    adaptive = simulate_queue_capacity(
+        scored,
+        QueueSimulationSpec(
+            iterations=2,
+            review_budget=5,
+            adaptive_threshold_quantile=0.90,
+            fixed_capacity=4,
+            capacity_sd=0,
+            seed=11,
+            scenario="queue-stress",
+        ),
+    )
+    grid_summary = summarize_queue_simulation(grid)
+    adaptive_summary = summarize_queue_simulation(adaptive)
+
+    assert set(grid.get_column("demand_mode")) == {"threshold_grid"}
+    assert grid.get_column("resolved_threshold").n_unique() == 2
+    assert adaptive.get_column("demand_mode").unique().to_list() == [
+        "adaptive_threshold",
+    ]
+    assert adaptive.select(pl.col("resolved_threshold").is_not_null().all()).item()
+    assert grid.select(pl.max("candidate_queue_size")).item() > 0
+    assert {
+        "scenario",
+        "resolved_threshold",
+        "demand_mode",
+        "avg_candidate_queue_size",
+        "avg_reviewed_records",
+        "overload_probability",
+        "avg_missed_estimated_exposure",
+        "avg_missed_synthetic_anomaly_dollars",
+    } <= set(grid_summary.columns)
+    assert "adaptive_threshold_quantile" in adaptive_summary.columns
+
+
 def test_statistical_diagnostics_output_schemas_non_empty() -> None:
     config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
     scored = run_pipeline(config)["scored"]
@@ -415,17 +546,20 @@ def test_plot_helper_input_tables_include_rich_context_columns() -> None:
     superiority = pairwise_component_superiority(unit_metrics)
     scored = run_pipeline(config, scenario=scenarios["subgroup-drift"])["scored"]
     subgroups = subgroup_diagnostics(scored, k=5, scenario="subgroup-drift")
-    calibration = expected_pay_calibration(scored, by=PayrollCol.DEPARTMENT)
+    top_subgroups = top_subgroup_diagnostics(subgroups, top_n=6)
+    calibration = calibration_plot_inputs(scored, by=PayrollCol.DEPARTMENT)
 
     assert {"scenario", "samples", "mean_delta", "lower_95", "upper_95"} <= set(
         superiority.columns,
     )
     assert {"records", "anomaly_count", "lower_95", "upper_95", "scenario"} <= set(
-        subgroups.columns,
+        top_subgroups.columns,
     )
-    assert {"subgroup", "residual", "interval_width", "excess_over_p90"} <= set(
+    assert top_subgroups.height >= 6
+    assert {"subgroup", "residual", "interval_width", "tail_excess"} <= set(
         calibration.columns,
     )
+    assert calibration.height >= 2
 
 
 def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
@@ -434,10 +568,12 @@ def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
 
     assert "LetsPlot.setup_html()" in notebook_06
     assert "LetsPlot.setup_html()" in notebook_07
-    assert "samples=50" in notebook_06
-    assert "iterations=40" in notebook_07
+    assert "INTERVAL_SAMPLES = 75" in notebook_06
+    assert "QUEUE_ITERATIONS = 60" in notebook_07
     assert "DIAGNOSTIC_SCENARIOS" in notebook_06
-    assert "score_threshold=0.55" in notebook_07
+    assert "FAST_MODE_SCENARIOS" in notebook_06
+    assert "FAST_MODE_ITERATIONS" in notebook_07
+    assert "QUEUE_THRESHOLD_GRID" in notebook_07
 
 
 def test_scoring_excludes_injected_evaluation_truth() -> None:

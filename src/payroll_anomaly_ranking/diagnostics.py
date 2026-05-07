@@ -126,7 +126,16 @@ def run_diagnostic_comparison_units(
     from payroll_anomaly_ranking.pipeline import run_pipeline
 
     scenario_map = scenarios or diagnostic_scenario_presets(
-        ("baseline", "rule-friendly", "statistical-friendly", "subgroup-drift"),
+        (
+            "baseline",
+            "rule-friendly",
+            "statistical-friendly",
+            "ml-friendly",
+            "exposure-heavy",
+            "subgroup-drift",
+            "calendar-drift",
+            "queue-stress",
+        ),
     )
     budget = k or config.review_budgets[0]
     rows: list[dict[str, object]] = []
@@ -275,6 +284,26 @@ def subgroup_diagnostics(
     return pl.DataFrame(rows, infer_schema_length=None)
 
 
+def top_subgroup_diagnostics(
+    subgroups: pl.DataFrame,
+    top_n: int = 12,
+    sort_by: str = "anomaly_count",
+) -> pl.DataFrame:
+    if subgroups.is_empty():
+        return pl.DataFrame()
+    order_column = sort_by if sort_by in subgroups.columns else "records"
+    return (
+        subgroups.with_columns(
+            (pl.col("raw_anomaly_rate") - pl.col("pooled_anomaly_rate")).alias(
+                "raw_pooled_delta",
+            ),
+        )
+        .sort(["scenario", order_column], descending=[False, True])
+        .group_by("scenario", maintain_order=True)
+        .head(top_n)
+    )
+
+
 def expected_pay_calibration(
     scored: pl.DataFrame,
     by: str | None = None,
@@ -328,6 +357,21 @@ def expected_pay_calibration(
     )
 
 
+def calibration_plot_inputs(
+    scored: pl.DataFrame,
+    scenario: str = "default",
+    by: str = PayrollCol.DEPARTMENT,
+) -> pl.DataFrame:
+    calibration = expected_pay_calibration(scored, by=by, scenario=scenario)
+    if calibration.is_empty():
+        return calibration
+    return calibration.with_columns(
+        pl.col("avg_interval_width").alias("interval_width"),
+        pl.col("avg_residual").alias("residual"),
+        pl.col("avg_excess_over_p90").alias("tail_excess"),
+    )
+
+
 def robustness_summary(frames: dict[str, pl.DataFrame], k: int = 25) -> pl.DataFrame:
     rows = []
     queues: dict[str, set[int]] = {}
@@ -362,7 +406,13 @@ def robustness_summary(frames: dict[str, pl.DataFrame], k: int = 25) -> pl.DataF
         row["mean_queue_overlap"] = sum(overlaps) / len(overlaps) if overlaps else 1.0
         row["queue_overlap"] = row["mean_queue_overlap"]
         row["performance_instability"] = 1.0 - row["mean_queue_overlap"]
-    return pl.DataFrame(rows)
+    result = pl.DataFrame(rows)
+    if result.is_empty():
+        return result
+    return result.with_columns(
+        (1.0 - pl.col("mean_queue_overlap")).alias("instability_metric"),
+        pl.col("mean_queue_overlap").alias("queue_overlap"),
+    )
 
 
 def perturbation_sensitivity(

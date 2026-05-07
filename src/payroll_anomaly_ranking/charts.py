@@ -155,7 +155,7 @@ def effect_size_interval_chart(
 ):
     return (
         ggplot(_plot_data(intervals), aes(x, y))
-        + geom_point(aes(size="samples"))
+        + geom_point(aes(size="samples", color="scenario"))
         + geom_errorbar(aes(ymin="lower_95", ymax="upper_95"), width=0.2)
         + ggtitle("Effect-Size Intervals")
         + theme_minimal()
@@ -176,7 +176,7 @@ def subgroup_forest_chart(subgroups: pl.DataFrame):
     data = _sort_if_present(subgroups, "pooled_anomaly_rate")
     return (
         ggplot(_plot_data(data), aes("subgroup", "pooled_anomaly_rate"))
-        + geom_point(aes(size="records"))
+        + geom_point(aes(size="records", color="scenario"))
         + geom_errorbar(aes(ymin="lower_95", ymax="upper_95"), width=0.2)
         + ggtitle("Subgroup Pooled Anomaly Rates")
         + theme_minimal()
@@ -305,11 +305,18 @@ def capacity_distribution_chart(simulation: pl.DataFrame):
 
 
 def overload_probability_chart(summary: pl.DataFrame):
-    return _simple_point_chart(
-        summary,
-        PayrollCol.PAY_PERIOD_INDEX,
-        "overload_probability",
-        "Overload Probability",
+    color = (
+        "resolved_threshold" if "resolved_threshold" in summary.columns else "scenario"
+    )
+    return (
+        ggplot(
+            _plot_data(summary),
+            aes(PayrollCol.PAY_PERIOD_INDEX, "overload_probability"),
+        )
+        + geom_point(aes(color=color, size="avg_candidate_queue_size"))
+        + geom_line(aes(color=color))
+        + ggtitle("Overload Probability")
+        + theme_minimal()
     )
 
 
@@ -344,13 +351,20 @@ def stress_test_heatmap(comparison: pl.DataFrame):
 
 
 def queue_demand_chart(summary: pl.DataFrame):
-    return _simple_point_chart(
-        summary,
-        PayrollCol.PAY_PERIOD_INDEX,
+    y = (
         "avg_candidate_queue_size"
         if "avg_candidate_queue_size" in summary.columns
-        else "avg_queue_size",
-        "Scenario Queue Demand",
+        else "avg_queue_size"
+    )
+    color = (
+        "resolved_threshold" if "resolved_threshold" in summary.columns else "scenario"
+    )
+    return (
+        ggplot(_plot_data(summary), aes(PayrollCol.PAY_PERIOD_INDEX, y))
+        + geom_point(aes(color=color, size="avg_reviewed_records"))
+        + geom_line(aes(color=color))
+        + ggtitle("Scenario Queue Demand")
+        + theme_minimal()
     )
 
 

@@ -34,8 +34,9 @@ from payroll_anomaly_ranking.charts import (
     subgroup_shrinkage_chart,
 )
 from payroll_anomaly_ranking.config import PayrollConfig
+from payroll_anomaly_ranking.data import scenario_sanity_summary
 from payroll_anomaly_ranking.diagnostics import (
-    expected_pay_calibration,
+    calibration_plot_inputs,
     exposure_calibration,
     pairwise_component_superiority,
     perturbation_sensitivity,
@@ -43,6 +44,7 @@ from payroll_anomaly_ranking.diagnostics import (
     robustness_summary,
     run_diagnostic_comparison_units,
     subgroup_diagnostics,
+    top_subgroup_diagnostics,
 )
 from payroll_anomaly_ranking.models import score_payroll
 from payroll_anomaly_ranking.pipeline import run_pipeline
@@ -51,18 +53,38 @@ from payroll_anomaly_ranking.scenarios import diagnostic_scenario_presets
 LetsPlot.setup_html()
 
 # %%
-config = PayrollConfig(employee_count=160, pay_periods=12, review_budgets=(10, 25))
+config = PayrollConfig(employee_count=220, pay_periods=14, review_budgets=(10, 25))
 DIAGNOSTIC_SCENARIOS = (
     "baseline",
     "rule-friendly",
     "statistical-friendly",
+    "ml-friendly",
+    "exposure-heavy",
     "subgroup-drift",
+    "calendar-drift",
+    "queue-stress",
 )
-DIAGNOSTIC_SEEDS = (42, 43)
-FAST_MODE_NOTE = "Reduce DIAGNOSTIC_SCENARIOS, DIAGNOSTIC_SEEDS, or samples=50 for faster local execution."
+DIAGNOSTIC_SEEDS = (42, 43, 44)
+INTERVAL_SAMPLES = 75
+FAST_MODE_SCENARIOS = ("baseline", "subgroup-drift", "queue-stress")
+FAST_MODE_SEEDS = (42,)
+FAST_MODE_SAMPLE_COUNT = 25
+FAST_MODE_NOTE = "Dense defaults: 8 scenarios, 3 seeds, 220 employees, 14 pay periods, samples=75. Fast mode: reduce to FAST_MODE_SCENARIOS, FAST_MODE_SEEDS, or FAST_MODE_SAMPLE_COUNT."
 scenarios = diagnostic_scenario_presets(DIAGNOSTIC_SCENARIOS)
 results = run_pipeline(config, scenario=scenarios["subgroup-drift"])
 scored = results["scored"]
+
+# %%
+sanity = pl.concat(
+    [
+        scenario_sanity_summary(
+            run_pipeline(config, scenario=scenario)["scored"],
+            scenario=name,
+        )
+        for name, scenario in scenarios.items()
+    ],
+)
+sanity
 
 # %% [markdown]
 # ## Review Budget Intervals And Multi-Regime Component Superiority
@@ -70,7 +92,12 @@ scored = results["scored"]
 # Diagnostic question: which ranking signal wins when the synthetic world changes? These scenario regimes are internal stress tests, not estimates of real payroll frequencies.
 
 # %%
-intervals = review_budget_interval_summary(scored, k=10, samples=50, seed=config.seed)
+intervals = review_budget_interval_summary(
+    scored,
+    k=10,
+    samples=INTERVAL_SAMPLES,
+    seed=config.seed,
+)
 unit_metrics = run_diagnostic_comparison_units(
     config,
     scenarios=scenarios,
@@ -96,10 +123,11 @@ effect_size_interval_chart(superiority)
 
 # %%
 subgroups = subgroup_diagnostics(scored, k=10, scenario="subgroup-drift")
-subgroups.head(10)
+top_subgroups = top_subgroup_diagnostics(subgroups, top_n=15)
+top_subgroups
 
 # %%
-subgroup_forest_chart(subgroups.filter(pl.col("dimension") == "department"))
+subgroup_forest_chart(top_subgroups.filter(pl.col("dimension") == "department"))
 
 # %%
 subgroup_shrinkage_chart(subgroups)
@@ -110,10 +138,10 @@ subgroup_shrinkage_chart(subgroups)
 # Diagnostic question: are expected-pay intervals covering normal variation, and where do residuals or p90 excess concentrate?
 
 # %%
-calibration = expected_pay_calibration(
+calibration = calibration_plot_inputs(
     scored,
-    by="department",
     scenario="subgroup-drift",
+    by="department",
 )
 exposure = exposure_calibration(scored)
 calibration
@@ -136,7 +164,7 @@ exposure
 alt_results = run_pipeline(
     PayrollConfig(
         employee_count=160,
-        pay_periods=12,
+        pay_periods=14,
         review_budgets=(10, 25),
         seed=config.seed + 1,
     ),
