@@ -20,12 +20,17 @@
 
 # %%
 import polars as pl
-from lets_plot import LetsPlot
-
-from payroll_anomaly_ranking.charts import (
-    employee_history_chart,
-    score_distribution_chart,
+from common.plots import (
+    LetsPlot,
+    aes,
+    geom_histogram,
+    geom_line,
+    geom_point,
+    ggplot,
+    ggtitle,
+    theme_minimal,
 )
+
 from payroll_anomaly_ranking.columns import FeatureCol, PayrollCol, RuleCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.pipeline import run_pipeline
@@ -127,7 +132,15 @@ scored.with_columns(
 # **Score distribution plot:** This chart shows how the final review-priority score is spread across synthetic payroll records. A useful ranking process should create a small higher-risk tail so analysts can focus limited review time on the most unusual records rather than scanning the entire payroll population.
 
 # %%
-score_distribution_chart(scored)
+(
+    ggplot(
+        scored.select(ScoreCol.FINAL_ANOMALY_SCORE),
+        aes(ScoreCol.FINAL_ANOMALY_SCORE),
+    )
+    + geom_histogram(bins=30)
+    + ggtitle("Hybrid Score Distribution")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # ## Selected Employee History
@@ -139,7 +152,27 @@ score_distribution_chart(scored)
 
 # %%
 highlight_employee = queue.select(PayrollCol.EMPLOYEE_ID).item(0, 0)
-employee_history_chart(scored, highlight_employee)
+employee_history = (
+    scored.filter(pl.col(PayrollCol.EMPLOYEE_ID) == highlight_employee)
+    .select(
+        [
+            PayrollCol.PAY_PERIOD_INDEX,
+            PayrollCol.GROSS_PAY,
+            FeatureCol.GROSS_PAY_ROLLING_MEDIAN,
+        ],
+    )
+    .sort(PayrollCol.PAY_PERIOD_INDEX)
+)
+(
+    ggplot(
+        employee_history,
+        aes(PayrollCol.PAY_PERIOD_INDEX, PayrollCol.GROSS_PAY),
+    )
+    + geom_line()
+    + geom_point()
+    + ggtitle(f"Highlighted History: {highlight_employee}")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # ## What This Proves

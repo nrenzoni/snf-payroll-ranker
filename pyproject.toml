@@ -5,13 +5,17 @@ description = "payroll anomaly detection and ranked review system"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "numpy>=2.3.5",
+    "polars>=1.35.1",
+    "scikit-learn>=1.7.2",
+]
+
+[project.optional-dependencies]
+notebooks = [
     "jupyter>=1.1.1",
     "jupytext>=1.19.1",
     "lets-plot>=4.9.0",
     "nbconvert>=7.16.6",
-    "numpy>=2.3.5",
-    "polars>=1.35.1",
-    "scikit-learn>=1.7.2",
 ]
 
 [build-system]
@@ -51,6 +55,7 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 
 [tool.pyrefly]
+search-path = ["src", "notebooks"]
 project-includes = [
     "**/*.py*",
     "**/*.ipynb",

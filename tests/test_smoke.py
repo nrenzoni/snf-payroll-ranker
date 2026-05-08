@@ -1,3 +1,4 @@
+import importlib.util
 from pathlib import Path
 from typing import Any, cast
 
@@ -574,6 +575,14 @@ def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
     assert "FAST_MODE_SCENARIOS" in notebook_06
     assert "FAST_MODE_ITERATIONS" in notebook_07
     assert "QUEUE_THRESHOLD_GRID" in notebook_07
+
+
+def test_core_package_excludes_notebook_plotting_module() -> None:
+    assert importlib.util.find_spec("payroll_anomaly_ranking.charts") is None
+    for path in Path("src/payroll_anomaly_ranking").glob("*.py"):
+        source = path.read_text()
+        assert "lets_plot" not in source
+        assert "jupyter" not in source.lower()
 
 
 def test_scoring_excludes_injected_evaluation_truth() -> None:

@@ -20,19 +20,17 @@
 
 # %%
 import polars as pl
-from lets_plot import LetsPlot
-
-from payroll_anomaly_ranking.charts import (
-    credible_interval_chart,
-    effect_size_interval_chart,
-    expected_pay_coverage_chart,
-    expected_pay_residual_chart,
-    performance_instability_pareto_chart,
-    posterior_comparison_chart,
-    sensitivity_heatmap,
-    subgroup_forest_chart,
-    subgroup_shrinkage_chart,
+from common.plots import (
+    LetsPlot,
+    aes,
+    geom_errorbar,
+    geom_point,
+    geom_tile,
+    ggplot,
+    ggtitle,
+    theme_minimal,
 )
+
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.data import scenario_sanity_summary
 from payroll_anomaly_ranking.diagnostics import (
@@ -111,19 +109,38 @@ intervals
 # **Review-budget interval plot:** This chart shows uncertainty around review-budget performance rather than a single point estimate. The methodology repeatedly resamples synthetic evaluation outcomes to show a plausible range for metrics such as queue precision, recall, and dollar capture under the same review budget.
 
 # %%
-credible_interval_chart(intervals)
+(
+    ggplot(intervals, aes("metric", "mean"))
+    + geom_point()
+    + ggtitle("Bayesian-Style Review Budget Intervals")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # **Component superiority plot:** This chart compares which scoring component tends to perform better across internal synthetic regimes. It is useful for model governance because it shows whether rules, statistics, ML, exposure, or the hybrid score are consistently useful or only strong under certain synthetic conditions.
 
 # %%
-posterior_comparison_chart(superiority)
+(
+    ggplot(
+        superiority,
+        aes("left_signal", "right_signal", fill="win_probability"),
+    )
+    + geom_tile()
+    + ggtitle("Pairwise Component Superiority")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # **Effect-size interval plot:** This chart shows not just which component wins, but how large the performance difference appears to be. The methodology compares component metrics across scenario and seed units, then summarizes the uncertainty around those differences.
 
 # %%
-effect_size_interval_chart(superiority)
+(
+    ggplot(superiority, aes("left_signal", "mean_delta"))
+    + geom_point(aes(size="samples", color="scenario"))
+    + geom_errorbar(aes(ymin="lower_95", ymax="upper_95"), width=0.2)
+    + ggtitle("Effect-Size Intervals")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # ## Hierarchical Subgroup Diagnostics
@@ -139,13 +156,33 @@ top_subgroups
 # **Subgroup forest plot:** This chart highlights where synthetic anomaly-review outcomes differ across payroll subgroups such as departments. Stakeholders should use it as an internal diagnostic for concentration and coverage patterns, not as evidence about real employee groups.
 
 # %%
-subgroup_forest_chart(top_subgroups.filter(pl.col("dimension") == "department"))
+department_subgroups = top_subgroups.filter(pl.col("dimension") == "department").sort(
+    "pooled_anomaly_rate",
+)
+(
+    ggplot(
+        department_subgroups,
+        aes("subgroup", "pooled_anomaly_rate"),
+    )
+    + geom_point(aes(size="records", color="scenario"))
+    + geom_errorbar(aes(ymin="lower_95", ymax="upper_95"), width=0.2)
+    + ggtitle("Subgroup Pooled Anomaly Rates")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # **Subgroup shrinkage plot:** This chart compares raw subgroup results with stabilized estimates that reduce overreaction to small groups. The methodology pulls sparse subgroup estimates toward the overall pattern so internal reviewers can distinguish stronger signals from noisy small-sample variation.
 
 # %%
-subgroup_shrinkage_chart(subgroups)
+(
+    ggplot(
+        subgroups,
+        aes("raw_anomaly_rate", "pooled_anomaly_rate"),
+    )
+    + geom_point(aes(size="records"))
+    + ggtitle("Raw vs Pooled Subgroup Rates")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # ## Expected-Pay And Exposure Calibration
@@ -165,13 +202,23 @@ calibration
 # **Expected-pay coverage plot:** This chart shows whether expected gross-pay intervals cover typical synthetic records across subgroups. It helps reviewers assess whether the expected-pay context is broad enough for normal variation without becoming too vague for triage.
 
 # %%
-expected_pay_coverage_chart(calibration)
+(
+    ggplot(calibration, aes("subgroup", "coverage"))
+    + geom_point()
+    + ggtitle("Expected Pay Coverage")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # **Expected-pay residual plot:** This chart shows where actual gross pay sits relative to expected-pay estimates. Large residual patterns can indicate scenario drift, subgroup-specific pay behavior, or areas where expected-pay context may need recalibration before operational use.
 
 # %%
-expected_pay_residual_chart(calibration)
+(
+    ggplot(calibration, aes("subgroup", "avg_residual"))
+    + geom_point()
+    + ggtitle("Expected Pay Residuals")
+    + theme_minimal()
+)
 
 # %%
 exposure
@@ -203,7 +250,15 @@ robustness
 # **Instability Pareto plot:** This chart ranks internal scenario and seed units by instability so reviewers can focus on the settings most likely to change queue behavior. The methodology combines performance movement and queue-overlap changes into a diagnostic signal for robustness review.
 
 # %%
-performance_instability_pareto_chart(robustness)
+(
+    ggplot(
+        robustness,
+        aes("performance_instability", "precision_at_k"),
+    )
+    + geom_point()
+    + ggtitle("Performance vs Instability")
+    + theme_minimal()
+)
 
 
 # %%
@@ -222,4 +277,9 @@ sensitivity.head(10)
 # **Perturbation sensitivity heatmap:** This chart shows which ranked records move most when a controlled input perturbation is applied. It helps internal reviewers see whether small synthetic input changes materially alter score or rank, which is important for trust in review prioritization.
 
 # %%
-sensitivity_heatmap(sensitivity)
+(
+    ggplot(sensitivity, aes("rank_movement", "score_movement"))
+    + geom_point()
+    + ggtitle("Perturbation Sensitivity")
+    + theme_minimal()
+)

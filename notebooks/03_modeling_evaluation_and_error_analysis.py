@@ -19,15 +19,21 @@
 # **Executive takeaway:** Payroll anomaly ranking should be evaluated against realistic review budgets over time. Hybrid scoring is stronger when label-free exposure estimates, validation-selected thresholds, and rolling-origin checks are stable enough for payroll analysts to review before finalization.
 
 # %%
-from typing import Any
-
-import lets_plot as lp
 import polars as pl
+from common.plots import (
+    LetsPlot,
+    aes,
+    geom_histogram,
+    geom_line,
+    geom_point,
+    ggplot,
+    ggtitle,
+    theme_minimal,
+)
 from sklearn.ensemble import IsolationForest
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
-from payroll_anomaly_ranking.charts import dollars_captured_chart, precision_at_k_chart
 from payroll_anomaly_ranking.columns import (
     MODEL_FEATURE_COLUMNS,
     AggregateCol,
@@ -39,15 +45,6 @@ from payroll_anomaly_ranking.columns import (
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.models import temporal_split
 from payroll_anomaly_ranking.pipeline import run_pipeline
-
-LetsPlot: Any = getattr(lp, "LetsPlot")
-aes: Any = getattr(lp, "aes")
-geom_histogram: Any = getattr(lp, "geom_histogram")
-geom_line: Any = getattr(lp, "geom_line")
-geom_point: Any = getattr(lp, "geom_point")
-ggplot: Any = getattr(lp, "ggplot")
-ggtitle: Any = getattr(lp, "ggtitle")
-theme_minimal: Any = getattr(lp, "theme_minimal")
 
 LetsPlot.setup_html()
 
@@ -90,13 +87,25 @@ metrics
 # **Precision-at-review-budget plot:** This chart shows the share of reviewed records that match synthetic evaluation exceptions at each review budget. For non-technical stakeholders, it answers: "If payroll analysts review this many records, how concentrated is the queue with records that the synthetic test data intended to be exceptions?"
 
 # %%
-precision_at_k_chart(metrics)
+(
+    ggplot(metrics, aes("k", "precision_at_k"))
+    + geom_point()
+    + geom_line()
+    + ggtitle("Precision@K")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # **Dollars-captured plot:** This chart shows how much evaluation-only synthetic dollar impact is captured inside each review budget. The methodology ranks records by the operating score, takes the top records for each budget, and sums the injected synthetic impact only for evaluation; those injected impacts are not used to score or populate the analyst-safe queue.
 
 # %%
-dollars_captured_chart(metrics)
+(
+    ggplot(metrics, aes("k", "dollar_capture_rate"))
+    + geom_point()
+    + geom_line()
+    + ggtitle("Dollars Captured@K")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # ## Model Comparison
@@ -381,7 +390,7 @@ test_period_distribution = pl.concat(
 # %%
 (
     ggplot(
-        test_period_distribution.to_dict(as_series=False),
+        test_period_distribution,
         aes(PayrollCol.PAY_PERIOD_INDEX, "test_rows", color="method"),
     )
     + geom_point(size=4)
@@ -530,7 +539,7 @@ iforest_distribution = pl.concat(
 
 # %%
 (
-    ggplot(iforest_distribution.to_dict(as_series=False), aes("score", fill="method"))
+    ggplot(iforest_distribution, aes("score", fill="method"))
     + geom_histogram(bins=30, alpha=0.55)
     + ggtitle("Isolation Forest Score Distributions Depend On Assumptions")
     + theme_minimal()

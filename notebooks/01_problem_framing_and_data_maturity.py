@@ -50,14 +50,16 @@
 
 # %%
 import polars as pl
-from lets_plot import LetsPlot
-
-from payroll_anomaly_ranking.charts import (
-    department_heatmap_data,
-    overtime_distribution_chart,
-    pay_distribution_chart,
-    payroll_trend_chart,
+from common.plots import (
+    LetsPlot,
+    aes,
+    geom_histogram,
+    geom_line,
+    ggplot,
+    ggtitle,
+    theme_minimal,
 )
+
 from payroll_anomaly_ranking.columns import AggregateCol, PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.pipeline import run_pipeline
@@ -122,27 +124,62 @@ payroll.select(
 # **Payroll trend plot:** This chart shows how total synthetic payroll changes across pay periods. Stakeholders should use it to spot unusual cycle-level movement that could indicate seasonal payroll patterns, data-generation scenario effects, or periods worth investigating before interpreting individual records.
 
 # %%
-payroll_trend_chart(payroll)
+payroll_trend = (
+    payroll.group_by(PayrollCol.PAY_PERIOD_INDEX)
+    .agg(pl.sum(PayrollCol.GROSS_PAY).alias(PayrollCol.GROSS_PAY))
+    .sort(PayrollCol.PAY_PERIOD_INDEX)
+)
+(
+    ggplot(
+        payroll_trend,
+        aes(PayrollCol.PAY_PERIOD_INDEX, PayrollCol.GROSS_PAY),
+    )
+    + geom_line()
+    + ggtitle("Synthetic Payroll Trend")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # **Gross pay distribution plot:** This chart shows the spread of synthetic gross pay across employee-pay-period records. It helps non-technical reviewers see the difference between common payroll amounts and unusually large payments that may deserve review context.
 
 # %%
-pay_distribution_chart(payroll)
+(
+    ggplot(
+        payroll.select(PayrollCol.GROSS_PAY),
+        aes(PayrollCol.GROSS_PAY),
+    )
+    + geom_histogram(bins=30)
+    + ggtitle("Gross Pay Distribution")
+    + theme_minimal()
+)
 
 # %% [markdown]
 # **Overtime distribution plot:** This chart shows how overtime hours are distributed across synthetic payroll records. Most payroll cycles should have many ordinary records and a smaller tail of high-overtime records; the tail is important because approved overtime can be legitimate but still needs clear review evidence.
 
 # %%
-overtime_distribution_chart(payroll)
+(
+    ggplot(
+        payroll.select(PayrollCol.OVERTIME_HOURS),
+        aes(PayrollCol.OVERTIME_HOURS),
+    )
+    + geom_histogram(bins=30)
+    + ggtitle("Overtime Distribution")
+    + theme_minimal()
+)
 
 # %%
-department_heatmap_data(payroll).pivot(
-    index=PayrollCol.PAY_PERIOD_INDEX,
-    on=PayrollCol.DEPARTMENT,
-    values=AggregateCol.DEPARTMENT_GROSS_PAY,
-    aggregate_function="sum",
-).sort(PayrollCol.PAY_PERIOD_INDEX).head(10)
+(
+    payroll.group_by([PayrollCol.PAY_PERIOD_INDEX, PayrollCol.DEPARTMENT])
+    .agg(pl.sum(PayrollCol.GROSS_PAY).alias(AggregateCol.DEPARTMENT_GROSS_PAY))
+    .pivot(
+        index=PayrollCol.PAY_PERIOD_INDEX,
+        on=PayrollCol.DEPARTMENT,
+        values=AggregateCol.DEPARTMENT_GROSS_PAY,
+        aggregate_function="sum",
+    )
+    .sort(PayrollCol.PAY_PERIOD_INDEX)
+    .head(10)
+)
 
 # %% [markdown]
 # ## What This Proves

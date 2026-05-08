@@ -8,10 +8,20 @@ This project demonstrates a privacy-safe payroll anomaly detection workflow usin
 - No real employee identifiers, salaries, tax records, bank details, HR comments, company data, or production integrations are included.
 - Review queue outputs describe records requiring payroll review; they do not label employees or records as confirmed misconduct.
 
-## Setup
+## Core Pipeline Setup
+
+The core runtime installs only pipeline dependencies needed by downstream payroll anomaly ranking workflows. Notebook and plotting tools are optional.
 
 ```bash
 uv sync
+```
+
+## Notebook Reporting Setup
+
+Install the notebook/reporting extra before executing Jupytext notebooks or rendering Lets-Plot visuals.
+
+```bash
+uv sync --extra notebooks
 ```
 
 ## Run The Pipeline
@@ -54,12 +64,13 @@ Internal diagnostic notebooks are separate from the business-facing sequence:
 
 The internal notebooks use synthetic evaluation labels and injected anomaly dollar impacts for diagnostics only. Those fields do not alter model feature columns or analyst-safe review queue outputs.
 
-Run a notebook from a clean checkout with:
+Run a notebook from a clean checkout after installing the notebook/reporting extra with:
 
 ```bash
-uv run jupytext --to ipynb notebooks/01_problem_framing_and_data_maturity.py
-uv run jupyter nbconvert --to notebook --execute notebooks/01_problem_framing_and_data_maturity.ipynb --output 01_problem_framing_and_data_maturity.executed.ipynb --output-dir notebooks
+uv run jupytext --set-formats ipynb,py:percent --execute notebooks/01_problem_framing_and_data_maturity.py
 ```
+
+Notebook-only plotting code lives in the Jupytext notebook sources, with shared plotting adapters in `notebooks/common/plots.py`. The `src/payroll_anomaly_ranking/` package is kept free of Jupyter and Lets-Plot imports so downstream ML pipelines can use the runtime package without reporting dependencies.
 
 Internal notebooks use bounded but denser local defaults. Notebook `06` runs eight internal diagnostic scenarios (`baseline`, `rule-friendly`, `statistical-friendly`, `ml-friendly`, `exposure-heavy`, `subgroup-drift`, `calendar-drift`, `queue-stress`) across three seeds with 220 employees, 14 pay periods, and `INTERVAL_SAMPLES = 75`. Notebook `07` runs four queue scenarios (`baseline`, `queue-stress`, `calendar-drift`, `exposure-heavy`) with 220 employees, 14 pay periods, `QUEUE_ITERATIONS = 60`, `review_budget=10`, and threshold-grid demand at `QUEUE_THRESHOLD_GRID = (0.35, 0.45, 0.55, 0.65)`, plus an adaptive 90th-percentile threshold view. For faster local execution, reduce `DIAGNOSTIC_SCENARIOS`, `DIAGNOSTIC_SEEDS`, or `INTERVAL_SAMPLES` in notebook `06`, and reduce `QUEUE_SCENARIOS`, `QUEUE_ITERATIONS`, or `QUEUE_THRESHOLD_GRID` in notebook `07`.
 
@@ -86,4 +97,4 @@ Retraining should be triggered by feature drift, score drift, business rule chan
 - Synthetic labels are useful for demonstration but simpler than real payroll operations.
 - Unsupervised anomaly scores can prioritize legitimate bonuses, high earners, or approved corrections.
 - Hybrid weights are configurable examples and should be tuned against validation outcomes and business review capacity.
-- The MVP is notebook-first and does not include live dashboards, access control, alerting, scheduling, or vendor integrations.
+- The MVP includes optional notebook reporting and does not include live dashboards, access control, alerting, scheduling, or vendor integrations.

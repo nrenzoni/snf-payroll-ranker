@@ -1156,13 +1156,17 @@ name = "payroll-anomaly-ranking"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "numpy" },
+    { name = "polars" },
+    { name = "scikit-learn" },
+]
+
+[package.optional-dependencies]
+notebooks = [
     { name = "jupyter" },
     { name = "jupytext" },
     { name = "lets-plot" },
     { name = "nbconvert" },
-    { name = "numpy" },
-    { name = "polars" },
-    { name = "scikit-learn" },
 ]
 
 [package.dev-dependencies]
@@ -1179,14 +1183,15 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "jupyter", specifier = ">=1.1.1" },
-    { name = "jupytext", specifier = ">=1.19.1" },
-    { name = "lets-plot", specifier = ">=4.9.0" },
-    { name = "nbconvert", specifier = ">=7.16.6" },
+    { name = "jupyter", marker = "extra == 'notebooks'", specifier = ">=1.1.1" },
+    { name = "jupytext", marker = "extra == 'notebooks'", specifier = ">=1.19.1" },
+    { name = "lets-plot", marker = "extra == 'notebooks'", specifier = ">=4.9.0" },
+    { name = "nbconvert", marker = "extra == 'notebooks'", specifier = ">=7.16.6" },
     { name = "numpy", specifier = ">=2.3.5" },
     { name = "polars", specifier = ">=1.35.1" },
     { name = "scikit-learn", specifier = ">=1.7.2" },
 ]
+provides-extras = ["notebooks"]
 
 [package.metadata.requires-dev]
 dev = [
