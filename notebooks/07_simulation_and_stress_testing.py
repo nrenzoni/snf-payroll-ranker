@@ -25,14 +25,19 @@ import polars as pl
 from common.plots import (
     LetsPlot,
     aes,
+    coord_flip,
     geom_density,
     geom_histogram,
     geom_line,
     geom_point,
     geom_segment,
     geom_tile,
+    geom_vline,
     ggplot,
     ggtitle,
+    labs,
+    scale_color_gradient,
+    scale_fill_gradient,
     theme_minimal,
 )
 
@@ -57,6 +62,10 @@ config = PayrollConfig(employee_count=220, pay_periods=14, review_budgets=(10, 2
 QUEUE_SCENARIOS = ("baseline", "queue-stress", "calendar-drift", "exposure-heavy")
 QUEUE_THRESHOLD_GRID = (0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70)
 QUEUE_ITERATIONS = 300
+OPERATING_THRESHOLD = 0.60
+CAPACITY_SHOCK_PERIODS = (8, 9, 10, 11)
+CAPACITY_SHOCK_START_GUIDE = min(CAPACITY_SHOCK_PERIODS) - 0.5
+CAPACITY_SHOCK_END_GUIDE = max(CAPACITY_SHOCK_PERIODS) + 0.5
 FAST_MODE_QUEUE_SCENARIOS = ("baseline", "queue-stress")
 FAST_MODE_ITERATIONS = 20
 FAST_MODE_NOTE = "Dense defaults: 4 queue scenarios, 220 employees, 14 pay periods, threshold grid (0.30 through 0.70 by 0.05), iterations=300. Fast mode: reduce to FAST_MODE_QUEUE_SCENARIOS or FAST_MODE_ITERATIONS."
@@ -107,7 +116,7 @@ queue_sanity = pl.concat(
 #
 # How to read it: the x-axis is the score threshold, the y-axis is the number of records that would enter a threshold-based queue, and color identifies the synthetic scenario.
 #
-# What to look for: `queue-stress` should sit above calmer regimes across thresholds; if all lines overlap, later queue stress plots would mostly reflect capacity noise rather than scenario design.
+# What to look for: `queue-stress` should sit above calmer regimes across thresholds. If all lines overlap, later queue stress plots would mostly reflect capacity noise rather than scenario design.
 
 # %%
 candidate_columns = [
@@ -119,7 +128,7 @@ for row in queue_sanity.select(["scenario", *candidate_columns]).to_dicts():
         candidate_rows.append(
             {
                 "scenario": row["scenario"],
-                "threshold": column.removeprefix("candidates_at_"),
+                "threshold": float(column.removeprefix("candidates_at_")),
                 "candidates": row[column],
             },
         )
@@ -131,12 +140,17 @@ candidate_thresholds = pl.DataFrame(candidate_rows)
     )
     + geom_point(aes(color="scenario"), size=3)
     + geom_line(aes(color="scenario"))
-    + ggtitle("Scenario Candidate Demand by Threshold")
+    + ggtitle("Candidate Demand by Threshold")
+    + labs(
+        x="Score threshold",
+        y="Candidate records",
+        color="Scenario",
+    )
     + theme_minimal()
 )
 
 # %% [markdown]
-# **Scenario anomaly-load chart:** This plot checks whether scenarios differ in anomaly prevalence and synthetic dollar exposure.
+# **Scenario anomaly-load chart:** This plot checks whether scenarios differ in anomaly prevalence and evaluation-only synthetic dollar exposure.
 #
 # How to read it: the y-axis is anomaly rate, point size is total synthetic anomaly dollars, and color is anomaly count. The scenario labels are internal diagnostic regimes only.
 #
@@ -146,7 +160,13 @@ candidate_thresholds = pl.DataFrame(candidate_rows)
 (
     ggplot(queue_sanity, aes("scenario", "anomaly_rate"))
     + geom_point(aes(size="anomaly_dollars", color="anomaly_count"), alpha=0.8)
-    + ggtitle("Scenario Anomaly Load and Synthetic Exposure")
+    + ggtitle("Anomaly Load and Synthetic Exposure")
+    + labs(
+        x="Scenario",
+        y="Anomaly rate",
+        color="Anomaly count",
+        size="Synthetic anomaly dollars",
+    )
     + theme_minimal()
 )
 
@@ -169,26 +189,44 @@ adaptive_queue_spec = QueueSimulationSpec(
 
 # %%
 simulation = simulate_queue_capacity(queue_focus.scored, queue_spec)
-summary = summarize_queue_simulation(simulation)
+simulation_plot = simulation.with_columns(
+    (pl.col("dollars_captured") / 1_000).alias("dollars_captured_k"),
+)
+summary = summarize_queue_simulation(simulation).with_columns(
+    (pl.col("avg_missed_estimated_exposure") / 1_000).alias(
+        "avg_missed_estimated_exposure_k",
+    ),
+    (pl.col("avg_missed_synthetic_anomaly_dollars") / 1_000).alias(
+        "avg_missed_synthetic_anomaly_dollars_k",
+    ),
+)
 
 # %%
 adaptive_summary = summarize_queue_simulation(
     simulate_queue_capacity(queue_focus.scored, adaptive_queue_spec),
+).with_columns(
+    (pl.col("avg_missed_estimated_exposure") / 1_000).alias(
+        "avg_missed_estimated_exposure_k",
+    ),
 )
 
 # %% [markdown]
 # **Capacity distribution plot:** This chart shows the Monte Carlo distribution of available review capacity across simulated payroll cycles.
 #
-# How to read it: the x-axis is available analyst capacity for a period-threshold run; the light bars show integer capacity draws, and the smooth curve shows the overall simulated distribution.
+# How to read it: the x-axis is available analyst capacity for a period-threshold run; the light bars show integer capacity draws, and the smoothed curve shows the overall simulated distribution.
 #
 # What to look for: the left tail is the operational risk zone because demand policies must remain acceptable when available capacity drops below the nominal mean.
 
 # %%
 (
     ggplot(simulation, aes("capacity"))
-    + geom_histogram(aes(y="..density.."), bins=40, alpha=0.25)
-    + geom_density(color="#0f766e", size=1.2)
+    + geom_histogram(aes(y="..density.."), bins=16, alpha=0.25)
+    + geom_density(color="#0f766e", size=1.2, adjust=2.0, n=512)
     + ggtitle("Queue Capacity Distribution")
+    + labs(
+        x="Available analyst capacity",
+        y="Density",
+    )
     + theme_minimal()
 )
 
@@ -197,7 +235,7 @@ adaptive_summary = summarize_queue_simulation(
 #
 # How to read it: each point is a period-threshold policy summary from 300 Monte Carlo capacity draws. Color is threshold policy, and point size is average candidate queue size.
 #
-# What to look for: large, high points identify policies and periods where workload routinely exceeds analyst capacity.
+# What to look for: large, high points identify policies and periods where workload routinely exceeds analyst capacity. The vertical guide lines bracket the deliberately shocked capacity periods 8-11.
 
 # %%
 (
@@ -206,7 +244,23 @@ adaptive_summary = summarize_queue_simulation(
         aes(PayrollCol.PAY_PERIOD_INDEX, "overload_probability"),
     )
     + geom_point(aes(color="resolved_threshold", size="avg_candidate_queue_size"))
+    + geom_vline(
+        xintercept=CAPACITY_SHOCK_START_GUIDE,
+        linetype="dashed",
+        color="#64748b",
+    )
+    + geom_vline(
+        xintercept=CAPACITY_SHOCK_END_GUIDE,
+        linetype="dashed",
+        color="#64748b",
+    )
     + ggtitle("Overload Probability")
+    + labs(
+        x="Pay period",
+        y="Overload probability",
+        color="Score threshold",
+        size="Candidate records",
+    )
     + theme_minimal()
 )
 
@@ -229,6 +283,12 @@ adaptive_summary = summarize_queue_simulation(
     )
     + geom_tile()
     + ggtitle("Overload Probability Heatmap")
+    + labs(
+        x="Score threshold",
+        y="Pay period",
+        fill="Overload probability",
+    )
+    + scale_fill_gradient(low="#f8fafc", high="#b91c1c", limits=[0, 1])
     + theme_minimal()
 )
 
@@ -237,7 +297,7 @@ adaptive_summary = summarize_queue_simulation(
 #
 # How to read it: each point is a period-threshold combination; color is threshold and size is the average number of records actually reviewed after capacity is applied.
 #
-# What to look for: high candidate demand with small reviewed counts indicates queue spillover risk.
+# What to look for: high candidate demand with small reviewed counts indicates queue spillover risk. The shocked capacity periods 8-11 are where this gap is most operationally important.
 
 # %%
 (
@@ -246,29 +306,49 @@ adaptive_summary = summarize_queue_simulation(
         aes(PayrollCol.PAY_PERIOD_INDEX, "avg_candidate_queue_size"),
     )
     + geom_point(aes(color="resolved_threshold", size="avg_reviewed_records"))
+    + geom_vline(
+        xintercept=CAPACITY_SHOCK_START_GUIDE,
+        linetype="dashed",
+        color="#64748b",
+    )
+    + geom_vline(
+        xintercept=CAPACITY_SHOCK_END_GUIDE,
+        linetype="dashed",
+        color="#64748b",
+    )
     + ggtitle("Scenario Queue Demand")
+    + labs(
+        x="Pay period",
+        y="Candidate records",
+        color="Score threshold",
+        size="Reviewed records",
+    )
     + theme_minimal()
 )
 
 # %% [markdown]
 # **Dollar-capture distribution plot:** This chart shows the range of evaluation-only synthetic dollar impact captured across repeated queue-capacity simulations.
 #
-# How to read it: the x-axis is synthetic anomaly dollars captured in a single simulated period-threshold-capacity draw, and bar height is frequency.
+# How to read it: the x-axis is evaluation-only synthetic anomaly dollars captured in a single simulated period-threshold-capacity draw, shown in thousands of dollars, and bar height is frequency.
 #
 # What to look for: a wide or multi-peaked distribution means operational impact depends strongly on which records fit into capacity.
 
 # %%
 (
-    ggplot(simulation, aes("dollars_captured"))
+    ggplot(simulation_plot, aes("dollars_captured_k"))
     + geom_histogram(bins=20)
     + ggtitle("Dollar Capture Distribution")
+    + labs(
+        x="Synthetic anomaly dollars captured ($K)",
+        y="Simulation draws",
+    )
     + theme_minimal()
 )
 
 # %% [markdown]
-# **Queue tornado plot:** This chart ranks threshold policies by the range of missed estimated exposure they produce across pay periods.
+# **Queue tornado plot:** This chart ranks threshold policies by the range of missed estimated exposure they produce across pay periods. Estimated exposure is the review-safe proxy for dollars at risk, not the evaluation-only synthetic anomaly dollars.
 #
-# How to read it: each horizontal bar spans the low-to-high missed estimated exposure for one threshold; the dot marks the average.
+# How to read it: each horizontal bar spans the low-to-high missed estimated exposure for one threshold in thousands of dollars; the dot marks the average.
 #
 # What to look for: long bars identify policies whose results are highly period-sensitive and therefore operationally fragile.
 
@@ -279,9 +359,9 @@ queue_tornado = (
     )
     .group_by("condition")
     .agg(
-        pl.min("avg_missed_estimated_exposure").alias("low"),
-        pl.max("avg_missed_estimated_exposure").alias("high"),
-        pl.mean("avg_missed_estimated_exposure").alias("mean_value"),
+        pl.min("avg_missed_estimated_exposure_k").alias("low"),
+        pl.max("avg_missed_estimated_exposure_k").alias("high"),
+        pl.mean("avg_missed_estimated_exposure_k").alias("mean_value"),
     )
     .with_columns((pl.col("high") - pl.col("low")).alias("impact"))
     .sort("impact")
@@ -294,13 +374,18 @@ queue_tornado = (
     )
     + geom_point(aes(x="mean_value"), color="#111827", size=3)
     + ggtitle("Queue Sensitivity Tornado")
+    + labs(
+        x="Missed estimated exposure ($K)",
+        y="Score threshold",
+        color="Range ($K)",
+    )
     + theme_minimal()
 )
 
 # %% [markdown]
-# **Missed exposure plot:** This chart shows synthetic exposure that remains outside reviewed capacity by period and threshold policy.
+# **Missed exposure plot:** This chart shows estimated exposure that remains outside reviewed capacity by period and threshold policy. Point size uses evaluation-only synthetic anomaly dollars, so it should be interpreted as validation context rather than analyst-facing queue content.
 #
-# How to read it: the y-axis is missed estimated exposure, color is threshold, and point size is missed synthetic anomaly dollars.
+# How to read it: the y-axis is missed estimated exposure in thousands of dollars, color is threshold, and point size is missed synthetic anomaly dollars.
 #
 # What to look for: large high points are the policy-period combinations where limited capacity leaves the most synthetic risk unreviewed.
 
@@ -308,13 +393,29 @@ queue_tornado = (
 (
     ggplot(
         summary,
-        aes(PayrollCol.PAY_PERIOD_INDEX, "avg_missed_estimated_exposure"),
+        aes(PayrollCol.PAY_PERIOD_INDEX, "avg_missed_estimated_exposure_k"),
     )
     + geom_point(
-        aes(color="resolved_threshold", size="avg_missed_synthetic_anomaly_dollars"),
+        aes(color="resolved_threshold", size="avg_missed_synthetic_anomaly_dollars_k"),
         alpha=0.75,
     )
+    + geom_vline(
+        xintercept=CAPACITY_SHOCK_START_GUIDE,
+        linetype="dashed",
+        color="#64748b",
+    )
+    + geom_vline(
+        xintercept=CAPACITY_SHOCK_END_GUIDE,
+        linetype="dashed",
+        color="#64748b",
+    )
     + ggtitle("Missed Exposure by Period and Policy")
+    + labs(
+        x="Pay period",
+        y="Missed estimated exposure ($K)",
+        color="Score threshold",
+        size="Missed synthetic anomaly dollars ($K)",
+    )
     + theme_minimal()
 )
 
@@ -341,16 +442,16 @@ summary.select(
 #
 # **Adaptive vs fixed threshold chart:** This plot compares the fixed score-threshold grid with an adaptive 90th-percentile policy.
 #
-# How to read it: each point is a policy summary. The x-axis is mean overload probability, the y-axis is mean missed estimated exposure, and point size is mean candidate queue size.
+# How to read it: each point is a policy summary. The x-axis is mean overload probability, the y-axis is mean missed estimated exposure in thousands of dollars, and point size is mean candidate queue size.
 #
-# What to look for: policies closer to the lower-left corner are less overloaded and leave less estimated exposure outside capacity. The adaptive point shows whether a relative top-tail policy is more stable than fixed cutoffs.
+# What to look for: policies closer to the lower-left corner are less overloaded and leave less estimated exposure outside capacity. The adaptive p90 point is a relative upper-tail diagnostic, not a capacity-calibrated operating policy; if it overloads capacity, a future adaptive rule should be calibrated from current period volume and available staffing rather than from a fixed employee count.
 
 # %%
 fixed_policy = (
     summary.group_by("resolved_threshold")
     .agg(
         pl.mean("overload_probability").alias("mean_overload_probability"),
-        pl.mean("avg_missed_estimated_exposure").alias("mean_missed_exposure"),
+        pl.mean("avg_missed_estimated_exposure_k").alias("mean_missed_exposure_k"),
         pl.mean("avg_candidate_queue_size").alias("mean_candidate_queue_size"),
     )
     .with_columns(
@@ -366,7 +467,7 @@ adaptive_policy = (
     adaptive_summary.group_by("resolved_threshold")
     .agg(
         pl.mean("overload_probability").alias("mean_overload_probability"),
-        pl.mean("avg_missed_estimated_exposure").alias("mean_missed_exposure"),
+        pl.mean("avg_missed_estimated_exposure_k").alias("mean_missed_exposure_k"),
         pl.mean("avg_candidate_queue_size").alias("mean_candidate_queue_size"),
     )
     .with_columns(
@@ -382,47 +483,78 @@ policy_comparison = pl.concat([fixed_policy, adaptive_policy])
 (
     ggplot(
         policy_comparison,
-        aes("mean_overload_probability", "mean_missed_exposure"),
+        aes("mean_overload_probability", "mean_missed_exposure_k"),
     )
     + geom_point(aes(color="policy", size="mean_candidate_queue_size"), alpha=0.8)
     + ggtitle("Adaptive vs Fixed Threshold Queue Risk")
+    + labs(
+        x="Mean overload probability",
+        y="Mean missed estimated exposure ($K)",
+        color="Policy",
+        size="Mean candidate records",
+    )
     + theme_minimal()
 )
 
 # %% [markdown]
+# ## Operating Recommendation
+#
+# The queue service-level view is more actionable than a single model metric: a candidate operating policy should keep overload probability acceptable while limiting unreviewed estimated exposure. In this run, permissive thresholds create the clearest overload during the shocked capacity window, while stricter thresholds reduce workload at the cost of leaving more estimated exposure outside analyst capacity.
+#
+# Estimated exposure is the review-safe dollars-at-risk proxy used for operational decisions. Synthetic anomaly dollars are evaluation-only truth labels used here to validate whether the proxy tracks injected payroll risk; they should not appear in analyst-facing queues.
+#
+# A practical next operating test is to select a threshold band from the lower-left region of the policy comparison, then rerun the queue simulation under expected staffing, reduced staffing, and catch-up staffing assumptions. Adaptive thresholding should remain relative to the current pay-period population and available capacity rather than assuming a fixed employee count.
+
+# %% [markdown]
 # ## Scenario-Dependent Queue Stress Tests
 #
-# Diagnostic question: which internal stress-test regimes create demand, overload, missed exposure, or missed synthetic anomaly dollars under the same operating policy?
+# Diagnostic question: which internal stress-test regimes create demand, overload, missed estimated exposure, or missed evaluation-only synthetic anomaly dollars under the same threshold-grid design?
 
 # %%
 comparison = compare_scenarios(
     config,
     scenarios,
     queue_spec,
+).with_columns(
+    (pl.col("avg_missed_estimated_exposure") / 1_000).alias(
+        "avg_missed_estimated_exposure_k",
+    ),
+    (pl.col("avg_missed_synthetic_anomaly_dollars") / 1_000).alias(
+        "avg_missed_synthetic_anomaly_dollars_k",
+    ),
+)
+operating_threshold_comparison = comparison.filter(
+    pl.col("resolved_threshold") == OPERATING_THRESHOLD,
 )
 
 # %% [markdown]
-# **Scenario stress-test heatmap:** This chart compares queue outcomes across internal synthetic stress regimes under the same operating policy.
+# **Scenario stress-test heatmap:** This chart compares queue outcomes across internal synthetic stress regimes at the selected operating threshold.
 #
 # How to read it: scenario is on the x-axis, pay period is on the y-axis, and fill color is overload probability after Monte Carlo capacity draws.
 #
-# What to look for: scenario-period blocks with high overload show where the same queue policy fails under a different synthetic world.
+# What to look for: scenario-period blocks with high overload show where the same threshold policy fails under a different synthetic world. The full threshold grid remains in the worst-row table below; this heatmap is filtered to one operating threshold to avoid overplotting multiple policies into the same tile.
 
 # %%
 (
     ggplot(
-        comparison,
+        operating_threshold_comparison,
         aes("scenario", PayrollCol.PAY_PERIOD_INDEX, fill="overload_probability"),
     )
     + geom_tile()
-    + ggtitle("Stress-Test Queue Outcomes")
+    + ggtitle(f"Stress-Test Queue Outcomes at Threshold {OPERATING_THRESHOLD:.2f}")
+    + labs(
+        x="Scenario",
+        y="Pay period",
+        fill="Overload probability",
+    )
+    + scale_fill_gradient(low="#f8fafc", high="#b91c1c", limits=[0, 1])
     + theme_minimal()
 )
 
 # %% [markdown]
 # **Scenario risk ranking:** This chart compresses the scenario comparison into one point per regime.
 #
-# How to read it: the y-axis ranks maximum missed estimated exposure, color is maximum overload probability, and size is mean candidate queue size.
+# How to read it: the horizontal axis ranks maximum missed estimated exposure in thousands of dollars, color is maximum overload probability, and size is mean candidate queue size.
 #
 # What to look for: scenarios with large, high-risk points are the regimes that need threshold changes, staffing buffers, or additional triage rules.
 
@@ -431,20 +563,28 @@ scenario_risk = (
     comparison.group_by("scenario")
     .agg(
         pl.max("overload_probability").alias("max_overload_probability"),
-        pl.max("avg_missed_estimated_exposure").alias("max_missed_exposure"),
+        pl.max("avg_missed_estimated_exposure_k").alias("max_missed_exposure_k"),
         pl.mean("avg_candidate_queue_size").alias("mean_candidate_queue_size"),
     )
-    .sort("max_missed_exposure")
+    .sort("max_missed_exposure_k")
 )
 (
     ggplot(
         scenario_risk,
-        aes("scenario", "max_missed_exposure"),
+        aes("scenario", "max_missed_exposure_k"),
     )
     + geom_point(
         aes(color="max_overload_probability", size="mean_candidate_queue_size"),
     )
     + ggtitle("Scenario Queue Risk Ranking")
+    + labs(
+        x="Scenario",
+        y="Maximum missed estimated exposure ($K)",
+        color="Max overload probability",
+        size="Mean candidate records",
+    )
+    + scale_color_gradient(low="#0f766e", high="#b91c1c", limits=[0, 1])
+    + coord_flip()
     + theme_minimal()
 )
 
