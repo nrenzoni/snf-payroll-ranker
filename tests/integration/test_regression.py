@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -58,6 +59,17 @@ from payroll_anomaly_ranking.scenarios import (
 from payroll_anomaly_ranking.validation import validate_payroll
 
 pytestmark = pytest.mark.integration
+
+
+def _load_notebook_plots_module() -> Any:
+    module_path = Path("notebooks/common/plots.py")
+    spec = importlib.util.spec_from_file_location("notebook_common_plots", module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_end_to_end_smoke() -> None:
@@ -586,6 +598,30 @@ def test_core_package_excludes_notebook_plotting_module() -> None:
         source = path.read_text()
         assert "lets_plot" not in source
         assert "jupyter" not in source.lower()
+
+
+def test_checked_ggplot_allows_valid_render() -> None:
+    plots = _load_notebook_plots_module()
+    plot = (
+        plots.ggplot({"x": [1, 2], "y": [1, 2]}, plots.aes("x", "y"))
+        + plots.geom_point()
+    )
+
+    html = plot._repr_html_()
+
+    assert "__error_message" not in html
+
+
+def test_checked_ggplot_raises_on_embedded_render_error() -> None:
+    plots = _load_notebook_plots_module()
+    plot = (
+        plots.ggplot({"x": [1, 2], "y": [1, 2]}, plots.aes("x", "y"))
+        + plots.geom_point()
+        + plots.geom_vline(xintercept=(7.5, 11.5))
+    )
+
+    with pytest.raises(plots.LetsPlotRenderError, match="Can't convert to number"):
+        plot._repr_html_()
 
 
 def test_scoring_excludes_injected_evaluation_truth() -> None:
