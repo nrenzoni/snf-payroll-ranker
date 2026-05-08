@@ -123,6 +123,9 @@ scored.with_columns(
 #
 # The distribution shows whether the hybrid score creates a focused top end for analyst review rather than treating every record as equally risky.
 
+# %% [markdown]
+# **Score distribution plot:** This chart shows how the final review-priority score is spread across synthetic payroll records. A useful ranking process should create a small higher-risk tail so analysts can focus limited review time on the most unusual records rather than scanning the entire payroll population.
+
 # %%
 score_distribution_chart(scored)
 
@@ -130,6 +133,9 @@ score_distribution_chart(scored)
 # ## Selected Employee History
 #
 # A flagged employee history helps analysts see whether a current-period value differs from the employee's previous payroll pattern.
+
+# %% [markdown]
+# **Selected employee history plot:** This chart follows one prioritized synthetic employee across pay periods. It gives reviewers a plain-language view of whether the current record is unusual for that employee's own history, which is often easier to interpret than comparing the employee only against the whole workforce.
 
 # %%
 highlight_employee = queue.select(PayrollCol.EMPLOYEE_ID).item(0, 0)

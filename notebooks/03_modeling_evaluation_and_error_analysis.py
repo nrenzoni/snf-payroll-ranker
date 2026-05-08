@@ -86,8 +86,14 @@ metrics
 # %% [markdown]
 # Precision@K shows how concentrated true synthetic exceptions are in the queue. Recall@K and dollar capture rate show whether the queue covers enough evaluation-only synthetic impact. Average anomaly rank and mean reciprocal rank summarize how early anomalies appear in each period.
 
+# %% [markdown]
+# **Precision-at-review-budget plot:** This chart shows the share of reviewed records that match synthetic evaluation exceptions at each review budget. For non-technical stakeholders, it answers: "If payroll analysts review this many records, how concentrated is the queue with records that the synthetic test data intended to be exceptions?"
+
 # %%
 precision_at_k_chart(metrics)
+
+# %% [markdown]
+# **Dollars-captured plot:** This chart shows how much evaluation-only synthetic dollar impact is captured inside each review budget. The methodology ranks records by the operating score, takes the top records for each budget, and sums the injected synthetic impact only for evaluation; those injected impacts are not used to score or populate the analyst-safe queue.
 
 # %%
 dollars_captured_chart(metrics)
@@ -110,6 +116,9 @@ comparison
 
 # %%
 backtest
+
+# %% [markdown]
+# **Backtest precision-over-time plot:** This chart shows whether review quality is reasonably stable across later synthetic payroll periods. Stakeholders should look for whether performance depends on only one strong period or remains useful across multiple payroll cycles.
 
 # %%
 (
@@ -365,6 +374,11 @@ test_period_distribution = pl.concat(
         .with_columns(pl.lit("Corrected: temporal holdout").alias("method")),
     ],
 ).sort(["method", PayrollCol.PAY_PERIOD_INDEX])
+
+# %% [markdown]
+# **Random-split period-mix plot:** This plot makes the evaluation mistake visible by showing which pay periods appear in the test set. A random row split mixes historical and future payroll periods, while the corrected temporal holdout keeps evaluation in later periods so the test better resembles future payroll review.
+
+# %%
 (
     ggplot(
         test_period_distribution.to_dict(as_series=False),
@@ -510,6 +524,11 @@ iforest_distribution = pl.concat(
         ),
     ],
 )
+
+# %% [markdown]
+# **Isolation Forest score-distribution plot:** This chart compares how default and configured model assumptions shape anomaly scores. The point for stakeholders is that model defaults are not neutral business decisions; contamination assumptions, training period choices, and fixed seeds affect which records appear review-worthy.
+
+# %%
 (
     ggplot(iforest_distribution.to_dict(as_series=False), aes("score", fill="method"))
     + geom_histogram(bins=30, alpha=0.55)
@@ -590,6 +609,9 @@ for budget in [5, 10, 25, 50, 100]:
 cumulative_capture = pl.DataFrame(capture_rows)
 cumulative_capture
 
+# %% [markdown]
+# **Ranked budget dollar-capture plot:** This chart shows the business tradeoff of reviewing more top-ranked records. The methodology sorts later-period records by the final score, expands the review budget, and calculates evaluation-only synthetic dollars captured at each budget.
+
 # %%
 (
     ggplot(cumulative_capture, aes("budget", "dollar_capture_rate"))
@@ -640,6 +662,11 @@ queue_plot = queue_error_summary.unpivot(
     variable_name="outcome",
     value_name="records",
 )
+
+# %% [markdown]
+# **False-positive and missed-anomaly tradeoff plot:** This chart shows how review budget changes the balance between useful hits, normal records sent to review, and synthetic exceptions left outside the queue. It helps payroll leaders decide whether extra review capacity is justified by the expected reduction in missed exceptions.
+
+# %%
 (
     ggplot(queue_plot, aes("budget", "records", color="outcome"))
     + geom_point(size=4)
@@ -694,6 +721,9 @@ for budget in config.review_budgets:
         )
 importance_summary = pl.DataFrame(importance_rows)
 importance_summary
+
+# %% [markdown]
+# **Likelihood-versus-exposure plot:** This chart compares a likelihood-only ranking with the impact-aware hybrid ranking. The methodology evaluates dollars captured per reviewed row under fixed budgets, reinforcing that payroll review should consider material exposure and not only whether a record looks statistically unusual.
 
 # %%
 (

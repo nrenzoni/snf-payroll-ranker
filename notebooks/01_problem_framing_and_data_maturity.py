@@ -118,11 +118,20 @@ payroll.select(
 #
 # These views show payroll trend, gross pay distribution, overtime distribution, and department-period payroll concentration using synthetic data.
 
+# %% [markdown]
+# **Payroll trend plot:** This chart shows how total synthetic payroll changes across pay periods. Stakeholders should use it to spot unusual cycle-level movement that could indicate seasonal payroll patterns, data-generation scenario effects, or periods worth investigating before interpreting individual records.
+
 # %%
 payroll_trend_chart(payroll)
 
+# %% [markdown]
+# **Gross pay distribution plot:** This chart shows the spread of synthetic gross pay across employee-pay-period records. It helps non-technical reviewers see the difference between common payroll amounts and unusually large payments that may deserve review context.
+
 # %%
 pay_distribution_chart(payroll)
+
+# %% [markdown]
+# **Overtime distribution plot:** This chart shows how overtime hours are distributed across synthetic payroll records. Most payroll cycles should have many ordinary records and a smaller tail of high-overtime records; the tail is important because approved overtime can be legitimate but still needs clear review evidence.
 
 # %%
 overtime_distribution_chart(payroll)

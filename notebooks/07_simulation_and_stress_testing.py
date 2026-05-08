@@ -108,20 +108,38 @@ adaptive_summary = summarize_queue_simulation(
 )
 adaptive_summary
 
+# %% [markdown]
+# **Capacity distribution plot:** This chart shows how much review capacity is available across simulated payroll cycles. Stakeholders should use it to understand that analyst availability can vary, so a queue policy must be robust to periods with lower capacity.
+
 # %%
 capacity_distribution_chart(simulation)
+
+# %% [markdown]
+# **Overload probability plot:** This chart shows where review demand is likely to exceed available capacity. The methodology compares simulated queue demand with simulated analyst capacity for each period and threshold policy, then summarizes how often demand is too high.
 
 # %%
 overload_probability_chart(summary)
 
+# %% [markdown]
+# **Queue demand plot:** This chart shows how many records would enter review under the configured score-threshold policy. It helps non-technical stakeholders see that threshold-based queues can expand or shrink with risk concentration, unlike a fixed top-K workload.
+
 # %%
 queue_demand_chart(summary)
+
+# %% [markdown]
+# **Dollar-capture distribution plot:** This chart shows the range of evaluation-only synthetic dollar impact captured across repeated queue-capacity simulations. It communicates uncertainty in operational impact instead of presenting one run as the expected production result.
 
 # %%
 dollar_capture_distribution_chart(simulation)
 
+# %% [markdown]
+# **Queue tornado plot:** This chart highlights which operating conditions most influence simulated queue outcomes. It is a sensitivity view for leaders who need to know whether threshold choice, available capacity, or period effects drive the most operational variation.
+
 # %%
 queue_tornado_chart(summary)
+
+# %% [markdown]
+# **Missed exposure plot:** This chart shows synthetic exposure that remains outside reviewed capacity. The methodology compares records demanded by the queue with records that can actually be reviewed, then summarizes the evaluation-only exposure left unreviewed.
 
 # %%
 missed_exposure_chart(summary)
@@ -138,6 +156,9 @@ comparison = compare_scenarios(
     queue_spec,
 )
 comparison
+
+# %% [markdown]
+# **Scenario stress-test heatmap:** This chart compares queue outcomes across internal synthetic stress regimes under the same operating policy. It helps stakeholders see whether a policy that works in a baseline scenario still behaves acceptably under drift, high exposure, or capacity pressure.
 
 # %%
 stress_test_heatmap(comparison)
