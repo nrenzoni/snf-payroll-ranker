@@ -55,3 +55,6 @@ project-includes = [
     "**/*.py*",
     "**/*.ipynb",
 ]
+project-excludes = [
+    "**/.ipynb_checkpoints/**",
+]
