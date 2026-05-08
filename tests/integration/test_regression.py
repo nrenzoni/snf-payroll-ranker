@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import polars as pl
+import pytest
 
 from payroll_anomaly_ranking.columns import (
     MODEL_FEATURE_COLUMNS,
@@ -55,6 +56,8 @@ from payroll_anomaly_ranking.scenarios import (
     diagnostic_scenario_presets,
 )
 from payroll_anomaly_ranking.validation import validate_payroll
+
+pytestmark = pytest.mark.integration
 
 
 def test_end_to_end_smoke() -> None:

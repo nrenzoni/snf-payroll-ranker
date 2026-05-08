@@ -31,4 +31,11 @@ Python 3.13 payroll anomaly ranking pipeline using Polars, NumPy, scikit-learn, 
 ## Verify
 
 - After code or notebook changes, run `uv run prek run --all-files`.
-- Run `uv run pytest` when behavior, pipeline logic, diagnostics, or test-covered code changes.
+- After code changes, run the quick smoke suite with `uv run pytest tests/smoke` unless the change is docs-only.
+- Also run targeted tests for the code area you changed when available:
+  - Data generation or scenarios: `uv run pytest tests/integration/test_regression.py -k "generation or scenario or drift or anomaly"`
+  - Features or rules: `uv run pytest tests/integration/test_regression.py -k "feature or rule"`
+  - Scoring, uncertainty, or models: `uv run pytest tests/integration/test_regression.py -k "scoring or uncertainty"`
+  - Evaluation, diagnostics, or queue simulation: `uv run pytest tests/integration/test_regression.py -k "evaluation or diagnostic or queue"`
+  - Notebook contracts or dependency boundaries: `uv run pytest tests/integration/test_regression.py -k "notebook or plotting"`
+- Run full `uv run pytest` for large behavior changes, pipeline-wide changes, scenario/diagnostic changes, dependency/config changes, or when the user requests full validation.

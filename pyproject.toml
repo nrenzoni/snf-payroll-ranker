@@ -40,6 +40,11 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "smoke: fast post-change sanity checks",
+    "integration: broader pipeline, scenario, and diagnostic tests",
+    "slow: expensive scenario, diagnostic, or notebook execution tests",
+]
 
 [tool.ruff]
 line-length = 88

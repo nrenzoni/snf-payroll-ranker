@@ -47,6 +47,26 @@ Expected generated files:
 - `outputs/evaluation/evaluation_labeled_review_queue.csv`
 - `outputs/evaluation/scenario_metadata.json` when a scenario-controlled run is written
 
+## Development Checks
+
+Use the smoke suite for a quick sanity check after small code changes:
+
+```bash
+uv run pytest tests/smoke
+```
+
+Run targeted integration checks for the affected area when changing pipeline behavior, scoring, diagnostics, scenarios, queue simulation, or notebook contracts. Run the full suite for large behavior changes or release-level validation:
+
+```bash
+uv run pytest
+```
+
+Run repository hooks after code or notebook edits:
+
+```bash
+uv run prek run --all-files
+```
+
 ## Notebook Sequence
 
 The Jupytext-paired notebook index is `notebooks/payroll_anomaly_detection.py`. The business-facing sequence is:
