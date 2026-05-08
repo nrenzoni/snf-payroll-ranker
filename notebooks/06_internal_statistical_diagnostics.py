@@ -20,6 +20,7 @@
 
 # %%
 import polars as pl
+from common.execution import notebook_fast_mode
 from common.plots import (
     LetsPlot,
     aes,
@@ -68,7 +69,11 @@ FAST_MODE_SCENARIOS = ("baseline", "subgroup-drift", "queue-stress")
 FAST_MODE_SEEDS = (42,)
 FAST_MODE_SAMPLE_COUNT = 25
 FAST_MODE_NOTE = "Dense defaults: 8 scenarios, 3 seeds, 220 employees, 14 pay periods, samples=75. Fast mode: reduce to FAST_MODE_SCENARIOS, FAST_MODE_SEEDS, or FAST_MODE_SAMPLE_COUNT."
-scenarios = diagnostic_scenario_presets(DIAGNOSTIC_SCENARIOS)
+NOTEBOOK_FAST = notebook_fast_mode()
+active_scenarios = FAST_MODE_SCENARIOS if NOTEBOOK_FAST else DIAGNOSTIC_SCENARIOS
+active_seeds = FAST_MODE_SEEDS if NOTEBOOK_FAST else DIAGNOSTIC_SEEDS
+active_interval_samples = FAST_MODE_SAMPLE_COUNT if NOTEBOOK_FAST else INTERVAL_SAMPLES
+scenarios = diagnostic_scenario_presets(active_scenarios)
 results = run_pipeline(config, scenario=scenarios["subgroup-drift"])
 scored = results.scored
 
@@ -93,13 +98,13 @@ sanity
 intervals = review_budget_interval_summary(
     scored,
     k=10,
-    samples=INTERVAL_SAMPLES,
+    samples=active_interval_samples,
     seed=config.seed,
 )
 unit_metrics = run_diagnostic_comparison_units(
     config,
     scenarios=scenarios,
-    seeds=DIAGNOSTIC_SEEDS,
+    seeds=active_seeds,
     k=10,
 )
 superiority = pairwise_component_superiority(unit_metrics, metric="precision_at_k")

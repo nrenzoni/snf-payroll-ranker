@@ -84,7 +84,13 @@ Internal diagnostic notebooks are separate from the business-facing sequence:
 
 The internal notebooks use synthetic evaluation labels and injected anomaly dollar impacts for diagnostics only. Those fields do not alter model feature columns or analyst-safe review queue outputs.
 
-Run a notebook from a clean checkout after installing the notebook/reporting extra with:
+For fast notebook error checks that must not create or overwrite paired `.ipynb` artifacts, execute to a temporary notebook under `/tmp` with `NOTEBOOK_FAST=1`:
+
+```bash
+NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/06_internal_statistical_diagnostics.fast.ipynb notebooks/06_internal_statistical_diagnostics.py
+```
+
+When full evaluation is required, or when analyst-visible outputs should be refreshed, run the paired notebook command after installing the notebook/reporting extra:
 
 ```bash
 uv run jupytext --set-formats ipynb,py:percent --execute notebooks/01_problem_framing_and_data_maturity.py
@@ -92,7 +98,7 @@ uv run jupytext --set-formats ipynb,py:percent --execute notebooks/01_problem_fr
 
 Notebook-only plotting code lives in the Jupytext notebook sources, with shared plotting adapters in `notebooks/common/plots.py`. The `src/payroll_anomaly_ranking/` package is kept free of Jupyter and Lets-Plot imports so downstream ML pipelines can use the runtime package without reporting dependencies.
 
-Internal notebooks use bounded but denser local defaults. Notebook `06` runs eight internal diagnostic scenarios (`baseline`, `rule-friendly`, `statistical-friendly`, `ml-friendly`, `exposure-heavy`, `subgroup-drift`, `calendar-drift`, `queue-stress`) across three seeds with 220 employees, 14 pay periods, and `INTERVAL_SAMPLES = 75`. Notebook `07` runs four queue scenarios (`baseline`, `queue-stress`, `calendar-drift`, `exposure-heavy`) with 220 employees, 14 pay periods, `QUEUE_ITERATIONS = 60`, `review_budget=10`, and threshold-grid demand at `QUEUE_THRESHOLD_GRID = (0.35, 0.45, 0.55, 0.65)`, plus an adaptive 90th-percentile threshold view. For faster local execution, reduce `DIAGNOSTIC_SCENARIOS`, `DIAGNOSTIC_SEEDS`, or `INTERVAL_SAMPLES` in notebook `06`, and reduce `QUEUE_SCENARIOS`, `QUEUE_ITERATIONS`, or `QUEUE_THRESHOLD_GRID` in notebook `07`.
+Internal notebooks use bounded but denser local defaults. Notebook `06` runs eight internal diagnostic scenarios (`baseline`, `rule-friendly`, `statistical-friendly`, `ml-friendly`, `exposure-heavy`, `subgroup-drift`, `calendar-drift`, `queue-stress`) across three seeds with 220 employees, 14 pay periods, and `INTERVAL_SAMPLES = 75`. Notebook `07` runs four queue scenarios (`baseline`, `queue-stress`, `calendar-drift`, `exposure-heavy`) with 220 employees, 14 pay periods, `QUEUE_ITERATIONS = 300`, `review_budget=10`, and threshold-grid demand at `QUEUE_THRESHOLD_GRID = (0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70)`, plus an adaptive 90th-percentile threshold view. `NOTEBOOK_FAST=1` switches supported internal notebooks to reduced diagnostic workloads for execution checks and prints a diagnostic-only fast-mode message; without that environment variable, JupyterLab and full Jupytext refreshes run the full defaults without extra fast-mode output.
 
 ## What The Workflow Covers
 

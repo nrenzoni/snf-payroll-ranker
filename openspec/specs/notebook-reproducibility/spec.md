@@ -42,6 +42,10 @@ The internal diagnostic notebooks SHALL support dense diagnostic defaults and an
 - **WHEN** notebook fast mode is enabled
 - **THEN** scenario counts, Monte Carlo repetitions, plot density, and expensive diagnostics are reduced while preserving representative outputs
 
+#### Scenario: Fast mode avoids paired output refresh
+- **WHEN** a fast notebook error check is run with `NOTEBOOK_FAST=1`
+- **THEN** Jupytext writes the executed notebook to a temporary `/tmp` output rather than creating or overwriting the paired `.ipynb` artifact
+
 ### Requirement: Paired notebook outputs are refreshable
 The internal diagnostic notebooks SHALL produce paired outputs that can be regenerated reproducibly.
 

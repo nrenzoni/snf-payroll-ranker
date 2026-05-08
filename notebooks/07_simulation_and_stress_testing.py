@@ -22,6 +22,7 @@
 
 # %%
 import polars as pl
+from common.execution import notebook_fast_mode
 from common.plots import (
     LetsPlot,
     aes,
@@ -69,8 +70,11 @@ CAPACITY_SHOCK_END_GUIDE = max(CAPACITY_SHOCK_PERIODS) + 0.5
 FAST_MODE_QUEUE_SCENARIOS = ("baseline", "queue-stress")
 FAST_MODE_ITERATIONS = 20
 FAST_MODE_NOTE = "Dense defaults: 4 queue scenarios, 220 employees, 14 pay periods, threshold grid (0.30 through 0.70 by 0.05), iterations=300. Fast mode: reduce to FAST_MODE_QUEUE_SCENARIOS or FAST_MODE_ITERATIONS."
+NOTEBOOK_FAST = notebook_fast_mode()
+active_queue_scenarios = FAST_MODE_QUEUE_SCENARIOS if NOTEBOOK_FAST else QUEUE_SCENARIOS
+active_queue_iterations = FAST_MODE_ITERATIONS if NOTEBOOK_FAST else QUEUE_ITERATIONS
 queue_spec = QueueSimulationSpec(
-    iterations=QUEUE_ITERATIONS,
+    iterations=active_queue_iterations,
     review_budget=10,
     score_thresholds=QUEUE_THRESHOLD_GRID,
     fixed_capacity=8,
@@ -79,7 +83,7 @@ queue_spec = QueueSimulationSpec(
     seed=config.seed,
     scenario="queue-stress",
 )
-scenarios = diagnostic_scenario_presets(QUEUE_SCENARIOS)
+scenarios = diagnostic_scenario_presets(active_queue_scenarios)
 queue_focus = run_pipeline(config, scenario=scenarios["queue-stress"])
 
 # %% [markdown]

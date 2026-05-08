@@ -9,7 +9,8 @@ Python 3.13 payroll anomaly ranking pipeline using Polars, NumPy, scikit-learn, 
 - Jupytext `.py` files are the notebook source of truth; do not edit `.ipynb` artifacts directly.
 - Run any Python-related project command with `uv run ...`.
 - Use `uv sync --extra notebooks` before executing notebooks or rendering Lets-Plot visuals.
-- To inspect cell output for a `.py` notebook, run `uv run jupytext --set-formats ipynb,py:percent --execute notebook.py`. This creates/updates the paired `.ipynb`, executes it, reports failures, and lets you inspect outputs on success.
+- For fast notebook error checks that must not create or overwrite paired `.ipynb` artifacts, run `NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/notebook-name.fast.ipynb notebook.py`. This uses reduced diagnostic workloads where notebooks support fast mode, preserves notebook-local imports, and writes the executed notebook only under `/tmp`.
+- When full notebook evaluation or refreshed analyst-visible outputs are required, run `uv run jupytext --set-formats ipynb,py:percent --execute notebook.py`. This creates/updates the paired `.ipynb`, executes the full workload, reports failures, and lets you inspect outputs on success.
 
 ## Specs
 
