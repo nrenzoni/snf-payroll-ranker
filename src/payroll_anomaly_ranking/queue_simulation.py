@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 import numpy as np
 import polars as pl
@@ -19,50 +20,101 @@ def simulate_queue_capacity(
     periods = sorted(scored.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list())
     rows: list[dict[str, object]] = []
     thresholds = _threshold_specs(scored, spec)
+    snapshots = _queue_snapshots(scored, periods, thresholds, spec)
     for iteration in range(1, spec.iterations + 1):
-        for period in periods:
-            period_scores = scored.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) == period)
-            ordered = period_scores.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True)
-            for demand_mode, threshold in thresholds:
-                if threshold is None:
-                    queue = ordered.head(min(spec.review_budget, period_scores.height))
-                else:
-                    queue = ordered.filter(
-                        pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= threshold,
-                    )
-                queue = queue.with_columns(pl.lit(spec.scenario).alias("scenario"))
-                capacity = _capacity_for_period(spec, period, rng)
-                reviewed = queue.head(min(capacity, queue.height))
-                missed = queue.slice(reviewed.height)
-                rows.append(
-                    {
-                        "iteration": iteration,
-                        "scenario": spec.scenario,
-                        PayrollCol.PAY_PERIOD_INDEX: period,
-                        "demand_mode": demand_mode,
-                        "score_threshold": spec.score_threshold,
-                        "resolved_threshold": threshold,
-                        "adaptive_threshold_quantile": spec.adaptive_threshold_quantile,
-                        "review_budget": spec.review_budget,
-                        "capacity": capacity,
-                        "queue_size": queue.height,
-                        "candidate_queue_size": queue.height,
-                        "reviewed_records": reviewed.height,
-                        "overload": capacity < queue.height,
-                        "captured_anomalies": _sum(reviewed, PayrollCol.IS_ANOMALY),
-                        "dollars_captured": _sum(reviewed, PayrollCol.ANOMALY_DOLLARS),
-                        "missed_anomalies": _sum(missed, PayrollCol.IS_ANOMALY),
-                        "missed_estimated_exposure": _sum(
-                            missed,
-                            ScoreCol.ESTIMATED_EXPOSURE,
-                        ),
-                        "missed_synthetic_anomaly_dollars": _sum(
-                            missed,
-                            PayrollCol.ANOMALY_DOLLARS,
-                        ),
-                    },
-                )
+        for snapshot in snapshots:
+            capacity = _capacity_for_period(spec, snapshot.period, rng)
+            reviewed_records = min(capacity, snapshot.queue_size)
+            captured_anomalies = snapshot.captured_anomalies(reviewed_records)
+            dollars_captured = snapshot.dollars_captured(reviewed_records)
+            missed_anomalies = snapshot.missed_anomalies(reviewed_records)
+            missed_exposure = snapshot.missed_estimated_exposure(reviewed_records)
+            missed_dollars = snapshot.missed_synthetic_anomaly_dollars(reviewed_records)
+            # Queue membership is deterministic for a period-threshold policy; only
+            # simulated capacity varies across Monte Carlo iterations.
+            threshold = snapshot.threshold
+            demand_mode = snapshot.demand_mode
+            period = snapshot.period
+            rows.append(
+                {
+                    "iteration": iteration,
+                    "scenario": spec.scenario,
+                    PayrollCol.PAY_PERIOD_INDEX: period,
+                    "demand_mode": demand_mode,
+                    "score_threshold": spec.score_threshold,
+                    "resolved_threshold": threshold,
+                    "adaptive_threshold_quantile": spec.adaptive_threshold_quantile,
+                    "review_budget": spec.review_budget,
+                    "capacity": capacity,
+                    "queue_size": snapshot.queue_size,
+                    "candidate_queue_size": snapshot.queue_size,
+                    "reviewed_records": reviewed_records,
+                    "overload": capacity < snapshot.queue_size,
+                    "captured_anomalies": captured_anomalies,
+                    "dollars_captured": dollars_captured,
+                    "missed_anomalies": missed_anomalies,
+                    "missed_estimated_exposure": missed_exposure,
+                    "missed_synthetic_anomaly_dollars": missed_dollars,
+                },
+            )
     return pl.DataFrame(rows)
+
+
+@dataclass(frozen=True)
+class _QueueSnapshot:
+    period: int
+    demand_mode: str
+    threshold: float | None
+    queue_size: int
+    anomaly_prefix: np.ndarray
+    dollars_prefix: np.ndarray
+    exposure_prefix: np.ndarray
+
+    def captured_anomalies(self, reviewed_records: int) -> float:
+        return float(self.anomaly_prefix[reviewed_records])
+
+    def dollars_captured(self, reviewed_records: int) -> float:
+        return float(self.dollars_prefix[reviewed_records])
+
+    def missed_anomalies(self, reviewed_records: int) -> float:
+        return float(self.anomaly_prefix[-1] - self.anomaly_prefix[reviewed_records])
+
+    def missed_estimated_exposure(self, reviewed_records: int) -> float:
+        return float(self.exposure_prefix[-1] - self.exposure_prefix[reviewed_records])
+
+    def missed_synthetic_anomaly_dollars(self, reviewed_records: int) -> float:
+        return float(self.dollars_prefix[-1] - self.dollars_prefix[reviewed_records])
+
+
+def _queue_snapshots(
+    scored: pl.DataFrame,
+    periods: list[int],
+    thresholds: list[tuple[str, float | None]],
+    spec: QueueSimulationSpec,
+) -> list[_QueueSnapshot]:
+    snapshots: list[_QueueSnapshot] = []
+    for period in periods:
+        period_scores = scored.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) == period)
+        ordered = period_scores.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True)
+        for demand_mode, threshold in thresholds:
+            if threshold is None:
+                queue = ordered.head(min(spec.review_budget, period_scores.height))
+            else:
+                queue = ordered.filter(
+                    pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= threshold,
+                )
+            snapshots.append(
+                _QueueSnapshot(
+                    period=period,
+                    demand_mode=demand_mode,
+                    threshold=threshold,
+                    queue_size=queue.height,
+                    anomaly_prefix=_prefix_sum(queue, PayrollCol.IS_ANOMALY),
+                    dollars_prefix=_prefix_sum(queue, PayrollCol.ANOMALY_DOLLARS),
+                    exposure_prefix=_prefix_sum(queue, ScoreCol.ESTIMATED_EXPOSURE),
+                ),
+            )
+    return snapshots
 
 
 def summarize_queue_simulation(simulation: pl.DataFrame) -> pl.DataFrame:
@@ -148,7 +200,8 @@ def _threshold_specs(
     return [("fixed_top_k", None)]
 
 
-def _sum(frame: pl.DataFrame, column: str) -> float:
+def _prefix_sum(frame: pl.DataFrame, column: str) -> np.ndarray:
     if frame.is_empty() or column not in frame.columns:
-        return 0.0
-    return float(frame.select(pl.sum(column)).item() or 0.0)
+        return np.array([0.0])
+    values = frame.get_column(column).to_numpy().astype(float)
+    return np.concatenate(([0.0], np.cumsum(values)))

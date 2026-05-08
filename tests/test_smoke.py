@@ -569,7 +569,7 @@ def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
     assert "LetsPlot.setup_html()" in notebook_06
     assert "LetsPlot.setup_html()" in notebook_07
     assert "INTERVAL_SAMPLES = 75" in notebook_06
-    assert "QUEUE_ITERATIONS = 60" in notebook_07
+    assert "QUEUE_ITERATIONS = 300" in notebook_07
     assert "DIAGNOSTIC_SCENARIOS" in notebook_06
     assert "FAST_MODE_SCENARIOS" in notebook_06
     assert "FAST_MODE_ITERATIONS" in notebook_07
