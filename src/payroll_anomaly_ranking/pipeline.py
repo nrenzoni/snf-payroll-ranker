@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypeVar
 
 import polars as pl
 
@@ -27,29 +28,151 @@ from payroll_anomaly_ranking.validation import (
     validate_payroll,
 )
 
+T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class PipelineIncludeConfig:
+    validation: bool = True
+    aggregations: bool = True
+    evaluation: bool = True
+    backtest: bool = True
+    rolling_origin: bool = True
+    review_queues: bool = True
+    leakage_checks: bool = True
+
+    @classmethod
+    def all(cls) -> PipelineIncludeConfig:
+        return cls()
+
+    @classmethod
+    def scored_only(cls) -> PipelineIncludeConfig:
+        return cls(
+            validation=False,
+            aggregations=False,
+            evaluation=False,
+            backtest=False,
+            rolling_origin=False,
+            review_queues=False,
+            leakage_checks=False,
+        )
+
+
+class PipelineArtifactNotGeneratedError(RuntimeError):
+    """Raised when code accesses a pipeline artifact that was not requested."""
+
+
+def _artifact_not_generated(artifact_name: str) -> PipelineArtifactNotGeneratedError:
+    return PipelineArtifactNotGeneratedError(
+        f"Pipeline artifact '{artifact_name}' was not generated. "
+        "Include it via PipelineIncludeConfig before accessing this result.",
+    )
+
 
 @dataclass(frozen=True)
 class PipelineResults:
     payroll: pl.DataFrame
     labels: pl.DataFrame
-    validation_failures: pl.DataFrame
-    validation_warnings: pl.DataFrame
-    aggregations: PayrollAggregations
     scored: pl.DataFrame
-    metrics: pl.DataFrame
-    model_comparison: pl.DataFrame
-    category_error_analysis: pl.DataFrame
-    uncertainty_bucket_metrics: pl.DataFrame
-    risk_coverage_analysis: pl.DataFrame
-    expected_gross_pay_interval_metrics: pl.DataFrame
-    backtest: pl.DataFrame
-    rolling_origin_metrics: pl.DataFrame
-    validation_selected_settings: pl.DataFrame
-    stability_summary: pl.DataFrame
-    leakage_checks: pl.DataFrame
-    analyst_review_queue: pl.DataFrame
-    evaluation_labeled_review_queue: pl.DataFrame
     scenario_metadata: dict[str, object]
+    include: PipelineIncludeConfig = PipelineIncludeConfig()
+    _validation_failures: pl.DataFrame | None = None
+    _validation_warnings: pl.DataFrame | None = None
+    _aggregations: PayrollAggregations | None = None
+    _metrics: pl.DataFrame | None = None
+    _model_comparison: pl.DataFrame | None = None
+    _category_error_analysis: pl.DataFrame | None = None
+    _uncertainty_bucket_metrics: pl.DataFrame | None = None
+    _risk_coverage_analysis: pl.DataFrame | None = None
+    _expected_gross_pay_interval_metrics: pl.DataFrame | None = None
+    _backtest: pl.DataFrame | None = None
+    _rolling_origin_metrics: pl.DataFrame | None = None
+    _validation_selected_settings: pl.DataFrame | None = None
+    _stability_summary: pl.DataFrame | None = None
+    _leakage_checks: pl.DataFrame | None = None
+    _analyst_review_queue: pl.DataFrame | None = None
+    _evaluation_labeled_review_queue: pl.DataFrame | None = None
+
+    def _required(self, value: T | None, artifact_name: str) -> T:
+        if value is None:
+            raise _artifact_not_generated(artifact_name)
+        return value
+
+    @property
+    def validation_failures(self) -> pl.DataFrame:
+        return self._required(self._validation_failures, "validation_failures")
+
+    @property
+    def validation_warnings(self) -> pl.DataFrame:
+        return self._required(self._validation_warnings, "validation_warnings")
+
+    @property
+    def aggregations(self) -> PayrollAggregations:
+        return self._required(self._aggregations, "aggregations")
+
+    @property
+    def metrics(self) -> pl.DataFrame:
+        return self._required(self._metrics, "metrics")
+
+    @property
+    def model_comparison(self) -> pl.DataFrame:
+        return self._required(self._model_comparison, "model_comparison")
+
+    @property
+    def category_error_analysis(self) -> pl.DataFrame:
+        return self._required(self._category_error_analysis, "category_error_analysis")
+
+    @property
+    def uncertainty_bucket_metrics(self) -> pl.DataFrame:
+        return self._required(
+            self._uncertainty_bucket_metrics,
+            "uncertainty_bucket_metrics",
+        )
+
+    @property
+    def risk_coverage_analysis(self) -> pl.DataFrame:
+        return self._required(self._risk_coverage_analysis, "risk_coverage_analysis")
+
+    @property
+    def expected_gross_pay_interval_metrics(self) -> pl.DataFrame:
+        return self._required(
+            self._expected_gross_pay_interval_metrics,
+            "expected_gross_pay_interval_metrics",
+        )
+
+    @property
+    def backtest(self) -> pl.DataFrame:
+        return self._required(self._backtest, "backtest")
+
+    @property
+    def rolling_origin_metrics(self) -> pl.DataFrame:
+        return self._required(self._rolling_origin_metrics, "rolling_origin_metrics")
+
+    @property
+    def validation_selected_settings(self) -> pl.DataFrame:
+        return self._required(
+            self._validation_selected_settings,
+            "validation_selected_settings",
+        )
+
+    @property
+    def stability_summary(self) -> pl.DataFrame:
+        return self._required(self._stability_summary, "stability_summary")
+
+    @property
+    def leakage_checks(self) -> pl.DataFrame:
+        return self._required(self._leakage_checks, "leakage_checks")
+
+    @property
+    def analyst_review_queue(self) -> pl.DataFrame:
+        return self._required(self._analyst_review_queue, "analyst_review_queue")
+
+    @property
+    def evaluation_labeled_review_queue(self) -> pl.DataFrame:
+        return self._required(
+            self._evaluation_labeled_review_queue,
+            "evaluation_labeled_review_queue",
+        )
 
 
 def run_pipeline(
@@ -57,46 +180,76 @@ def run_pipeline(
     *,
     scenario: ScenarioSpec | None = None,
     write_outputs: bool = False,
+    include: PipelineIncludeConfig = PipelineIncludeConfig(),
 ) -> PipelineResults:
     generated = generate_payroll(config, scenario=scenario)
-    validation = validate_payroll(generated.payroll)
     features = build_features(generated.payroll)
     ruled = add_rule_flags(features)
     scored = score_payroll(ruled, config)
-    evaluation = evaluate_scores(scored, config)
-    category = evaluation.category_error_analysis.sort(PayrollCol.ANOMALY_CATEGORY)
-    backtest = backtest_by_period(scored, config)
-    analyst_queue = build_review_queue(scored, top_k=max(config.review_budgets))
-    evaluation_queue = build_evaluation_review_queue(
-        scored,
-        top_k=max(config.review_budgets),
+    validation = validate_payroll(generated.payroll) if include.validation else None
+    aggregations = (
+        payroll_aggregations(generated.payroll) if include.aggregations else None
     )
-    rolling = rolling_origin_evaluation(
-        scored,
-        config,
+    evaluation = evaluate_scores(scored, config) if include.evaluation else None
+    category = (
+        evaluation.category_error_analysis.sort(PayrollCol.ANOMALY_CATEGORY)
+        if evaluation is not None
+        else None
     )
-    leakage = leakage_checks(analyst_queue)
+    backtest = backtest_by_period(scored, config) if include.backtest else None
+    analyst_queue = (
+        build_review_queue(scored, top_k=max(config.review_budgets))
+        if include.review_queues or include.leakage_checks
+        else None
+    )
+    evaluation_queue = (
+        build_evaluation_review_queue(
+            scored,
+            top_k=max(config.review_budgets),
+        )
+        if include.review_queues
+        else None
+    )
+    rolling = (
+        rolling_origin_evaluation(scored, config) if include.rolling_origin else None
+    )
+    leakage = (
+        leakage_checks(analyst_queue)
+        if include.leakage_checks and analyst_queue is not None
+        else None
+    )
     results = PipelineResults(
         payroll=generated.payroll,
         labels=generated.labels,
-        validation_failures=validation.failures,
-        validation_warnings=validation.warnings,
-        aggregations=payroll_aggregations(generated.payroll),
         scored=scored,
-        metrics=evaluation.metrics,
-        model_comparison=evaluation.model_comparison,
-        category_error_analysis=category,
-        uncertainty_bucket_metrics=evaluation.uncertainty_bucket_metrics,
-        risk_coverage_analysis=evaluation.risk_coverage_analysis,
-        expected_gross_pay_interval_metrics=evaluation.expected_gross_pay_interval_metrics,
-        backtest=backtest,
-        rolling_origin_metrics=rolling.metrics,
-        validation_selected_settings=rolling.selected_settings,
-        stability_summary=rolling.stability_summary,
-        leakage_checks=leakage,
-        analyst_review_queue=analyst_queue,
-        evaluation_labeled_review_queue=evaluation_queue,
         scenario_metadata=_scenario_metadata(scenario),
+        include=include,
+        _validation_failures=validation.failures if validation is not None else None,
+        _validation_warnings=validation.warnings if validation is not None else None,
+        _aggregations=aggregations,
+        _metrics=evaluation.metrics if evaluation is not None else None,
+        _model_comparison=evaluation.model_comparison
+        if evaluation is not None
+        else None,
+        _category_error_analysis=category,
+        _uncertainty_bucket_metrics=evaluation.uncertainty_bucket_metrics
+        if evaluation is not None
+        else None,
+        _risk_coverage_analysis=evaluation.risk_coverage_analysis
+        if evaluation is not None
+        else None,
+        _expected_gross_pay_interval_metrics=evaluation.expected_gross_pay_interval_metrics
+        if evaluation is not None
+        else None,
+        _backtest=backtest,
+        _rolling_origin_metrics=rolling.metrics if rolling is not None else None,
+        _validation_selected_settings=rolling.selected_settings
+        if rolling is not None
+        else None,
+        _stability_summary=rolling.stability_summary if rolling is not None else None,
+        _leakage_checks=leakage,
+        _analyst_review_queue=analyst_queue if include.review_queues else None,
+        _evaluation_labeled_review_queue=evaluation_queue,
     )
     if write_outputs:
         write_pipeline_outputs(results, config)
@@ -107,6 +260,7 @@ def write_pipeline_outputs(
     results: PipelineResults,
     config: PayrollConfig = PayrollConfig(),
 ) -> None:
+    _require_output_artifacts(results)
     config.data_dir.mkdir(parents=True, exist_ok=True)
     config.output_dir.mkdir(parents=True, exist_ok=True)
     evaluation_dir = config.output_dir / "evaluation"
@@ -159,6 +313,25 @@ def _scenario_metadata(scenario: ScenarioSpec | None) -> dict[str, object]:
         scenario.anomaly_plan or scenario.drift_plans or scenario.change_points,
     )
     return metadata
+
+
+def _require_output_artifacts(results: PipelineResults) -> None:
+    for artifact_name in (
+        "metrics",
+        "model_comparison",
+        "category_error_analysis",
+        "uncertainty_bucket_metrics",
+        "risk_coverage_analysis",
+        "expected_gross_pay_interval_metrics",
+        "backtest",
+        "rolling_origin_metrics",
+        "validation_selected_settings",
+        "stability_summary",
+        "leakage_checks",
+        "analyst_review_queue",
+        "evaluation_labeled_review_queue",
+    ):
+        getattr(results, artifact_name)
 
 
 if __name__ == "__main__":

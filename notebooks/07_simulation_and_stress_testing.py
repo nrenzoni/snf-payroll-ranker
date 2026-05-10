@@ -45,7 +45,7 @@ from common.plots import (
 from payroll_anomaly_ranking.columns import PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.data import scenario_sanity_summary
-from payroll_anomaly_ranking.pipeline import run_pipeline
+from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig, run_pipeline
 from payroll_anomaly_ranking.queue_simulation import (
     compare_scenarios,
     simulate_queue_capacity,
@@ -73,6 +73,11 @@ FAST_MODE_NOTE = "Dense defaults: 4 queue scenarios, 220 employees, 14 pay perio
 NOTEBOOK_FAST = notebook_fast_mode()
 active_queue_scenarios = FAST_MODE_QUEUE_SCENARIOS if NOTEBOOK_FAST else QUEUE_SCENARIOS
 active_queue_iterations = FAST_MODE_ITERATIONS if NOTEBOOK_FAST else QUEUE_ITERATIONS
+active_pipeline_include = (
+    PipelineIncludeConfig.scored_only()
+    if NOTEBOOK_FAST
+    else PipelineIncludeConfig.all()
+)
 queue_spec = QueueSimulationSpec(
     iterations=active_queue_iterations,
     review_budget=10,
@@ -84,7 +89,11 @@ queue_spec = QueueSimulationSpec(
     scenario="queue-stress",
 )
 scenarios = diagnostic_scenario_presets(active_queue_scenarios)
-queue_focus = run_pipeline(config, scenario=scenarios["queue-stress"])
+queue_focus = run_pipeline(
+    config,
+    scenario=scenarios["queue-stress"],
+    include=active_pipeline_include,
+)
 
 # %% [markdown]
 # ## Simulation Design
@@ -105,7 +114,11 @@ queue_focus = run_pipeline(config, scenario=scenarios["queue-stress"])
 queue_sanity = pl.concat(
     [
         scenario_sanity_summary(
-            run_pipeline(config, scenario=scenario).scored,
+            run_pipeline(
+                config,
+                scenario=scenario,
+                include=active_pipeline_include,
+            ).scored,
             scenario=name,
             score_thresholds=QUEUE_THRESHOLD_GRID,
         )

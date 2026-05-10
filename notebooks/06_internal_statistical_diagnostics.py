@@ -46,7 +46,7 @@ from payroll_anomaly_ranking.diagnostics import (
     top_subgroup_diagnostics,
 )
 from payroll_anomaly_ranking.models import score_payroll
-from payroll_anomaly_ranking.pipeline import run_pipeline
+from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig, run_pipeline
 from payroll_anomaly_ranking.scenarios import diagnostic_scenario_presets
 
 LetsPlot.setup_html()
@@ -73,15 +73,28 @@ NOTEBOOK_FAST = notebook_fast_mode()
 active_scenarios = FAST_MODE_SCENARIOS if NOTEBOOK_FAST else DIAGNOSTIC_SCENARIOS
 active_seeds = FAST_MODE_SEEDS if NOTEBOOK_FAST else DIAGNOSTIC_SEEDS
 active_interval_samples = FAST_MODE_SAMPLE_COUNT if NOTEBOOK_FAST else INTERVAL_SAMPLES
+active_pipeline_include = (
+    PipelineIncludeConfig.scored_only()
+    if NOTEBOOK_FAST
+    else PipelineIncludeConfig.all()
+)
 scenarios = diagnostic_scenario_presets(active_scenarios)
-results = run_pipeline(config, scenario=scenarios["subgroup-drift"])
+results = run_pipeline(
+    config,
+    scenario=scenarios["subgroup-drift"],
+    include=active_pipeline_include,
+)
 scored = results.scored
 
 # %%
 sanity = pl.concat(
     [
         scenario_sanity_summary(
-            run_pipeline(config, scenario=scenario).scored,
+            run_pipeline(
+                config,
+                scenario=scenario,
+                include=active_pipeline_include,
+            ).scored,
             scenario=name,
         )
         for name, scenario in scenarios.items()
@@ -241,6 +254,7 @@ alt_results = run_pipeline(
         review_budgets=(10, 25),
         seed=config.seed + 1,
     ),
+    include=active_pipeline_include,
 )
 robustness = robustness_summary(
     {

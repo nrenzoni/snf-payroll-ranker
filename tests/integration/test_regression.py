@@ -41,7 +41,11 @@ from payroll_anomaly_ranking.explainability import (
 )
 from payroll_anomaly_ranking.features import build_features
 from payroll_anomaly_ranking.models import _feature_matrix, score_payroll
-from payroll_anomaly_ranking.pipeline import run_pipeline
+from payroll_anomaly_ranking.pipeline import (
+    PipelineArtifactNotGeneratedError,
+    PipelineIncludeConfig,
+    run_pipeline,
+)
 from payroll_anomaly_ranking.queue_simulation import (
     simulate_queue_capacity,
     summarize_queue_simulation,
@@ -133,6 +137,71 @@ def test_pipeline_writes_outputs_only_when_requested(tmp_path) -> None:
     assert (
         config.output_dir / "evaluation" / OutputName.EVALUATION_LABELED_REVIEW_QUEUE
     ).exists()
+
+
+def test_pipeline_default_result_exposes_full_artifacts() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+
+    results = run_pipeline(config)
+
+    assert results.payroll.height > 0
+    assert results.labels.height > 0
+    assert results.scored.height == results.payroll.height
+    assert results.validation_failures.height == 0
+    assert results.validation_warnings.height >= 0
+    assert results.aggregations.payroll_volume.height > 0
+    assert results.metrics.height == 2
+    assert results.model_comparison.height == 4
+    assert results.category_error_analysis.height > 0
+    assert results.uncertainty_bucket_metrics.height > 0
+    assert results.risk_coverage_analysis.height > 0
+    assert results.expected_gross_pay_interval_metrics.height == 1
+    assert results.backtest.height > 0
+    assert results.rolling_origin_metrics.height > 0
+    assert results.validation_selected_settings.height > 0
+    assert results.stability_summary.height == 1
+    assert results.leakage_checks.height > 0
+    assert results.analyst_review_queue.height > 0
+    assert results.evaluation_labeled_review_queue.height > 0
+    assert results.scenario_metadata["name"] == "default"
+
+
+def test_pipeline_scored_only_result_exposes_core_artifacts() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+
+    results = run_pipeline(config, include=PipelineIncludeConfig.scored_only())
+
+    assert results.payroll.height > 0
+    assert results.labels.height > 0
+    assert results.scored.height == results.payroll.height
+    assert results.scenario_metadata["name"] == "default"
+
+
+def test_pipeline_scored_only_excluded_artifacts_raise() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    results = run_pipeline(config, include=PipelineIncludeConfig.scored_only())
+
+    excluded_artifact_names = [
+        "validation_failures",
+        "validation_warnings",
+        "aggregations",
+        "metrics",
+        "model_comparison",
+        "category_error_analysis",
+        "uncertainty_bucket_metrics",
+        "risk_coverage_analysis",
+        "expected_gross_pay_interval_metrics",
+        "backtest",
+        "rolling_origin_metrics",
+        "validation_selected_settings",
+        "stability_summary",
+        "leakage_checks",
+        "analyst_review_queue",
+        "evaluation_labeled_review_queue",
+    ]
+    for artifact_name in excluded_artifact_names:
+        with pytest.raises(PipelineArtifactNotGeneratedError, match=artifact_name):
+            getattr(results, artifact_name)
 
 
 def test_default_payroll_generation_reproducible_and_schema_compatible() -> None:
@@ -589,8 +658,20 @@ def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
     assert "LetsPlot.setup_html()" in notebook_07
     assert "from common.execution import notebook_fast_mode" in notebook_06
     assert "from common.execution import notebook_fast_mode" in notebook_07
+    assert (
+        "from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig"
+        in notebook_06
+    )
+    assert (
+        "from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig"
+        in notebook_07
+    )
     assert "NOTEBOOK_FAST = notebook_fast_mode()" in notebook_06
     assert "NOTEBOOK_FAST = notebook_fast_mode()" in notebook_07
+    assert "PipelineIncludeConfig.scored_only()" in notebook_06
+    assert "PipelineIncludeConfig.scored_only()" in notebook_07
+    assert "if NOTEBOOK_FAST" in notebook_06
+    assert "if NOTEBOOK_FAST" in notebook_07
     assert "INTERVAL_SAMPLES = 75" in notebook_06
     assert "QUEUE_ITERATIONS = 300" in notebook_07
     assert "DIAGNOSTIC_SCENARIOS" in notebook_06
@@ -599,6 +680,8 @@ def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
     assert "QUEUE_THRESHOLD_GRID" in notebook_07
     assert 'os.getenv("NOTEBOOK_FAST") == "1"' in execution_helper
     assert "reduced diagnostic workload" in execution_helper
+    assert "scored-only pipeline artifacts" in readme
+    assert "scored-only pipeline artifacts" in agent_instructions
     assert (
         "--run-path notebooks --output /tmp/06_internal_statistical_diagnostics.fast.ipynb"
         in readme

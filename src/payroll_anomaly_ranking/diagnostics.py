@@ -123,7 +123,7 @@ def run_diagnostic_comparison_units(
     origins: tuple[str, ...] = ("default",),
     k: int | None = None,
 ) -> pl.DataFrame:
-    from payroll_anomaly_ranking.pipeline import run_pipeline
+    from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig, run_pipeline
 
     scenario_map = scenarios or diagnostic_scenario_presets(
         (
@@ -142,7 +142,11 @@ def run_diagnostic_comparison_units(
     for scenario_name, scenario in scenario_map.items():
         for seed in seeds:
             seed_config = replace(config, seed=seed)
-            results = run_pipeline(seed_config, scenario=scenario)
+            results = run_pipeline(
+                seed_config,
+                scenario=scenario,
+                include=PipelineIncludeConfig.scored_only(),
+            )
             scored = results.scored
             for origin in origins:
                 unit = f"{scenario_name}|seed={seed}|origin={origin}"

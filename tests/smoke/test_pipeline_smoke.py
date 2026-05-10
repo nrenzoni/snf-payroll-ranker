@@ -4,7 +4,11 @@ import pytest
 
 from payroll_anomaly_ranking.columns import OutputName, PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
-from payroll_anomaly_ranking.pipeline import run_pipeline
+from payroll_anomaly_ranking.pipeline import (
+    PipelineArtifactNotGeneratedError,
+    PipelineIncludeConfig,
+    run_pipeline,
+)
 
 pytestmark = pytest.mark.smoke
 
@@ -54,3 +58,28 @@ def test_pipeline_output_writes_are_explicit(tmp_path: Path) -> None:
     assert (config.data_dir / "synthetic_payroll.csv").exists()
     assert (config.output_dir / "evaluation" / "review_budget_metrics.csv").exists()
     assert (config.output_dir / "evaluation" / OutputName.ANALYST_REVIEW_QUEUE).exists()
+
+
+def test_scored_only_pipeline_exposes_only_core_artifacts() -> None:
+    results = run_pipeline(
+        _smoke_config(),
+        include=PipelineIncludeConfig.scored_only(),
+    )
+
+    assert results.payroll.height > 0
+    assert results.labels.height > 0
+    assert results.scored.height == results.payroll.height
+    assert results.scenario_metadata["name"] == "default"
+    with pytest.raises(PipelineArtifactNotGeneratedError, match="metrics"):
+        results.metrics
+
+
+def test_scored_only_pipeline_cannot_write_full_outputs(tmp_path: Path) -> None:
+    config = _smoke_config(tmp_path)
+
+    with pytest.raises(PipelineArtifactNotGeneratedError, match="metrics"):
+        run_pipeline(
+            config,
+            write_outputs=True,
+            include=PipelineIncludeConfig.scored_only(),
+        )
