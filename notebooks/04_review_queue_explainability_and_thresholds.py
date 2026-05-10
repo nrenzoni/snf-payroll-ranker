@@ -14,169 +14,86 @@
 # ---
 
 # %% [markdown]
-# # 04 Review Queue, Explainability, And Thresholds
+# # SNF Approval Queue, Explainability, And Thresholds
 #
-# **Executive takeaway:** The analyst-safe review queue turns latest-period model outputs into triage: risk, uncertainty, reason codes, expected versus actual pay context, estimated dollars at risk, and review-safe explanations without synthetic evaluation labels.
+# **Executive takeaway:** The administrator-safe approval queue turns model and rule signals into a short weekly checklist: what to review, which source to check, and what action to take before payroll approval.
 
 # %%
-import polars as pl
+from common.plots import LetsPlot, aes, geom_bar, ggplot, labs, theme_minimal
 
-from payroll_anomaly_ranking.columns import (
-    AggregateCol,
-    PayrollCol,
-    ReviewCol,
-    RuleCol,
-    ScoreCol,
-)
+from payroll_anomaly_ranking.columns import PayrollCol, ReviewCol
 from payroll_anomaly_ranking.config import PayrollConfig
-from payroll_anomaly_ranking.explainability import sample_review_language
 from payroll_anomaly_ranking.pipeline import run_pipeline
 from payroll_anomaly_ranking.presentation import compact_case_cards
 
-# %%
-config = PayrollConfig(employee_count=650, pay_periods=26, review_budgets=(10, 25, 50))
-results = run_pipeline(config)
-queue = results.analyst_review_queue
-evaluation_queue = results.evaluation_labeled_review_queue
-scored = results.scored
+LetsPlot.setup_html()
 
-# %% [markdown]
-# ## Review-Safe Language
-#
-# Queue records are prioritized for payroll review because they differ from expected history, peer context, deterministic payroll rules, missing-deduction checks, or estimated-exposure signals. They are not confirmed misconduct findings and should not be treated as automated adverse decisions.
-
-# %%
-sample_review_language()
-
-# %% [markdown]
-# ## Analyst-Readable Review Queue
-#
-# The fields below are intended for latest-cycle triage: rank, cycle label, risk, uncertainty, reason codes, expected gross-pay interval context, dollars at risk, and review-safe explanations.
-
-# %%
-queue.select(
-    ReviewCol.RANK,
-    PayrollCol.EMPLOYEE_ID,
-    PayrollCol.PAY_PERIOD_INDEX,
-    ReviewCol.PAY_PERIOD_LABEL,
-    ScoreCol.FINAL_ANOMALY_SCORE,
-    ReviewCol.RISK_CATEGORY,
-    ReviewCol.UNCERTAINTY_BUCKET,
-    ScoreCol.COMPOSITE_UNCERTAINTY_SCORE,
-    ReviewCol.PRIMARY_REASON,
-    ReviewCol.PRIMARY_UNCERTAINTY_REASON,
-    ReviewCol.SECONDARY_REASON,
-    ScoreCol.CONFORMAL_PERCENTILE,
-    ScoreCol.EXPECTED_GROSS_PAY_P10,
-    ScoreCol.EXPECTED_GROSS_PAY_P50,
-    ScoreCol.EXPECTED_GROSS_PAY_P90,
-    ScoreCol.GROSS_PAY_EXCESS_VS_P90,
-    ReviewCol.EXPECTED_GROSS_PAY,
-    PayrollCol.GROSS_PAY,
-    ReviewCol.DIFFERENCE_FROM_EXPECTED,
-    ReviewCol.PEER_CONTEXT,
-    ReviewCol.DOLLARS_AT_RISK,
-    RuleCol.REASON_CODES,
-    ReviewCol.WHY_RISKY,
-    ReviewCol.WHY_UNCERTAIN,
-    ReviewCol.EXPLANATION,
-).head(15)
-
-# %%
-queue.select(
-    pl.min(PayrollCol.PAY_PERIOD_INDEX).name.prefix("min"),
-    pl.max(PayrollCol.PAY_PERIOD_INDEX).name.prefix("max"),
+results = run_pipeline(
+    PayrollConfig(employee_count=160, pay_periods=12, review_budgets=(10, 25)),
 )
+queue = results.analyst_review_queue
 
 # %% [markdown]
-# ## Evaluation-Labeled Queue
+# ## Administrator-Safe Approval Queue
 #
-# Synthetic labels and injected dollar impacts are preserved only in the separate evaluation-labeled queue for metrics and category analysis. They are intentionally absent from the analyst-safe queue above.
+# The queue excludes synthetic evaluation labels and uses review-safe wording. It does not claim confirmed misconduct, fraud, or payroll error.
 
 # %%
-evaluation_queue.select(
-    ReviewCol.RANK,
-    PayrollCol.EMPLOYEE_ID,
-    PayrollCol.PAY_PERIOD_INDEX,
-    ReviewCol.UNCERTAINTY_BUCKET,
-    ReviewCol.DOLLARS_AT_RISK,
-    PayrollCol.IS_ANOMALY,
-    PayrollCol.ANOMALY_CATEGORY,
-    PayrollCol.ANOMALY_DOLLARS,
+queue.select(
+    [
+        ReviewCol.RANK,
+        PayrollCol.FACILITY_ID,
+        PayrollCol.UNIT,
+        PayrollCol.ROLE,
+        PayrollCol.SHIFT_DATE,
+        PayrollCol.SHIFT_TYPE,
+        ReviewCol.APPROVAL_RISK_CATEGORY,
+        ReviewCol.RECOMMENDED_ACTION,
+        ReviewCol.SOURCE_TO_CHECK,
+        ReviewCol.PRIMARY_REASON,
+        ReviewCol.DOLLARS_AT_RISK,
+    ],
 ).head(15)
 
 # %% [markdown]
 # ## Compact Case Cards
 #
-# Case cards summarize both why the record is risky and why its score may be uncertain before an analyst decides whether the record is an expected exception, a correction, or an item requiring escalation.
+# Case cards are designed for administrators, business office managers, DON/scheduling partners, or regional operators who need concise evidence before payroll approval.
 
 # %%
 compact_case_cards(queue, limit=5)
 
 # %% [markdown]
-# ## Thresholds And Review Budgets
+# ## Facility Approval Summary
 #
-# Teams can choose a fixed top-K review budget per pay period or a score threshold. Top-K gives predictable workload; thresholds adapt to risk concentration but can produce variable queue sizes.
+# Facility summaries let leaders see where the queue is concentrated before drilling into individual shifts.
 
 # %%
-budget_sizes = (
-    scored.group_by(PayrollCol.PAY_PERIOD_INDEX)
-    .agg(
-        (pl.col(ScoreCol.PAY_PERIOD_RANK) <= 10).sum().alias(AggregateCol.TOP_10_QUEUE),
-        (pl.col(ScoreCol.PAY_PERIOD_RANK) <= 25).sum().alias(AggregateCol.TOP_25_QUEUE),
-        (pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= 0.65)
-        .sum()
-        .alias(AggregateCol.SCORE_THRESHOLD_065_QUEUE),
+results.facility_approval_summary.sort("estimated_exposure", descending=True)
+
+# %%
+summary = results.facility_approval_summary
+(
+    ggplot(summary, aes(PayrollCol.FACILITY_ID, "queue_count"))
+    + geom_bar(stat="identity", fill="#c46f38")
+    + labs(
+        title="Latest-period approval queue count by facility",
+        x="Facility",
+        y="Queued records",
     )
-    .sort(PayrollCol.PAY_PERIOD_INDEX)
-)
-budget_sizes
-
-# %%
-budget_sizes.select(
-    pl.mean(AggregateCol.TOP_10_QUEUE).alias(AggregateCol.EXPECTED_TOP_10_PER_PERIOD),
-    pl.mean(AggregateCol.TOP_25_QUEUE).alias(AggregateCol.EXPECTED_TOP_25_PER_PERIOD),
-    pl.mean(AggregateCol.SCORE_THRESHOLD_065_QUEUE).alias(
-        AggregateCol.EXPECTED_THRESHOLD_065_PER_PERIOD,
-    ),
+    + theme_minimal()
 )
 
 # %% [markdown]
-# ## Risk Categories And Next Actions
+# ## Weekly Operating Model
 #
-# | Risk category | Typical analyst action |
-# | --- | --- |
-# | High | Review before finalization, compare source payroll inputs, and escalate if the reason cannot be reconciled. |
-# | Medium | Review when capacity allows, confirm business context such as bonus, retro pay, overtime approval, or lifecycle event. |
-# | Low | Monitor trends, sample for quality assurance, or leave unreviewed if capacity is constrained. |
-
-# %%
-queue.group_by(ReviewCol.RISK_CATEGORY).agg(
-    pl.len().alias(AggregateCol.RECORDS),
-    pl.sum(ReviewCol.DOLLARS_AT_RISK).name.suffix("_sum"),
-).sort(ReviewCol.RISK_CATEGORY)
-
-# %%
-queue.group_by(ReviewCol.UNCERTAINTY_BUCKET).agg(
-    pl.len().alias(AggregateCol.RECORDS),
-    pl.mean(ScoreCol.COMPOSITE_UNCERTAINTY_SCORE).alias(AggregateCol.AVG_UNCERTAINTY),
-).sort(ReviewCol.UNCERTAINTY_BUCKET)
-
-# %% [markdown]
-# ## Payroll Analyst Operating Model
-#
-# 1. Triage the top-K or threshold queue for each payroll cycle.
-# 2. Review the risk explanation, uncertainty drivers, source payroll fields, and supporting HRIS or timekeeping extracts outside this demo.
-# 3. Approve known exceptions such as planned bonus, retro adjustment, or authorized overtime.
-# 4. Escalate unreconciled high-risk records to payroll leadership or internal controls before finalization.
-# 5. Capture review outcome, reason, analyst notes, and final disposition for future calibration.
-
-# %% [markdown]
-# ## Conceptual Feedback Capture
-#
-# A production case-management workflow could capture analyst disposition fields such as `reviewed_at`, `reviewed_by_role`, `disposition`, `confirmed_exception_type`, `approved_business_reason`, `amount_corrected`, and `notes_category`. This notebook does not implement case management or live integrations; it describes the feedback needed to recalibrate thresholds and future supervised models.
+# 1. Review high-priority records before approval.
+# 2. Check the named source: schedule, timeclock, pay code, pay policy, facility assignment, or employee lifecycle.
+# 3. Approve known staffing exceptions when supported.
+# 4. Escalate questionable payroll-code or lifecycle records.
+# 5. Capture feedback for future calibration.
 
 # %% [markdown]
 # ## What This Proves
 #
-# The scoring output can be translated into a practical, review-safe payroll queue with explanations, compact case cards, risk categories, workload controls, and a clear analyst operating model while synthetic labels remain isolated for evaluation.
+# The automated queue translates technical signals into administrator actions while preserving privacy and avoiding confirmed-error language.

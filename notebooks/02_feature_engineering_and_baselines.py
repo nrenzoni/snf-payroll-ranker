@@ -14,167 +14,96 @@
 # ---
 
 # %% [markdown]
-# # 02 Feature Engineering And Baselines
+# # SNF Feature Engineering And Threshold Baselines
 #
-# **Executive takeaway:** Leakage-safe employee history, period-safe peer context, deterministic rules, robust statistics, ML scores, and estimated exposure each capture different payroll review signals. The hybrid rank combines them so analysts are not dependent on a single fragile indicator.
+# **Executive takeaway:** The automated flagger uses leakage-safe, facility-normalized SNF features so administrators do not have to rely only on manually configured gross pay, total hours, overtime, or premium-dollar thresholds.
 
 # %%
-import polars as pl
-from common.plots import (
-    LetsPlot,
-    aes,
-    geom_histogram,
-    geom_line,
-    geom_point,
-    ggplot,
-    ggtitle,
-    theme_minimal,
-)
+from common.plots import LetsPlot, aes, geom_point, ggplot, labs, theme_minimal
 
 from payroll_anomaly_ranking.columns import FeatureCol, PayrollCol, RuleCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
+from payroll_anomaly_ranking.features import build_features
 from payroll_anomaly_ranking.pipeline import run_pipeline
+from payroll_anomaly_ranking.rules import add_rule_flags
 
 LetsPlot.setup_html()
 
-# %%
-config = PayrollConfig(employee_count=650, pay_periods=26)
+config = PayrollConfig(employee_count=160, pay_periods=12, review_budgets=(10, 25))
 results = run_pipeline(config)
-scored = results.scored
-queue = results.analyst_review_queue
+featured = add_rule_flags(build_features(results.payroll))
 
 # %% [markdown]
-# ## Concrete Feature Examples
+# ## Leakage-Safe SNF Features
 #
-# These selected synthetic records show the feature families used for review prioritization: prior employee history, peer-relative comparison, deterministic rule flags, robust statistical outlier features, and component scores.
+# Historical features use prior shifts and prior pay periods. Peer features normalize within facility, role, shift type, unit, and pay-code context. Synthetic labels remain evaluation-only and are not used as model features, threshold baselines, exposure inputs, or administrator queue fields.
 
 # %%
-example_ids = queue.select(PayrollCol.EMPLOYEE_ID).head(8)
-scored.join(example_ids, on=PayrollCol.EMPLOYEE_ID, how="semi").sort(
-    [PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX],
-).select(
-    PayrollCol.EMPLOYEE_ID,
-    PayrollCol.PAY_PERIOD_INDEX,
-    PayrollCol.GROSS_PAY,
-    FeatureCol.GROSS_PAY_ROLLING_MEDIAN,
-    FeatureCol.GROSS_PAY_PCT_CHANGE,
-    FeatureCol.PEER_GROSS_MEDIAN,
-    FeatureCol.PEER_GROSS_DEVIATION_RATIO,
-    FeatureCol.GROSS_PAY_ROBUST_Z,
-    FeatureCol.GROSS_PAY_MAD_SCORE,
-    RuleCol.REASON_CODES,
-    ScoreCol.RULE_SCORE,
-    ScoreCol.STATISTICAL_SCORE,
-    ScoreCol.ML_SCORE,
-    ScoreCol.EXPOSURE_SCORE,
-    ScoreCol.ESTIMATED_EXPOSURE,
-    ScoreCol.FINAL_ANOMALY_SCORE,
-    ScoreCol.PAY_PERIOD_RANK,
-).filter(pl.col(ScoreCol.PAY_PERIOD_RANK) <= 25).head(12)
+featured.select(
+    [
+        PayrollCol.EMPLOYEE_ID,
+        PayrollCol.FACILITY_ID,
+        PayrollCol.ROLE,
+        PayrollCol.SHIFT_DATE,
+        PayrollCol.SHIFT_TYPE,
+        PayrollCol.SCHEDULED_HOURS,
+        PayrollCol.PAID_HOURS,
+        PayrollCol.OVERTIME_HOURS,
+        PayrollCol.PREMIUM_PAY,
+        FeatureCol.OVERTIME_PER_SCHEDULED_HOUR,
+        FeatureCol.PAID_MINUS_SCHEDULED_HOURS,
+        FeatureCol.PREMIUM_PAY_SHARE,
+        FeatureCol.GROSS_TO_EXPECTED_SHIFT_PAY,
+        FeatureCol.PREMIUM_ELIGIBILITY_MISMATCH,
+        FeatureCol.REST_GAP_RISK,
+        RuleCol.REASON_CODES,
+    ],
+).head(12)
 
 # %% [markdown]
-# ## Leakage-Safe Construction
+# ## Manual Threshold Baselines
 #
-# Historical features use shifted employee history, so current-period and future-period gross pay are excluded from rolling medians and lag changes. Peer and robust features use prior pay periods where available, with early-period fallbacks for sparse synthetic history.
-#
-# Injected labels such as `is_anomaly`, `anomaly_category`, and `anomaly_dollars` are retained for evaluation-only artifacts. They are not used as scoring features, estimated exposure inputs, or analyst-facing queue fields.
-
-# %% [markdown]
-# ## Baseline Ranking Signals
-#
-# The model comparison output evaluates rule score, statistical score, ML score, and hybrid score under the same review-budget framing. The hybrid score is the operating rank because deterministic compliance issues, statistical outliers, peer context, employee history, and estimated exposure represent different review risks.
+# These threshold flags approximate what many production workflows do today: configure cutoffs on individual fields. The automated model keeps those baselines for comparison but adds SNF context.
 
 # %%
-results.model_comparison
+results.scored.select(
+    [
+        PayrollCol.FACILITY_ID,
+        PayrollCol.ROLE,
+        PayrollCol.SHIFT_TYPE,
+        PayrollCol.GROSS_PAY,
+        PayrollCol.PAID_HOURS,
+        PayrollCol.OVERTIME_HOURS,
+        PayrollCol.PREMIUM_PAY,
+        ScoreCol.THRESHOLD_GROSS_PAY_FLAG,
+        ScoreCol.THRESHOLD_TOTAL_HOURS_FLAG,
+        ScoreCol.THRESHOLD_OVERTIME_HOURS_FLAG,
+        ScoreCol.THRESHOLD_PREMIUM_DOLLARS_FLAG,
+        ScoreCol.THRESHOLD_PAID_VS_SCHEDULED_FLAG,
+        ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE,
+    ],
+).sort(ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE, descending=True).head(12)
 
 # %%
-scored.select(
-    PayrollCol.EMPLOYEE_ID,
-    PayrollCol.PAY_PERIOD_INDEX,
-    ScoreCol.RULE_SCORE,
-    ScoreCol.STATISTICAL_SCORE,
-    ScoreCol.ML_SCORE,
-    ScoreCol.EXPOSURE_SCORE,
-    ScoreCol.ESTIMATED_EXPOSURE,
-    ScoreCol.FINAL_ANOMALY_SCORE,
-    ScoreCol.PAY_PERIOD_RANK,
-    RuleCol.REASON_CODES,
-).sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(15)
-
-# %% [markdown]
-# ## Simple Gross-Pay-Change Baseline
-#
-# Existing outputs contain the core score comparison. This lightweight table adds a business-intuitive gross-pay-change reference for reviewers who want to see how far a pure change-based baseline would get without rule, peer, ML, or dollar context.
-
-# %%
-scored.with_columns(
-    pl.col(FeatureCol.GROSS_PAY_PCT_CHANGE)
-    .abs()
-    .rank("ordinal", descending=True)
-    .over(PayrollCol.PAY_PERIOD_INDEX)
-    .alias(FeatureCol.GROSS_PAY_CHANGE_RANK),
-).select(
-    PayrollCol.EMPLOYEE_ID,
-    PayrollCol.PAY_PERIOD_INDEX,
-    PayrollCol.GROSS_PAY,
-    FeatureCol.GROSS_PAY_PCT_CHANGE,
-    FeatureCol.GROSS_PAY_CHANGE_RANK,
-    ScoreCol.FINAL_ANOMALY_SCORE,
-    ScoreCol.PAY_PERIOD_RANK,
-).sort(FeatureCol.GROSS_PAY_CHANGE_RANK).head(12)
-
-# %% [markdown]
-# ## Score Distribution
-#
-# The distribution shows whether the hybrid score creates a focused top end for analyst review rather than treating every record as equally risky.
-
-# %% [markdown]
-# **Score distribution plot:** This chart shows how the final review-priority score is spread across synthetic payroll records. A useful ranking process should create a small higher-risk tail so analysts can focus limited review time on the most unusual records rather than scanning the entire payroll population.
-
-# %%
-(
-    ggplot(
-        scored.select(ScoreCol.FINAL_ANOMALY_SCORE),
-        aes(ScoreCol.FINAL_ANOMALY_SCORE),
-    )
-    + geom_histogram(bins=30)
-    + ggtitle("Hybrid Score Distribution")
-    + theme_minimal()
-)
-
-# %% [markdown]
-# ## Selected Employee History
-#
-# A flagged employee history helps analysts see whether a current-period value differs from the employee's previous payroll pattern.
-
-# %% [markdown]
-# **Selected employee history plot:** This chart follows one prioritized synthetic employee across pay periods. It gives reviewers a plain-language view of whether the current record is unusual for that employee's own history, which is often easier to interpret than comparing the employee only against the whole workforce.
-
-# %%
-highlight_employee = queue.select(PayrollCol.EMPLOYEE_ID).item(0, 0)
-employee_history = (
-    scored.filter(pl.col(PayrollCol.EMPLOYEE_ID) == highlight_employee)
-    .select(
-        [
-            PayrollCol.PAY_PERIOD_INDEX,
-            PayrollCol.GROSS_PAY,
-            FeatureCol.GROSS_PAY_ROLLING_MEDIAN,
-        ],
-    )
-    .sort(PayrollCol.PAY_PERIOD_INDEX)
+plot_data = results.scored.select(
+    PayrollCol.OVERTIME_HOURS,
+    PayrollCol.PREMIUM_PAY,
+    ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE,
+    PayrollCol.IS_ANOMALY,
 )
 (
-    ggplot(
-        employee_history,
-        aes(PayrollCol.PAY_PERIOD_INDEX, PayrollCol.GROSS_PAY),
+    ggplot(plot_data, aes(PayrollCol.OVERTIME_HOURS, PayrollCol.PREMIUM_PAY))
+    + geom_point(aes(color=ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE), alpha=0.55)
+    + labs(
+        title="Automated approval score combines overtime and premium context",
+        x="Overtime hours",
+        y="Premium dollars",
+        color="Approval score",
     )
-    + geom_line()
-    + geom_point()
-    + ggtitle(f"Highlighted History: {highlight_employee}")
     + theme_minimal()
 )
 
 # %% [markdown]
 # ## What This Proves
 #
-# The feature layer is built from synthetic payroll history and peer context without label leakage. Baseline comparisons show why a hybrid rank is better suited to payroll review than relying only on rules, statistics, ML, or gross-pay movement.
+# Stationary ratios, premium eligibility checks, rest-gap context, and facility-normalized peer comparisons provide more administrator-relevant signal than one-field threshold rules.

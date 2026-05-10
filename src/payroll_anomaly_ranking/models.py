@@ -84,6 +84,9 @@ def add_statistical_scores(payroll: pl.DataFrame) -> pl.DataFrame:
             pl.col(FeatureCol.GROSS_PAY_MAD_SCORE).fill_null(0) / 10,
             pl.col(FeatureCol.PEER_GROSS_DEVIATION_RATIO).abs().fill_null(0) / 2,
             pl.col(FeatureCol.PEER_OVERTIME_DEVIATION_RATIO).abs().fill_null(0) / 6,
+            pl.col(FeatureCol.FACILITY_GROSS_ROBUST_Z).fill_null(0) / 8,
+            (pl.col(FeatureCol.GROSS_TO_EXPECTED_SHIFT_PAY).fill_null(1) - 1).abs()
+            / 1.5,
         )
         .clip(0, 1)
         .alias(ScoreCol.STATISTICAL_SCORE),
@@ -96,6 +99,18 @@ def add_statistical_scores(payroll: pl.DataFrame) -> pl.DataFrame:
         pl.max_horizontal(
             pl.col(FeatureCol.PEER_GROSS_DEVIATION_RATIO).abs().fill_null(0) / 2,
             pl.col(FeatureCol.PEER_OVERTIME_DEVIATION_RATIO).abs().fill_null(0) / 6,
+            (
+                (
+                    pl.col(PayrollCol.GROSS_PAY)
+                    - pl.col(
+                        FeatureCol.CROSS_FACILITY_ROLE_SHIFT_GROSS_MEDIAN,
+                    ).fill_null(pl.col(PayrollCol.GROSS_PAY))
+                ).abs()
+                / pl.col(FeatureCol.CROSS_FACILITY_ROLE_SHIFT_GROSS_MEDIAN)
+                .fill_null(pl.col(PayrollCol.GROSS_PAY))
+                .abs()
+                .clip(1, None)
+            ),
         )
         .clip(0, 1)
         .alias(ScoreCol.PEER_SCORE),
@@ -147,6 +162,14 @@ def add_hybrid_scores(
             * 1.5
         ),
         pl.col(PayrollCol.MANUAL_ADJUSTMENT).abs().fill_null(0),
+        (
+            pl.col(FeatureCol.PAID_MINUS_SCHEDULED_HOURS).fill_null(0).clip(0, None)
+            * pl.col(PayrollCol.PAY_RATE)
+        ),
+        (
+            pl.col(FeatureCol.PREMIUM_ELIGIBILITY_MISMATCH).fill_null(0)
+            * pl.col(PayrollCol.PREMIUM_PAY).fill_null(0)
+        ),
         (expected_deductions - pl.col(PayrollCol.DEDUCTIONS).fill_null(0)).clip(
             0,
             None,
@@ -160,6 +183,41 @@ def add_hybrid_scores(
         (exposure / pl.col(PayrollCol.GROSS_PAY).abs().clip(1, None))
         .clip(0, 1)
         .alias(ScoreCol.EXPOSURE_SCORE),
+        pl.max_horizontal(
+            pl.col(FeatureCol.PAID_MINUS_SCHEDULED_HOURS).fill_null(0).clip(0, None)
+            / 4,
+            pl.col(PayrollCol.MISSED_PUNCH).fill_null(0),
+            pl.col(PayrollCol.MANUAL_EDIT).fill_null(0) * 0.5,
+            pl.col(FeatureCol.REST_GAP_RISK).fill_null(0),
+        )
+        .clip(0, 1)
+        .alias(ScoreCol.SCHEDULE_TIMECLOCK_SCORE),
+        pl.max_horizontal(
+            pl.col(FeatureCol.PREMIUM_ELIGIBILITY_MISMATCH).fill_null(0),
+            pl.col(FeatureCol.DUPLICATE_PREMIUM_SIGNATURE).fill_null(0),
+            (
+                pl.col(PayrollCol.PREMIUM_PAY).fill_null(0)
+                / pl.col(PayrollCol.GROSS_PAY).abs().clip(1, None)
+                / 0.25
+            ),
+        )
+        .clip(0, 1)
+        .alias(ScoreCol.PREMIUM_ELIGIBILITY_SCORE),
+        (pl.col(PayrollCol.GROSS_PAY) > 1500)
+        .cast(pl.Int64)
+        .alias(ScoreCol.THRESHOLD_GROSS_PAY_FLAG),
+        (pl.col(PayrollCol.PAID_HOURS) > 16)
+        .cast(pl.Int64)
+        .alias(ScoreCol.THRESHOLD_TOTAL_HOURS_FLAG),
+        (pl.col(PayrollCol.OVERTIME_HOURS) > 8)
+        .cast(pl.Int64)
+        .alias(ScoreCol.THRESHOLD_OVERTIME_HOURS_FLAG),
+        (pl.col(PayrollCol.PREMIUM_PAY) > 100)
+        .cast(pl.Int64)
+        .alias(ScoreCol.THRESHOLD_PREMIUM_DOLLARS_FLAG),
+        (pl.col(FeatureCol.PAID_MINUS_SCHEDULED_HOURS).fill_null(0) > 2)
+        .cast(pl.Int64)
+        .alias(ScoreCol.THRESHOLD_PAID_VS_SCHEDULED_FLAG),
     )
     scored = scored.with_columns(
         pl.col(ScoreCol.EXPOSURE_SCORE).alias(ScoreCol.DOLLAR_SCORE),
@@ -168,12 +226,17 @@ def add_hybrid_scores(
     weighted_score = pl.lit(0.0)
     for name, weight in weights.items():
         weighted_score = weighted_score + pl.col(name).fill_null(0) * weight
+    weighted_score = weighted_score + (
+        pl.col(ScoreCol.SCHEDULE_TIMECLOCK_SCORE).fill_null(0) * 0.12
+        + pl.col(ScoreCol.PREMIUM_ELIGIBILITY_SCORE).fill_null(0) * 0.14
+    )
     return scored.with_columns(
-        weighted_score.alias(ScoreCol.FINAL_ANOMALY_SCORE),
+        weighted_score.clip(0, 1).alias(ScoreCol.FINAL_ANOMALY_SCORE),
+        weighted_score.clip(0, 1).alias(ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE),
     ).with_columns(
         pl.col(ScoreCol.FINAL_ANOMALY_SCORE)
         .rank("ordinal", descending=True)
-        .over(PayrollCol.PAY_PERIOD_INDEX)
+        .over([PayrollCol.PAY_PERIOD_INDEX, PayrollCol.FACILITY_ID])
         .alias(ScoreCol.PAY_PERIOD_RANK),
     )
 

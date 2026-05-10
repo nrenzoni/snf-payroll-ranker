@@ -16,6 +16,7 @@ from payroll_anomaly_ranking.evaluation import (
 )
 from payroll_anomaly_ranking.explainability import (
     build_evaluation_review_queue,
+    build_facility_approval_summary,
     build_review_queue,
 )
 from payroll_anomaly_ranking.features import build_features
@@ -92,6 +93,7 @@ class PipelineResults:
     _leakage_checks: pl.DataFrame | None = None
     _analyst_review_queue: pl.DataFrame | None = None
     _evaluation_labeled_review_queue: pl.DataFrame | None = None
+    _facility_approval_summary: pl.DataFrame | None = None
 
     def _required(self, value: T | None, artifact_name: str) -> T:
         if value is None:
@@ -174,6 +176,13 @@ class PipelineResults:
             "evaluation_labeled_review_queue",
         )
 
+    @property
+    def facility_approval_summary(self) -> pl.DataFrame:
+        return self._required(
+            self._facility_approval_summary,
+            "facility_approval_summary",
+        )
+
 
 def run_pipeline(
     config: PayrollConfig = PayrollConfig(),
@@ -210,6 +219,11 @@ def run_pipeline(
         if include.review_queues
         else None
     )
+    facility_summary = (
+        build_facility_approval_summary(scored, top_k=max(config.review_budgets))
+        if include.review_queues
+        else None
+    )
     rolling = (
         rolling_origin_evaluation(scored, config) if include.rolling_origin else None
     )
@@ -222,7 +236,7 @@ def run_pipeline(
         payroll=generated.payroll,
         labels=generated.labels,
         scored=scored,
-        scenario_metadata=_scenario_metadata(scenario),
+        scenario_metadata=generated.metadata or _scenario_metadata(scenario),
         include=include,
         _validation_failures=validation.failures if validation is not None else None,
         _validation_warnings=validation.warnings if validation is not None else None,
@@ -250,6 +264,7 @@ def run_pipeline(
         _leakage_checks=leakage,
         _analyst_review_queue=analyst_queue if include.review_queues else None,
         _evaluation_labeled_review_queue=evaluation_queue,
+        _facility_approval_summary=facility_summary,
     )
     if write_outputs:
         write_pipeline_outputs(results, config)
@@ -267,6 +282,7 @@ def write_pipeline_outputs(
     evaluation_dir.mkdir(parents=True, exist_ok=True)
 
     results.payroll.write_csv(config.data_dir / "synthetic_payroll.csv")
+    results.payroll.write_csv(config.data_dir / "synthetic_snf_shift_payroll.csv")
     results.labels.write_csv(config.data_dir / "synthetic_payroll_labels.csv")
     results.scored.write_csv(evaluation_dir / "scored_payroll.csv")
     results.metrics.write_csv(evaluation_dir / "review_budget_metrics.csv")
@@ -295,8 +311,14 @@ def write_pipeline_outputs(
     results.analyst_review_queue.write_csv(
         evaluation_dir / OutputName.ANALYST_REVIEW_QUEUE,
     )
+    results.analyst_review_queue.write_csv(
+        evaluation_dir / OutputName.ADMIN_APPROVAL_QUEUE,
+    )
     results.evaluation_labeled_review_queue.write_csv(
         evaluation_dir / OutputName.EVALUATION_LABELED_REVIEW_QUEUE,
+    )
+    results.facility_approval_summary.write_csv(
+        evaluation_dir / OutputName.FACILITY_APPROVAL_SUMMARY,
     )
     scenario_metadata = results.scenario_metadata
     if scenario_metadata:
@@ -330,6 +352,7 @@ def _require_output_artifacts(results: PipelineResults) -> None:
         "leakage_checks",
         "analyst_review_queue",
         "evaluation_labeled_review_queue",
+        "facility_approval_summary",
     ):
         getattr(results, artifact_name)
 

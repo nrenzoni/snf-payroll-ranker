@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import polars as pl
 from sklearn.metrics import average_precision_score
@@ -24,6 +24,7 @@ class EvaluationResults:
     uncertainty_bucket_metrics: pl.DataFrame
     risk_coverage_analysis: pl.DataFrame
     expected_gross_pay_interval_metrics: pl.DataFrame
+    threshold_baseline_metrics: pl.DataFrame = field(default_factory=pl.DataFrame)
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,7 @@ def evaluate_scores(
     uncertainty = precision_by_uncertainty_bucket(scored)
     risk_coverage = risk_coverage_analysis(scored, config)
     interval = expected_gross_pay_interval_evaluation(scored)
+    threshold = threshold_baseline_metrics(scored, config)
     return EvaluationResults(
         metrics=pl.DataFrame(rows),
         model_comparison=comparison,
@@ -135,6 +137,7 @@ def evaluate_scores(
         uncertainty_bucket_metrics=uncertainty,
         risk_coverage_analysis=risk_coverage,
         expected_gross_pay_interval_metrics=interval,
+        threshold_baseline_metrics=threshold,
     )
 
 
@@ -218,9 +221,13 @@ def model_comparison(
     for score_name in [
         ScoreCol.RULE_SCORE,
         ScoreCol.STATISTICAL_SCORE,
+        ScoreCol.SCHEDULE_TIMECLOCK_SCORE,
+        ScoreCol.PREMIUM_ELIGIBILITY_SCORE,
         ScoreCol.ML_SCORE,
         ScoreCol.FINAL_ANOMALY_SCORE,
     ]:
+        if score_name not in scored.columns:
+            continue
         renamed = scored.with_columns(
             pl.col(score_name).alias(ScoreCol.FINAL_ANOMALY_SCORE),
         ).with_columns(
@@ -238,6 +245,55 @@ def model_comparison(
                 ),
                 **metric,
                 **ranking_metrics(renamed),
+            },
+        )
+    return pl.DataFrame(rows)
+
+
+def threshold_baseline_metrics(
+    scored: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+) -> pl.DataFrame:
+    rows: list[dict[str, object]] = []
+    thresholds = {
+        "gross_pay_threshold": ScoreCol.THRESHOLD_GROSS_PAY_FLAG,
+        "total_hours_threshold": ScoreCol.THRESHOLD_TOTAL_HOURS_FLAG,
+        "overtime_hours_threshold": ScoreCol.THRESHOLD_OVERTIME_HOURS_FLAG,
+        "premium_dollars_threshold": ScoreCol.THRESHOLD_PREMIUM_DOLLARS_FLAG,
+        "paid_vs_scheduled_threshold": ScoreCol.THRESHOLD_PAID_VS_SCHEDULED_FLAG,
+    }
+    auto_top = scored.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(
+        min(config.review_budgets[0], scored.height),
+    )
+    auto_false_positives = auto_top.filter(pl.col(PayrollCol.IS_ANOMALY) == 0).height
+    for name, flag in thresholds.items():
+        if flag not in scored.columns:
+            continue
+        reviewed = scored.filter(pl.col(flag) == 1)
+        true_positive = reviewed.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height
+        false_positive = reviewed.filter(pl.col(PayrollCol.IS_ANOMALY) == 0).height
+        exposure = float(
+            reviewed.select(pl.sum(ScoreCol.ESTIMATED_EXPOSURE)).item() or 0.0,
+        )
+        synthetic = float(
+            reviewed.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+            .select(pl.sum(PayrollCol.ANOMALY_DOLLARS))
+            .item()
+            or 0.0,
+        )
+        rows.append(
+            {
+                "baseline": name,
+                MetricCol.REVIEW_VOLUME: reviewed.height,
+                MetricCol.PRECISION_AT_K: true_positive / max(reviewed.height, 1),
+                MetricCol.RECALL_AT_K: true_positive
+                / max(scored.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height, 1),
+                MetricCol.EXPOSURE_CAPTURED_AT_K: exposure,
+                MetricCol.DOLLARS_CAPTURED_AT_K: synthetic,
+                MetricCol.FALSE_POSITIVES_AVOIDED: max(
+                    false_positive - auto_false_positives,
+                    0,
+                ),
             },
         )
     return pl.DataFrame(rows)

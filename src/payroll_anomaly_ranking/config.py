@@ -11,6 +11,8 @@ class PayrollConfig:
     seed: int = 42
     employee_count: int = 650
     pay_periods: int = 26
+    facility_count: int = 6
+    shifts_per_employee_per_period: float = 4.5
     review_budgets: tuple[int, ...] = (10, 25, 50)
     hybrid_weights: dict[ScoreCol, float] = field(
         default_factory=lambda: {
@@ -45,3 +47,40 @@ class PayrollConfig:
     @property
     def periods_per_year(self) -> int:
         return 26
+
+
+@dataclass(frozen=True)
+class SNFPayPolicyConfig:
+    evening_diff_rate: float = 2.25
+    night_diff_rate: float = 3.50
+    weekend_diff_rate: float = 2.00
+    overtime_multiplier: float = 1.5
+    overtime_daily_hours: float = 8.0
+    rest_gap_warning_hours: float = 8.0
+    paid_vs_scheduled_warning_hours: float = 1.5
+    gross_pay_threshold: float = 1_500.0
+    total_hours_threshold: float = 16.0
+    overtime_hours_threshold: float = 8.0
+    premium_dollars_threshold: float = 100.0
+    paid_vs_scheduled_threshold: float = 2.0
+    facility_variance_threshold: float = 0.20
+
+
+def validate_snf_config(
+    config: PayrollConfig = PayrollConfig(),
+    policy: SNFPayPolicyConfig = SNFPayPolicyConfig(),
+) -> None:
+    if config.employee_count <= 0:
+        raise ValueError("employee_count must be positive")
+    if config.facility_count <= 0:
+        raise ValueError("facility_count must be positive")
+    if config.pay_periods < 4:
+        raise ValueError("pay_periods must be at least 4 for temporal evaluation")
+    if not config.review_budgets or min(config.review_budgets) <= 0:
+        raise ValueError("review_budgets must contain positive values")
+    if config.shifts_per_employee_per_period <= 0:
+        raise ValueError("shifts_per_employee_per_period must be positive")
+    if policy.overtime_multiplier < 1:
+        raise ValueError("overtime_multiplier must be at least 1")
+    if policy.rest_gap_warning_hours <= 0:
+        raise ValueError("rest_gap_warning_hours must be positive")

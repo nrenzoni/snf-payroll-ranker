@@ -224,12 +224,13 @@ def pairwise_component_superiority(
 def subgroup_diagnostics(
     scored: pl.DataFrame,
     dimensions: tuple[str, ...] = (
-        PayrollCol.DEPARTMENT,
-        PayrollCol.JOB_FAMILY,
-        PayrollCol.LOCATION,
-        PayrollCol.PAY_TYPE,
-        PayrollCol.PAY_CODE,
-        PayrollCol.JOB_LEVEL,
+        PayrollCol.FACILITY_ID,
+        PayrollCol.UNIT,
+        PayrollCol.ROLE,
+        PayrollCol.LICENSE_TYPE,
+        PayrollCol.SHIFT_TYPE,
+        PayrollCol.PAY_CODE_CATEGORY,
+        PayrollCol.APPROVAL_STATUS,
     ),
     k: int = 25,
     scenario: str = "default",
@@ -364,7 +365,7 @@ def expected_pay_calibration(
 def calibration_plot_inputs(
     scored: pl.DataFrame,
     scenario: str = "default",
-    by: str = PayrollCol.DEPARTMENT,
+    by: str = PayrollCol.FACILITY_ID,
 ) -> pl.DataFrame:
     calibration = expected_pay_calibration(scored, by=by, scenario=scenario)
     if calibration.is_empty():

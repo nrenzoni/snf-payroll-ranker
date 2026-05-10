@@ -9,8 +9,15 @@ from payroll_anomaly_ranking.columns import PEER_GROUP_COLUMNS, FeatureCol, Payr
 
 
 def add_history_features(payroll: pl.DataFrame) -> pl.DataFrame:
+    payroll = _ensure_snf_feature_inputs(payroll)
     return (
-        payroll.sort([PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX])
+        payroll.sort(
+            [
+                PayrollCol.EMPLOYEE_ID,
+                PayrollCol.PAY_PERIOD_INDEX,
+                PayrollCol.SHIFT_DATE,
+            ],
+        )
         .with_columns(
             pl.col(PayrollCol.GROSS_PAY)
             .shift(1)
@@ -52,6 +59,29 @@ def add_history_features(payroll: pl.DataFrame) -> pl.DataFrame:
             (
                 pl.col(PayrollCol.NET_PAY) / pl.col(PayrollCol.GROSS_PAY).clip(1, None)
             ).alias(FeatureCol.NET_TO_GROSS_RATIO),
+            (
+                pl.col(PayrollCol.OVERTIME_HOURS)
+                / pl.col(PayrollCol.SCHEDULED_HOURS).clip(1, None)
+            ).alias(FeatureCol.OVERTIME_PER_SCHEDULED_HOUR),
+            (
+                pl.col(PayrollCol.WORKED_HOURS)
+                / pl.col(PayrollCol.SCHEDULED_HOURS).clip(1, None)
+            ).alias(FeatureCol.WORKED_TO_SCHEDULED_RATIO),
+            (
+                pl.col(PayrollCol.PAID_HOURS)
+                / pl.col(PayrollCol.SCHEDULED_HOURS).clip(1, None)
+            ).alias(FeatureCol.PAID_TO_SCHEDULED_RATIO),
+            (
+                pl.col(PayrollCol.PREMIUM_PAY)
+                / pl.col(PayrollCol.GROSS_PAY).clip(1, None)
+            ).alias(FeatureCol.PREMIUM_PAY_SHARE),
+            (
+                pl.col(PayrollCol.GROSS_PAY)
+                / pl.col(PayrollCol.EXPECTED_SHIFT_GROSS_PAY).clip(1, None)
+            ).alias(FeatureCol.GROSS_TO_EXPECTED_SHIFT_PAY),
+            (pl.col(PayrollCol.PAID_HOURS) - pl.col(PayrollCol.SCHEDULED_HOURS)).alias(
+                FeatureCol.PAID_MINUS_SCHEDULED_HOURS,
+            ),
         )
         .with_columns(
             pl.col(FeatureCol.DEDUCTION_RATIO)
@@ -105,6 +135,26 @@ def add_peer_features(payroll: pl.DataFrame) -> pl.DataFrame:
                     or float(row[PayrollCol.OVERTIME_HOURS]),
                     FeatureCol.STRICT_PEER_GROUP_SIZE: strict_peer_group_size,
                     FeatureCol.EFFECTIVE_PEER_REFERENCE_SIZE: len(references),
+                    FeatureCol.FACILITY_ROLE_SHIFT_GROSS_MEDIAN: _median(gross_values)
+                    or float(row[PayrollCol.GROSS_PAY]),
+                    FeatureCol.FACILITY_ROLE_SHIFT_HOURS_MEDIAN: _median(
+                        [
+                            _row_float(candidate, PayrollCol.PAID_HOURS)
+                            for candidate in references
+                        ],
+                    )
+                    or float(row[PayrollCol.PAID_HOURS]),
+                    FeatureCol.CROSS_FACILITY_ROLE_SHIFT_GROSS_MEDIAN: _median(
+                        [
+                            _row_float(candidate, PayrollCol.GROSS_PAY)
+                            for candidate in prior_rows
+                            if candidate.get(PayrollCol.ROLE)
+                            == row.get(PayrollCol.ROLE)
+                            and candidate.get(PayrollCol.SHIFT_TYPE)
+                            == row.get(PayrollCol.SHIFT_TYPE)
+                        ],
+                    )
+                    or float(row[PayrollCol.GROSS_PAY]),
                 },
             )
         for row in period_rows:
@@ -123,6 +173,11 @@ def add_peer_features(payroll: pl.DataFrame) -> pl.DataFrame:
             )
             / (pl.col(FeatureCol.PEER_OVERTIME_MEDIAN) + 1)
         ).alias(FeatureCol.PEER_OVERTIME_DEVIATION_RATIO),
+        (
+            pl.col(FeatureCol.PREMIUM_PAY_SHARE)
+            .median()
+            .over([PayrollCol.FACILITY_ID, PayrollCol.ROLE, PayrollCol.SHIFT_TYPE])
+        ).alias(FeatureCol.FACILITY_PREMIUM_SHARE_MEDIAN),
     )
 
 
@@ -155,6 +210,8 @@ def add_robust_features(payroll: pl.DataFrame) -> pl.DataFrame:
                     ),
                     FeatureCol.GROSS_PAY_PERCENTILE: _percentile(gross, sorted_values),
                     FeatureCol.GROSS_PAY_DEVIATION_RATIO: (gross - med) / max(med, 1),
+                    FeatureCol.FACILITY_GROSS_ROBUST_Z: abs(gross - med)
+                    / (1.4826 * mad),
                 },
             )
         prior_values.extend(float(row[PayrollCol.GROSS_PAY]) for row in period_rows)
@@ -166,9 +223,109 @@ def add_robust_features(payroll: pl.DataFrame) -> pl.DataFrame:
 
 
 def build_features(payroll: pl.DataFrame) -> pl.DataFrame:
-    return add_robust_features(
+    payroll = _ensure_snf_feature_inputs(payroll)
+    featured = add_robust_features(
         add_peer_features(add_history_features(payroll)),
-    ).fill_nan(None)
+    ).with_columns(
+        _premium_mismatch_expr().alias(FeatureCol.PREMIUM_ELIGIBILITY_MISMATCH),
+        pl.struct(
+            [
+                PayrollCol.EMPLOYEE_ID,
+                PayrollCol.SHIFT_DATE,
+                PayrollCol.FACILITY_ID,
+                PayrollCol.PAY_CODE,
+            ],
+        )
+        .is_duplicated()
+        .cast(pl.Int64)
+        .alias(FeatureCol.DUPLICATE_PREMIUM_SIGNATURE),
+        (pl.col(PayrollCol.REST_GAP_HOURS) < 8)
+        .cast(pl.Int64)
+        .alias(FeatureCol.REST_GAP_RISK),
+    )
+    return _add_trailing_shift_features(featured).fill_nan(None)
+
+
+def _premium_mismatch_expr() -> pl.Expr:
+    return (
+        (pl.col(PayrollCol.PREMIUM_PAY) > 0)
+        & (pl.col(PayrollCol.SHIFT_TYPE) == "Day")
+        & (pl.col(PayrollCol.IS_WEEKEND) == 0)
+    ).cast(pl.Int64)
+
+
+def _add_trailing_shift_features(payroll: pl.DataFrame) -> pl.DataFrame:
+    sorted_payroll = payroll.sort([PayrollCol.EMPLOYEE_ID, PayrollCol.SHIFT_DATE])
+    return sorted_payroll.with_columns(
+        pl.col(PayrollCol.PAID_HOURS)
+        .shift(1)
+        .rolling_sum(window_size=7, min_samples=1)
+        .over(PayrollCol.EMPLOYEE_ID)
+        .fill_null(0)
+        .alias(FeatureCol.TRAILING_7_DAY_HOURS),
+        (pl.col(PayrollCol.SAME_DAY_SHIFT_COUNT).shift(1) > 1)
+        .cast(pl.Int64)
+        .rolling_sum(window_size=6, min_samples=1)
+        .over(PayrollCol.EMPLOYEE_ID)
+        .fill_null(0)
+        .alias(FeatureCol.PRIOR_DOUBLE_SHIFT_COUNT),
+    )
+
+
+def _ensure_snf_feature_inputs(payroll: pl.DataFrame) -> pl.DataFrame:
+    defaults: dict[str, pl.Expr] = {
+        PayrollCol.SHIFT_DATE: pl.lit(None, dtype=pl.Date),
+        PayrollCol.SCHEDULED_HOURS: pl.lit(8.0),
+        PayrollCol.WORKED_HOURS: pl.coalesce(
+            pl.col(PayrollCol.REGULAR_HOURS),
+            pl.lit(8.0),
+        )
+        if PayrollCol.REGULAR_HOURS in payroll.columns
+        else pl.lit(8.0),
+        PayrollCol.PAID_HOURS: (
+            pl.col(PayrollCol.REGULAR_HOURS).fill_null(0)
+            + pl.col(PayrollCol.OVERTIME_HOURS).fill_null(0)
+        )
+        if PayrollCol.REGULAR_HOURS in payroll.columns
+        else pl.lit(8.0),
+        PayrollCol.PREMIUM_PAY: pl.lit(0.0),
+        PayrollCol.EXPECTED_SHIFT_GROSS_PAY: pl.col(PayrollCol.GROSS_PAY),
+        PayrollCol.FACILITY_ID: pl.coalesce(
+            pl.col(PayrollCol.LOCATION),
+            pl.lit("SNF-F001"),
+        )
+        if PayrollCol.LOCATION in payroll.columns
+        else pl.lit("SNF-F001"),
+        PayrollCol.UNIT: pl.lit("Long Term Care"),
+        PayrollCol.ROLE: pl.coalesce(pl.col(PayrollCol.JOB_FAMILY), pl.lit("CNA"))
+        if PayrollCol.JOB_FAMILY in payroll.columns
+        else pl.lit("CNA"),
+        PayrollCol.SHIFT_TYPE: pl.lit("Day"),
+        PayrollCol.PAY_CODE_CATEGORY: pl.lit("Regular"),
+        PayrollCol.IS_WEEKEND: pl.lit(0),
+        PayrollCol.REST_GAP_HOURS: pl.lit(24.0),
+        PayrollCol.SAME_DAY_SHIFT_COUNT: pl.lit(1),
+        PayrollCol.MISSED_PUNCH: pl.lit(0),
+        PayrollCol.MANUAL_EDIT: pl.lit(0),
+        PayrollCol.CLOCK_IN_VARIANCE_MINUTES: pl.lit(0.0),
+        PayrollCol.CLOCK_OUT_VARIANCE_MINUTES: pl.lit(0.0),
+    }
+    additions = [
+        expr.alias(column)
+        for column, expr in defaults.items()
+        if column not in payroll.columns
+    ]
+    if not additions:
+        return payroll
+    filled = payroll.with_columns(additions)
+    if filled.get_column(PayrollCol.SHIFT_DATE).null_count() == filled.height:
+        filled = filled.with_columns(
+            (
+                pl.date(2024, 1, 1)
+                + pl.duration(days=(pl.col(PayrollCol.PAY_PERIOD_INDEX) - 1) * 14)
+            ).alias(PayrollCol.SHIFT_DATE),
+        )
+    return filled
 
 
 def _percentile(value: float, sorted_values: list[float]) -> float:

@@ -14,23 +14,24 @@
 # ---
 
 # %% [markdown]
-# # Payroll Anomaly Ranking Notebook Index
+# # SNF Payroll Approval Anomaly Ranking Notebook Index
 #
-# **Executive takeaway:** This index links the business-facing notebook sequence for synthetic payroll anomaly ranking. The sequence demonstrates review prioritization, not misconduct determination or live production integration.
+# **Executive takeaway:** This index links the business-facing notebook sequence for synthetic SNF shift-level payroll approval anomaly ranking. The sequence demonstrates administrator pre-approval prioritization, not misconduct determination or live production integration.
 
 # %% [markdown]
 # ## Notebook Sequence
 #
-# 1. `01_problem_framing_and_data_maturity.py` frames pre-finalization payroll review, privacy guardrails, taxonomy, data dictionary, validation, quality summaries, and data maturity visuals.
-# 2. `02_feature_engineering_and_baselines.py` explains leakage-safe history, peer, rule, robust statistical, ML, dollar, and hybrid score signals.
-# 3. `03_modeling_evaluation_and_error_analysis.py` presents temporal evaluation, review-budget metrics, model comparison, dollars captured, backtesting, and category error analysis.
-# 4. `04_review_queue_explainability_and_thresholds.py` turns scores into analyst-readable review queues, case cards, thresholds, risk categories, and operating model guidance.
+# 1. `01_problem_framing_and_data_maturity.py` frames SNF weekly payroll approval, privacy guardrails, synthetic shift-level schema, validation, quality summaries, and data maturity visuals.
+# 2. `02_feature_engineering_and_baselines.py` explains leakage-safe SNF history, facility-normalized peer, schedule/timeclock, premium eligibility, fatigue, rule, and threshold baseline signals.
+# 3. `03_modeling_evaluation_and_error_analysis.py` presents temporal evaluation, approval-budget metrics, model comparison, threshold baseline comparison, exposure captured, backtesting, and category error analysis.
+# 4. `04_review_queue_explainability_and_thresholds.py` turns scores into administrator-readable approval queues, case cards, thresholds, risk categories, recommended actions, and operating model guidance.
 # 5. `05_production_monitoring_and_deployment_path.py` outlines production deployment, monitoring, retraining triggers, limitations, and governance controls without claiming live integrations.
+# 6. `08_snf_payroll_approval_case_studies.py` highlights the two highest-value SNF case studies: overtime/double-shift staffing pressure and premium pay or shift differential mismatch.
 
 # %% [markdown]
 # ## Quick Pipeline Check
 #
-# This lightweight cell confirms that the synthetic pipeline can generate the same core outputs used by the notebooks.
+# This lightweight cell confirms that the synthetic SNF pipeline can generate the same core outputs used by the notebooks.
 
 # %%
 from payroll_anomaly_ranking.config import PayrollConfig
@@ -44,9 +45,10 @@ results = run_pipeline(
     results.scored.height,
     results.metrics.height,
     results.analyst_review_queue.height,
+    results.facility_approval_summary.height,
 ]
 
 # %% [markdown]
 # ## What This Proves
 #
-# The repository now has a navigable notebook story from business framing through production readiness, with all examples synthetic and all outputs framed as payroll review prioritization.
+# The repository now has a navigable notebook story from SNF payroll approval framing through production readiness, with all examples synthetic and all outputs framed as pre-approval exception prioritization.

@@ -151,7 +151,7 @@ def test_pipeline_default_result_exposes_full_artifacts() -> None:
     assert results.validation_warnings.height >= 0
     assert results.aggregations.payroll_volume.height > 0
     assert results.metrics.height == 2
-    assert results.model_comparison.height == 4
+    assert results.model_comparison.height >= 4
     assert results.category_error_analysis.height > 0
     assert results.uncertainty_bucket_metrics.height > 0
     assert results.risk_coverage_analysis.height > 0
@@ -163,6 +163,7 @@ def test_pipeline_default_result_exposes_full_artifacts() -> None:
     assert results.leakage_checks.height > 0
     assert results.analyst_review_queue.height > 0
     assert results.evaluation_labeled_review_queue.height > 0
+    assert results.facility_approval_summary.height > 0
     assert results.scenario_metadata["name"] == "default"
 
 
@@ -198,6 +199,7 @@ def test_pipeline_scored_only_excluded_artifacts_raise() -> None:
         "leakage_checks",
         "analyst_review_queue",
         "evaluation_labeled_review_queue",
+        "facility_approval_summary",
     ]
     for artifact_name in excluded_artifact_names:
         with pytest.raises(PipelineArtifactNotGeneratedError, match=artifact_name):
@@ -215,6 +217,13 @@ def test_default_payroll_generation_reproducible_and_schema_compatible() -> None
     assert generated_a.labels.equals(generated_b.labels)
     assert validation.failures.height == 0
     assert {
+        PayrollCol.SHIFT_ID,
+        PayrollCol.FACILITY_ID,
+        PayrollCol.UNIT,
+        PayrollCol.ROLE,
+        PayrollCol.SHIFT_TYPE,
+        PayrollCol.PAY_CODE_CATEGORY,
+        PayrollCol.PREMIUM_PAY,
         PayrollCol.IS_ANOMALY,
         PayrollCol.ANOMALY_CATEGORY,
         PayrollCol.ANOMALY_DOLLARS,

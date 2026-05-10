@@ -1,614 +1,541 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, cast
 
 import numpy as np
 import polars as pl
 
-from payroll_anomaly_ranking.columns import PayrollCol, ScoreCol
-from payroll_anomaly_ranking.config import PayrollConfig
-from payroll_anomaly_ranking.scenarios import (
-    AnomalyPlan,
-    ChangePointEvent,
-    DriftPlan,
-    ScenarioSpec,
-    TargetedAnomalyControl,
+from payroll_anomaly_ranking.columns import (
+    ApprovalStatus,
+    LaborSource,
+    LicenseType,
+    PayCodeCategory,
+    PayrollCol,
+    ScenarioFamily,
+    ShiftType,
+    SNFAnomalyCategory,
+    SNFRole,
+    UnitType,
 )
+from payroll_anomaly_ranking.config import (
+    PayrollConfig,
+    SNFPayPolicyConfig,
+    validate_snf_config,
+)
+from payroll_anomaly_ranking.scenarios import ScenarioSpec
 
-DEPARTMENTS = ["Operations", "Sales", "Engineering", "Finance", "Support", "HR"]
-JOB_FAMILIES = {
-    "Operations": ["Warehouse", "Fulfillment", "Supervisor"],
-    "Sales": ["Account Executive", "Sales Ops", "Manager"],
-    "Engineering": ["Software", "Data", "Infrastructure"],
-    "Finance": ["Payroll", "Accounting", "Analyst"],
-    "Support": ["Customer Support", "Technical Support", "Lead"],
-    "HR": ["People Ops", "Recruiting", "Benefits"],
-}
-LOCATIONS = ["Austin", "Chicago", "Denver", "Remote", "Seattle"]
-ANOMALY_CATEGORIES = [
-    "duplicate_payment",
-    "overtime_spike",
-    "pay_after_termination",
-    "gross_pay_spike",
-    "incorrect_pay_rate",
-    "missing_deduction",
-    "negative_net_pay",
-    "retro_pay_outlier",
-    "department_payroll_spike",
-    "new_employee_large_payment",
-]
-BASE_PAY_CODES = ["REG", "OT", "SAL", "BON", "COM", "RET"]
-LATE_PERIOD_PAY_CODES = ["SHIFT", "SPEC", "ADJX"]
+
+@dataclass(frozen=True)
+class FacilityProfile:
+    facility_id: str
+    facility_name: str
+    region: str
+    size_tier: str
+    payroll_maturity: str
+    staffing_pressure: float
+    units: tuple[UnitType, ...]
 
 
 @dataclass(frozen=True)
 class GeneratedPayroll:
     payroll: pl.DataFrame
     labels: pl.DataFrame
+    facilities: pl.DataFrame = field(default_factory=pl.DataFrame)
+    employees: pl.DataFrame = field(default_factory=pl.DataFrame)
+    schedules: pl.DataFrame = field(default_factory=pl.DataFrame)
+    timeclock: pl.DataFrame = field(default_factory=pl.DataFrame)
+    facility_rollups: pl.DataFrame = field(default_factory=pl.DataFrame)
+    employee_rollups: pl.DataFrame = field(default_factory=pl.DataFrame)
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
-def generate_employees(config: PayrollConfig = PayrollConfig()) -> pl.DataFrame:
-    rng = np.random.default_rng(config.seed)
-    employee_ids = [f"SYN-E{idx:05d}" for idx in range(1, config.employee_count + 1)]
-    departments = rng.choice(
-        DEPARTMENTS,
-        config.employee_count,
-        p=[0.24, 0.18, 0.20, 0.13, 0.17, 0.08],
-    )
-    pay_types = rng.choice(
-        ["hourly", "salaried"],
-        config.employee_count,
-        p=[0.58, 0.42],
-    )
-    job_families = [rng.choice(JOB_FAMILIES[dept]) for dept in departments]
-    locations = rng.choice(LOCATIONS, config.employee_count)
-    job_levels = rng.choice(
-        [1, 2, 3, 4, 5],
-        config.employee_count,
-        p=[0.26, 0.31, 0.24, 0.14, 0.05],
-    )
-    tenure_months = rng.integers(0, 121, config.employee_count)
-    start = date(2024, 1, 5)
-    hire_dates = [
-        start - timedelta(days=int(months * 30 + rng.integers(0, 30)))
-        for months in tenure_months
-    ]
-    terminated = rng.random(config.employee_count) < 0.07
-    termination_dates = [
-        start + timedelta(days=int(rng.integers(120, config.pay_periods * 14 + 30)))
-        if flag
-        else None
-        for flag in terminated
-    ]
-    hourly_rates = np.clip(rng.normal(28 + job_levels * 8, 6), 18, 95)
-    salary_period_rates = np.clip(rng.normal(2600 + job_levels * 950, 550), 1800, 9000)
-    pay_rates = np.where(pay_types == "hourly", hourly_rates, salary_period_rates)
-    return pl.DataFrame(
-        {
-            PayrollCol.EMPLOYEE_ID: employee_ids,
-            PayrollCol.MANAGER_ID: [
-                f"SYN-M{int(i):04d}" for i in rng.integers(1, 80, config.employee_count)
-            ],
-            PayrollCol.DEPARTMENT: departments,
-            PayrollCol.JOB_FAMILY: job_families,
-            PayrollCol.LOCATION: locations,
-            PayrollCol.JOB_LEVEL: job_levels,
-            PayrollCol.PAY_TYPE: pay_types,
-            PayrollCol.HIRE_DATE: hire_dates,
-            PayrollCol.TERMINATION_DATE: termination_dates,
-            PayrollCol.BASE_PAY_RATE: np.round(pay_rates, 2),
-        },
-    )
+ROLE_LICENSE = {
+    SNFRole.RN: LicenseType.RN,
+    SNFRole.LPN: LicenseType.LPN,
+    SNFRole.CNA: LicenseType.CNA,
+    SNFRole.MED_AIDE: LicenseType.MED_AIDE,
+    SNFRole.THERAPY: LicenseType.THERAPY,
+    SNFRole.DIETARY: LicenseType.NONE,
+    SNFRole.HOUSEKEEPING: LicenseType.NONE,
+    SNFRole.MAINTENANCE: LicenseType.NONE,
+    SNFRole.ADMIN: LicenseType.NONE,
+}
 
+ROLE_RATE = {
+    SNFRole.RN: (39.0, 7.0),
+    SNFRole.LPN: (31.0, 5.0),
+    SNFRole.CNA: (21.0, 3.0),
+    SNFRole.MED_AIDE: (24.0, 3.5),
+    SNFRole.THERAPY: (42.0, 6.0),
+    SNFRole.DIETARY: (18.0, 2.5),
+    SNFRole.HOUSEKEEPING: (17.0, 2.0),
+    SNFRole.MAINTENANCE: (23.0, 3.5),
+    SNFRole.ADMIN: (30.0, 5.0),
+}
 
-def generate_pay_periods(config: PayrollConfig = PayrollConfig()) -> pl.DataFrame:
-    start = date(2024, 1, 5)
-    return pl.DataFrame(
-        {
-            PayrollCol.PAY_PERIOD_INDEX: list(range(1, config.pay_periods + 1)),
-            PayrollCol.PAY_PERIOD_START: [
-                start + timedelta(days=(idx - 1) * 14)
-                for idx in range(1, config.pay_periods + 1)
-            ],
-            PayrollCol.PAY_PERIOD_END: [
-                start + timedelta(days=(idx - 1) * 14 + 13)
-                for idx in range(1, config.pay_periods + 1)
-            ],
-        },
-    )
+SHIFT_WINDOWS = {
+    ShiftType.DAY: (7, 15, 8.0),
+    ShiftType.EVENING: (15, 23, 8.0),
+    ShiftType.NIGHT: (23, 7, 8.0),
+    ShiftType.DOUBLE: (7, 23, 16.0),
+}
+
+FUTURE_SCENARIOS = {
+    ScenarioFamily.AGENCY_FLOAT_LABOR: "Agency/float labor duplicate and allocation anomalies",
+    ScenarioFamily.CENSUS_ACUITY: "Census and acuity adjusted staffing anomalies",
+    ScenarioFamily.CREDENTIAL_LICENSE: "Credential/license and role/pay eligibility mismatches",
+    ScenarioFamily.PBJ_CATEGORY: "PBJ staffing category mismatches",
+    ScenarioFamily.MEAL_BREAK_PREMIUM: "Missed meal break premium anomalies",
+    ScenarioFamily.LIFECYCLE: "New hire, termination, and final pay lifecycle exceptions",
+    ScenarioFamily.RETRO_RATE: "Retroactive pay and rate correction anomalies",
+    ScenarioFamily.UNION_POLICY: "Union or contract policy variation scenarios",
+    ScenarioFamily.NEW_CLIENT_BOOTSTRAP: "New client facility bootstrap normalization scenarios",
+    ScenarioFamily.PAYROLL_CLOSE_ADJUSTMENT: "Payroll close/reopen adjustment concentration",
+}
 
 
 def generate_payroll(
     config: PayrollConfig = PayrollConfig(),
     scenario: ScenarioSpec | None = None,
 ) -> GeneratedPayroll:
-    payroll = generate_baseline_payroll(config)
-    if scenario is not None:
-        payroll = apply_scenario(payroll, config, scenario)
-    anomaly_plan = scenario.anomaly_plan if scenario is not None else None
-    return inject_anomalies(payroll, config, anomaly_plan=anomaly_plan)
+    policy = SNFPayPolicyConfig()
+    validate_snf_config(config, policy)
+    rng = np.random.default_rng(config.seed + (scenario.seed_offset if scenario else 0))
+    facilities = generate_facilities(config, rng)
+    employees = generate_employees(config, facilities, rng)
+    schedules = generate_schedules(config, facilities, employees, rng)
+    timeclock = generate_timeclock(schedules, facilities, config, policy, rng)
+    payroll = generate_payroll_lines(timeclock, policy, rng)
+    payroll, labels = inject_anomalies(payroll, config, scenario, policy, rng)
+    facility_rollups = facility_pay_period_rollups(payroll)
+    employee_rollups = employee_pay_period_rollups(payroll)
+    _validate_rollups(payroll, facility_rollups)
+    return GeneratedPayroll(
+        payroll=payroll,
+        labels=labels,
+        facilities=facilities,
+        employees=employees,
+        schedules=schedules,
+        timeclock=timeclock,
+        facility_rollups=facility_rollups,
+        employee_rollups=employee_rollups,
+        metadata=scenario_metadata(scenario),
+    )
 
 
-def generate_baseline_payroll(
-    config: PayrollConfig = PayrollConfig(),
+def generate_facilities(
+    config: PayrollConfig,
+    rng: np.random.Generator,
 ) -> pl.DataFrame:
-    rng = np.random.default_rng(config.seed)
-    employees = generate_employees(config)
-    periods = generate_pay_periods(config)
+    regions = np.array(["Midwest", "Northeast", "Southeast", "West"])
+    size_tiers = np.array(["small", "mid", "large"])
+    maturities = np.array(["low", "medium", "high"])
     rows: list[dict[str, object]] = []
-    for emp in employees.iter_rows(named=True):
-        promotion_period = (
-            int(rng.integers(5, config.pay_periods + 1))
-            if rng.random() < 0.16
+    for idx in range(1, config.facility_count + 1):
+        size = str(rng.choice(size_tiers, p=[0.25, 0.50, 0.25]))
+        maturity = str(rng.choice(maturities, p=[0.20, 0.55, 0.25]))
+        pressure_base = {"small": 0.95, "mid": 1.0, "large": 1.08}[size]
+        pressure = float(np.clip(rng.normal(pressure_base, 0.12), 0.70, 1.40))
+        rows.append(
+            {
+                PayrollCol.FACILITY_ID: f"SNF-F{idx:03d}",
+                PayrollCol.FACILITY_NAME: f"Synthetic SNF Facility {idx:02d}",
+                PayrollCol.REGION: str(rng.choice(regions)),
+                PayrollCol.FACILITY_SIZE_TIER: size,
+                PayrollCol.PAYROLL_MATURITY: maturity,
+                PayrollCol.STAFFING_PRESSURE: round(pressure, 3),
+            },
+        )
+    return pl.DataFrame(rows)
+
+
+def generate_employees(
+    config: PayrollConfig = PayrollConfig(),
+    facilities: pl.DataFrame | None = None,
+    rng: np.random.Generator | None = None,
+) -> pl.DataFrame:
+    validate_snf_config(config)
+    rng = rng or np.random.default_rng(config.seed)
+    if facilities is None:
+        facilities = generate_facilities(config, rng)
+    facility_ids = facilities.get_column(PayrollCol.FACILITY_ID).to_numpy()
+    roles = np.array(list(SNFRole))
+    role_probabilities = np.array(
+        [0.10, 0.16, 0.44, 0.06, 0.04, 0.08, 0.06, 0.03, 0.03],
+    )
+    rows: list[dict[str, object]] = []
+    start = date(2024, 1, 1)
+    for idx in range(1, config.employee_count + 1):
+        role = SNFRole(rng.choice(roles, p=role_probabilities))
+        mean_rate, sd_rate = ROLE_RATE[role]
+        tenure_months = int(rng.integers(0, 121))
+        hire_date = start - timedelta(
+            days=int(tenure_months * 30 + rng.integers(0, 30)),
+        )
+        terminated = rng.random() < 0.04
+        termination_date = (
+            start + timedelta(days=int(rng.integers(90, config.pay_periods * 14 + 30)))
+            if terminated
             else None
         )
-        for period in periods.iter_rows(named=True):
-            period_end = period[PayrollCol.PAY_PERIOD_END]
-            active = period_end >= emp[PayrollCol.HIRE_DATE] and (
-                emp[PayrollCol.TERMINATION_DATE] is None
-                or period_end <= emp[PayrollCol.TERMINATION_DATE]
-            )
-            if not active and rng.random() > 0.03:
-                continue
-            seasonal = 1 + 0.06 * np.sin(
-                period[PayrollCol.PAY_PERIOD_INDEX] / config.pay_periods * 2 * np.pi,
-            )
-            promoted = (
-                promotion_period is not None
-                and period[PayrollCol.PAY_PERIOD_INDEX] >= promotion_period
-            )
-            pay_rate = float(emp[PayrollCol.BASE_PAY_RATE]) * (
-                1.09 if promoted else 1.0
-            )
-            hourly = emp[PayrollCol.PAY_TYPE] == "hourly"
-            regular_hours = (
-                float(np.clip(rng.normal(78, 5), 45, 86)) if hourly else 80.0
-            )
-            overtime_base = (
-                2.5 + (emp[PayrollCol.DEPARTMENT] in ["Operations", "Support"]) * 3.0
-            )
-            overtime_hours = (
-                float(max(0, rng.gamma(1.5, overtime_base / 1.5) * seasonal))
-                if hourly
-                else max(0, rng.normal(1.0, 1.2))
-            )
-            gross = (
-                regular_hours * pay_rate + overtime_hours * pay_rate * 1.5
-                if hourly
-                else pay_rate * seasonal
-            )
-            bonus = (
-                rng.gamma(1.3, 550)
-                if emp[PayrollCol.DEPARTMENT] in ["Sales", "Engineering"]
-                and rng.random() < 0.12
-                else 0.0
-            )
-            commission = (
-                rng.gamma(2.0, 420)
-                if emp[PayrollCol.DEPARTMENT] == "Sales" and rng.random() < 0.30
-                else 0.0
-            )
-            retro_pay = rng.gamma(1.4, 260) if rng.random() < 0.025 else 0.0
-            manual_adjustment = rng.normal(0, 160) if rng.random() < 0.05 else 0.0
-            pay_code, ood_context = _pay_code_for_row(
-                rng,
-                str(emp[PayrollCol.PAY_TYPE]),
-                overtime_hours,
-                bonus + commission + retro_pay,
-                int(period[PayrollCol.PAY_PERIOD_INDEX]),
-                config,
-            )
-            gross_pay = max(
-                0.0,
-                gross
-                + bonus
-                + commission
-                + retro_pay
-                + manual_adjustment
-                + rng.normal(0, 65),
-            )
-            deduction_rate = float(np.clip(rng.normal(0.23, 0.045), 0.08, 0.38))
-            deductions = max(0.0, gross_pay * deduction_rate + rng.normal(0, 25))
-            if rng.random() < 0.003:
-                deductions = None
-            net_pay = gross_pay - (deductions or 0.0)
-            rows.append(
-                {
-                    **emp,
-                    **period,
-                    PayrollCol.EMPLOYMENT_STATUS: "active" if active else "terminated",
-                    PayrollCol.PAY_CODE: pay_code,
-                    PayrollCol.TENURE_MONTHS: max(
-                        0,
-                        int((period_end - emp[PayrollCol.HIRE_DATE]).days / 30),
-                    ),
-                    PayrollCol.REGULAR_HOURS: round(regular_hours, 2),
-                    PayrollCol.OVERTIME_HOURS: round(overtime_hours, 2),
-                    PayrollCol.PAY_RATE: round(pay_rate, 2),
-                    PayrollCol.BONUS: round(bonus, 2),
-                    PayrollCol.COMMISSION: round(commission, 2),
-                    PayrollCol.RETRO_PAY: round(retro_pay, 2),
-                    PayrollCol.MANUAL_ADJUSTMENT: round(manual_adjustment, 2),
-                    PayrollCol.GROSS_PAY: round(gross_pay, 2),
-                    PayrollCol.DEDUCTIONS: None
-                    if deductions is None
-                    else round(deductions, 2),
-                    PayrollCol.NET_PAY: round(net_pay, 2),
-                    PayrollCol.IS_ANOMALY: 0,
-                    PayrollCol.ANOMALY_CATEGORY: "normal",
-                    PayrollCol.ANOMALY_DOLLARS: 0.0,
-                    PayrollCol.OOD_PAY_CODE_CONTEXT: ood_context,
-                },
-            )
-    payroll = pl.DataFrame(rows, infer_schema_length=None).with_row_index(
-        PayrollCol.RECORD_ID,
-    )
-    return payroll
+        base_rate = float(np.clip(rng.normal(mean_rate, sd_rate), 14.0, 65.0))
+        facility_id = str(rng.choice(facility_ids))
+        rows.append(
+            {
+                PayrollCol.EMPLOYEE_ID: f"SYN-SNF-E{idx:05d}",
+                PayrollCol.MANAGER_ID: f"SYN-SNF-M{int(rng.integers(1, 80)):04d}",
+                PayrollCol.HOME_FACILITY_ID: facility_id,
+                PayrollCol.FACILITY_ID: facility_id,
+                PayrollCol.WORKED_FACILITY_ID: facility_id,
+                PayrollCol.ROLE: role,
+                PayrollCol.LICENSE_TYPE: ROLE_LICENSE[role],
+                PayrollCol.DEPARTMENT: "Nursing"
+                if role in {SNFRole.RN, SNFRole.LPN, SNFRole.CNA, SNFRole.MED_AIDE}
+                else "Facility Support",
+                PayrollCol.JOB_FAMILY: role,
+                PayrollCol.LOCATION: facility_id,
+                PayrollCol.JOB_LEVEL: _role_level(role),
+                PayrollCol.PAY_TYPE: "hourly",
+                PayrollCol.HIRE_DATE: hire_date,
+                PayrollCol.TERMINATION_DATE: termination_date,
+                PayrollCol.BASE_PAY_RATE: round(base_rate, 2),
+            },
+        )
+    return pl.DataFrame(rows)
 
 
-def apply_scenario(
-    payroll: pl.DataFrame,
-    config: PayrollConfig = PayrollConfig(),
-    scenario: ScenarioSpec = ScenarioSpec(),
+def generate_schedules(
+    config: PayrollConfig,
+    facilities: pl.DataFrame,
+    employees: pl.DataFrame,
+    rng: np.random.Generator,
 ) -> pl.DataFrame:
-    rng = np.random.default_rng(config.seed + scenario.seed_offset + 101)
-    rows = payroll.to_dicts()
-    for plan in scenario.drift_plans:
-        _apply_drift_plan(rows, plan, rng)
-    for event in scenario.change_points:
-        _apply_change_point(rows, event)
+    facility_lookup = facilities.select(
+        PayrollCol.FACILITY_ID,
+        PayrollCol.FACILITY_NAME,
+        PayrollCol.REGION,
+        PayrollCol.FACILITY_SIZE_TIER,
+        PayrollCol.PAYROLL_MATURITY,
+        PayrollCol.STAFFING_PRESSURE,
+    )
+    employee_rows = employees.join(
+        facility_lookup,
+        on=PayrollCol.FACILITY_ID,
+    ).to_dicts()
+    period_start = date(2024, 1, 5)
+    rows: list[dict[str, object]] = []
+    shift_number = 1
+    units = list(UnitType)
+    shifts = np.array([ShiftType.DAY, ShiftType.EVENING, ShiftType.NIGHT])
+    for emp in employee_rows:
+        role = SNFRole(emp[PayrollCol.ROLE])
+        role_shift_prob = _role_shift_probabilities(role)
+        for period in range(1, config.pay_periods + 1):
+            pay_period_start = period_start + timedelta(days=(period - 1) * 14)
+            pay_period_end = pay_period_start + timedelta(days=13)
+            if pay_period_end < emp[PayrollCol.HIRE_DATE]:
+                continue
+            if (
+                emp[PayrollCol.TERMINATION_DATE] is not None
+                and pay_period_start > emp[PayrollCol.TERMINATION_DATE]
+            ):
+                continue
+            pressure = float(emp[PayrollCol.STAFFING_PRESSURE])
+            base_count = rng.poisson(config.shifts_per_employee_per_period * pressure)
+            shift_count = max(2, min(base_count, 14))
+            days = rng.choice(np.arange(14), size=shift_count, replace=shift_count > 14)
+            for day in sorted(int(value) for value in days):
+                shift_type = ShiftType(rng.choice(shifts, p=role_shift_prob))
+                start_hour, end_hour, scheduled_hours = SHIFT_WINDOWS[shift_type]
+                shift_date = pay_period_start + timedelta(days=day)
+                rows.append(
+                    {
+                        PayrollCol.SHIFT_ID: f"SYN-SHIFT-{shift_number:08d}",
+                        PayrollCol.EMPLOYEE_ID: emp[PayrollCol.EMPLOYEE_ID],
+                        PayrollCol.MANAGER_ID: emp[PayrollCol.MANAGER_ID],
+                        PayrollCol.FACILITY_ID: emp[PayrollCol.FACILITY_ID],
+                        PayrollCol.FACILITY_NAME: emp[PayrollCol.FACILITY_NAME],
+                        PayrollCol.REGION: emp[PayrollCol.REGION],
+                        PayrollCol.FACILITY_SIZE_TIER: emp[
+                            PayrollCol.FACILITY_SIZE_TIER
+                        ],
+                        PayrollCol.PAYROLL_MATURITY: emp[PayrollCol.PAYROLL_MATURITY],
+                        PayrollCol.STAFFING_PRESSURE: emp[PayrollCol.STAFFING_PRESSURE],
+                        PayrollCol.HOME_FACILITY_ID: emp[PayrollCol.HOME_FACILITY_ID],
+                        PayrollCol.WORKED_FACILITY_ID: emp[
+                            PayrollCol.WORKED_FACILITY_ID
+                        ],
+                        PayrollCol.UNIT: str(rng.choice(units)),
+                        PayrollCol.ROLE: emp[PayrollCol.ROLE],
+                        PayrollCol.LICENSE_TYPE: emp[PayrollCol.LICENSE_TYPE],
+                        PayrollCol.DEPARTMENT: emp[PayrollCol.DEPARTMENT],
+                        PayrollCol.JOB_FAMILY: emp[PayrollCol.JOB_FAMILY],
+                        PayrollCol.LOCATION: emp[PayrollCol.LOCATION],
+                        PayrollCol.JOB_LEVEL: emp[PayrollCol.JOB_LEVEL],
+                        PayrollCol.PAY_TYPE: emp[PayrollCol.PAY_TYPE],
+                        PayrollCol.LABOR_SOURCE: LaborSource.EMPLOYEE,
+                        PayrollCol.PAY_PERIOD_INDEX: period,
+                        PayrollCol.PAY_PERIOD_START: pay_period_start,
+                        PayrollCol.PAY_PERIOD_END: pay_period_end,
+                        PayrollCol.SHIFT_DATE: shift_date,
+                        PayrollCol.SHIFT_TYPE: shift_type,
+                        PayrollCol.SHIFT_START_HOUR: start_hour,
+                        PayrollCol.SHIFT_END_HOUR: end_hour,
+                        PayrollCol.SCHEDULED_HOURS: scheduled_hours,
+                        PayrollCol.BASE_PAY_RATE: emp[PayrollCol.BASE_PAY_RATE],
+                        PayrollCol.HIRE_DATE: emp[PayrollCol.HIRE_DATE],
+                        PayrollCol.TERMINATION_DATE: emp[PayrollCol.TERMINATION_DATE],
+                    },
+                )
+                shift_number += 1
     return pl.DataFrame(rows, infer_schema_length=None)
+
+
+def generate_timeclock(
+    schedules: pl.DataFrame,
+    facilities: pl.DataFrame,
+    config: PayrollConfig,
+    policy: SNFPayPolicyConfig,
+    rng: np.random.Generator,
+) -> pl.DataFrame:
+    rows = schedules.to_dicts()
+    for row in rows:
+        maturity = str(row[PayrollCol.PAYROLL_MATURITY])
+        pressure = float(row[PayrollCol.STAFFING_PRESSURE])
+        missed_rate = {"low": 0.060, "medium": 0.035, "high": 0.018}[maturity]
+        manual_rate = {"low": 0.090, "medium": 0.055, "high": 0.025}[maturity]
+        scheduled = float(row[PayrollCol.SCHEDULED_HOURS])
+        clock_in_variance = rng.normal(0, 9 + pressure * 2)
+        clock_out_variance = rng.normal(0, 10 + pressure * 3)
+        worked_hours = max(
+            0.0,
+            scheduled + (clock_out_variance - clock_in_variance) / 60,
+        )
+        if rng.random() < 0.045 * pressure:
+            worked_hours += rng.uniform(1.0, 4.0)
+        if rng.random() < 0.018 * pressure:
+            row[PayrollCol.SHIFT_TYPE] = ShiftType.DOUBLE
+            row[PayrollCol.SHIFT_END_HOUR] = 23
+            row[PayrollCol.SCHEDULED_HOURS] = 16.0
+            worked_hours = max(worked_hours, rng.normal(15.5, 0.5))
+        missed_punch = rng.random() < missed_rate
+        manual_edit = missed_punch or rng.random() < manual_rate
+        row[PayrollCol.WORKED_HOURS] = round(worked_hours, 2)
+        row[PayrollCol.PAID_HOURS] = round(
+            max(worked_hours, scheduled if manual_edit else worked_hours),
+            2,
+        )
+        row[PayrollCol.REGULAR_HOURS] = round(
+            min(row[PayrollCol.PAID_HOURS], policy.overtime_daily_hours),
+            2,
+        )
+        row[PayrollCol.OVERTIME_HOURS] = round(
+            max(row[PayrollCol.PAID_HOURS] - policy.overtime_daily_hours, 0.0),
+            2,
+        )
+        row[PayrollCol.CLOCK_IN_VARIANCE_MINUTES] = round(clock_in_variance, 1)
+        row[PayrollCol.CLOCK_OUT_VARIANCE_MINUTES] = round(clock_out_variance, 1)
+        row[PayrollCol.MISSED_PUNCH] = int(missed_punch)
+        row[PayrollCol.MANUAL_EDIT] = int(manual_edit)
+        row[PayrollCol.SCHEDULE_EXCEPTION] = int(
+            abs(row[PayrollCol.PAID_HOURS] - scheduled) > 1.0,
+        )
+        row[PayrollCol.PAID_WITHOUT_SCHEDULE] = 0
+        row[PayrollCol.APPROVAL_STATUS] = (
+            ApprovalStatus.MANUAL_OVERRIDE if manual_edit else ApprovalStatus.APPROVED
+        )
+    timed = pl.DataFrame(rows, infer_schema_length=None)
+    return _add_fatigue_context(timed, policy)
+
+
+def generate_payroll_lines(
+    timeclock: pl.DataFrame,
+    policy: SNFPayPolicyConfig,
+    rng: np.random.Generator,
+) -> pl.DataFrame:
+    rows = timeclock.to_dicts()
+    output: list[dict[str, object]] = []
+    for index, row in enumerate(rows, start=1):
+        base_rate = float(row[PayrollCol.BASE_PAY_RATE])
+        regular_hours = float(row[PayrollCol.REGULAR_HOURS])
+        overtime_hours = float(row[PayrollCol.OVERTIME_HOURS])
+        shift_type = ShiftType(row[PayrollCol.SHIFT_TYPE])
+        is_weekend = _is_weekend(row[PayrollCol.SHIFT_DATE])
+        shift_diff_rate = _shift_diff_rate(shift_type, policy)
+        weekend_rate = policy.weekend_diff_rate if is_weekend else 0.0
+        regular_pay = regular_hours * base_rate
+        overtime_pay = overtime_hours * base_rate * policy.overtime_multiplier
+        premium_pay = float(row[PayrollCol.PAID_HOURS]) * (
+            shift_diff_rate + weekend_rate
+        )
+        gross = regular_pay + overtime_pay + premium_pay
+        deductions = gross * float(np.clip(rng.normal(0.21, 0.025), 0.12, 0.33))
+        category = _primary_pay_code_category(
+            overtime_hours,
+            premium_pay,
+            shift_type,
+            is_weekend,
+        )
+        pay_code = _pay_code(category, shift_type, is_weekend)
+        ood_context = "standard_snf_pay_code"
+        if int(row[PayrollCol.PAY_PERIOD_INDEX]) >= max(
+            1,
+            0,
+        ) and rng.random() < _late_pay_code_rate(row):
+            pay_code = str(rng.choice(["SNF_CRIT", "SNF_PREM", "SNF_RARE"]))
+            ood_context = "late_period_new_or_rare_pay_code"
+        output.append(
+            {
+                **row,
+                PayrollCol.RECORD_ID: index - 1,
+                PayrollCol.PAYROLL_LINE_ID: f"SYN-PL-{index:08d}",
+                PayrollCol.PAY_CODE: pay_code,
+                PayrollCol.PAY_CODE_CATEGORY: category,
+                PayrollCol.PAY_RATE: round(base_rate, 2),
+                PayrollCol.BASE_RATE: round(base_rate, 2),
+                PayrollCol.RATE_MULTIPLIER: policy.overtime_multiplier
+                if overtime_hours
+                else 1.0,
+                PayrollCol.PREMIUM_PAY: round(premium_pay, 2),
+                PayrollCol.EXPECTED_SHIFT_GROSS_PAY: round(
+                    float(row[PayrollCol.SCHEDULED_HOURS]) * base_rate + premium_pay,
+                    2,
+                ),
+                PayrollCol.GROSS_PAY: round(gross, 2),
+                PayrollCol.DEDUCTIONS: round(deductions, 2),
+                PayrollCol.NET_PAY: round(gross - deductions, 2),
+                PayrollCol.BONUS: 0.0,
+                PayrollCol.COMMISSION: 0.0,
+                PayrollCol.RETRO_PAY: 0.0,
+                PayrollCol.MANUAL_ADJUSTMENT: 0.0,
+                PayrollCol.TENURE_MONTHS: max(
+                    0,
+                    int(
+                        (row[PayrollCol.SHIFT_DATE] - row[PayrollCol.HIRE_DATE]).days
+                        / 30,
+                    ),
+                ),
+                PayrollCol.EMPLOYMENT_STATUS: _employment_status(row),
+                PayrollCol.IS_WEEKEND: int(is_weekend),
+                PayrollCol.IS_HOLIDAY: 0,
+                PayrollCol.IS_ANOMALY: 0,
+                PayrollCol.ANOMALY_CATEGORY: SNFAnomalyCategory.NORMAL,
+                PayrollCol.ANOMALY_DOLLARS: 0.0,
+                PayrollCol.OOD_PAY_CODE_CONTEXT: ood_context,
+            },
+        )
+    return pl.DataFrame(output, infer_schema_length=None)
 
 
 def inject_anomalies(
     payroll: pl.DataFrame,
-    config: PayrollConfig = PayrollConfig(),
-    *,
-    anomaly_plan: AnomalyPlan | None = None,
-) -> GeneratedPayroll:
-    rng = np.random.default_rng(config.seed + 11)
-    payroll = payroll.clone()
-    default_target = min(max(60, payroll.height // 70), payroll.height // 8)
-    target_count = (
-        min(anomaly_plan.target_count, payroll.height)
-        if anomaly_plan is not None and anomaly_plan.target_count is not None
-        else default_target
-    )
+    config: PayrollConfig,
+    scenario: ScenarioSpec | None,
+    policy: SNFPayPolicyConfig,
+    rng: np.random.Generator,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
     rows = payroll.to_dicts()
-    selected = _select_anomaly_assignments(rows, target_count, anomaly_plan, rng)
+    if not rows:
+        return payroll, pl.DataFrame()
+    family = _scenario_family(scenario)
+    target_count = _scenario_target_count(scenario, rows)
+    candidates = _scenario_candidates(rows, family)
+    if not candidates:
+        candidates = list(range(len(rows)))
+    selected = rng.choice(candidates, min(target_count, len(candidates)), replace=False)
     labels: list[dict[str, object]] = []
-    department_spike_period = int(rng.integers(8, max(9, config.pay_periods - 2)))
-    department_spike_department = str(rng.choice(DEPARTMENTS))
-    for idx, category, severity_overrides in selected:
+    for raw_idx in selected:
+        idx = int(raw_idx)
         row = rows[idx]
         original = float(row[PayrollCol.GROSS_PAY])
-        severity = _severity_multiplier(anomaly_plan, category, severity_overrides)
-        if category == "duplicate_payment":
-            row[PayrollCol.GROSS_PAY] = round(original * (1 + severity), 2)
-            row[PayrollCol.NET_PAY] = round(
-                float(row[PayrollCol.NET_PAY]) * (1 + severity),
-                2,
-            )
-        elif category == "overtime_spike":
-            row[PayrollCol.OVERTIME_HOURS] = round(
-                max(
-                    float(row[PayrollCol.OVERTIME_HOURS]) * 5 * severity,
-                    35 * severity,
-                ),
-                2,
-            )
-            row[PayrollCol.GROSS_PAY] = round(
-                original
-                + float(row[PayrollCol.OVERTIME_HOURS])
-                * float(row[PayrollCol.PAY_RATE])
-                * 1.5,
-                2,
-            )
-        elif category == "pay_after_termination":
-            row[PayrollCol.EMPLOYMENT_STATUS] = "terminated"
-            row[PayrollCol.TERMINATION_DATE] = row[
-                PayrollCol.PAY_PERIOD_START
-            ] - timedelta(days=14)
-        elif category == "gross_pay_spike":
-            row[PayrollCol.GROSS_PAY] = round(
-                original * rng.uniform(2.2, 4.0) * severity,
-                2,
-            )
-        elif category == "incorrect_pay_rate":
-            row[PayrollCol.PAY_RATE] = round(
-                float(row[PayrollCol.PAY_RATE]) * rng.uniform(1.45, 2.2) * severity,
-                2,
-            )
-            row[PayrollCol.GROSS_PAY] = round(
-                original * rng.uniform(1.35, 1.9) * severity,
-                2,
-            )
-        elif category == "missing_deduction":
-            row[PayrollCol.DEDUCTIONS] = 0.0
-        elif category == "negative_net_pay":
-            row[PayrollCol.DEDUCTIONS] = round(
-                float(row[PayrollCol.GROSS_PAY]) * 1.35,
-                2,
-            )
-            row[PayrollCol.NET_PAY] = round(
-                float(row[PayrollCol.GROSS_PAY]) - float(row[PayrollCol.DEDUCTIONS]),
-                2,
-            )
-        elif category == "retro_pay_outlier":
-            row[PayrollCol.RETRO_PAY] = round(
-                max(float(row[PayrollCol.RETRO_PAY]), original * 1.2 * severity),
-                2,
-            )
-            row[PayrollCol.GROSS_PAY] = round(
-                original + float(row[PayrollCol.RETRO_PAY]),
-                2,
-            )
-        elif category == "department_payroll_spike":
-            row[PayrollCol.DEPARTMENT] = department_spike_department
-            row[PayrollCol.PAY_PERIOD_INDEX] = department_spike_period
-            row[PayrollCol.GROSS_PAY] = round(original * 1.9 * severity, 2)
-        elif category == "new_employee_large_payment":
-            row[PayrollCol.HIRE_DATE] = row[PayrollCol.PAY_PERIOD_START] - timedelta(
-                days=10,
-            )
-            row[PayrollCol.TENURE_MONTHS] = 0
-            row[PayrollCol.GROSS_PAY] = round(original * 2.4 * severity, 2)
-        if category not in [
-            "negative_net_pay",
-            "missing_deduction",
-            "duplicate_payment",
-        ]:
-            deductions = float(row[PayrollCol.DEDUCTIONS] or 0.0)
-            row[PayrollCol.NET_PAY] = round(
-                float(row[PayrollCol.GROSS_PAY]) - deductions,
-                2,
-            )
+        if family == ScenarioFamily.PREMIUM_MISMATCH:
+            category = _inject_premium_mismatch(row, policy, rng)
+        else:
+            category = _inject_overtime_pressure(row, policy, rng)
+            if scenario is not None and scenario.anomaly_plan is not None:
+                if "overtime_spike" in scenario.anomaly_plan.category_weights:
+                    category = "overtime_spike"
         row[PayrollCol.IS_ANOMALY] = 1
         row[PayrollCol.ANOMALY_CATEGORY] = category
+        row[PayrollCol.SCENARIO_FAMILY] = family
+        row[PayrollCol.SCENARIO_STATUS] = "implemented"
         row[PayrollCol.ANOMALY_DOLLARS] = round(
             abs(float(row[PayrollCol.GROSS_PAY]) - original),
             2,
         )
-        rows[idx] = row
         labels.append(
             {
                 PayrollCol.RECORD_ID: row[PayrollCol.RECORD_ID],
-                PayrollCol.ANOMALY_CATEGORY: category,
+                PayrollCol.SHIFT_ID: row[PayrollCol.SHIFT_ID],
+                PayrollCol.ANOMALY_CATEGORY: row[PayrollCol.ANOMALY_CATEGORY],
                 PayrollCol.ANOMALY_DOLLARS: row[PayrollCol.ANOMALY_DOLLARS],
+                PayrollCol.SCENARIO_FAMILY: family,
             },
         )
-    return GeneratedPayroll(
-        payroll=pl.DataFrame(rows, infer_schema_length=None),
-        labels=pl.DataFrame(labels, infer_schema_length=None),
+        rows[idx] = row
+    updated = pl.DataFrame(rows, infer_schema_length=None).with_columns(
+        pl.col(PayrollCol.SCENARIO_FAMILY).fill_null(ScenarioFamily.BASELINE),
+        pl.col(PayrollCol.SCENARIO_STATUS).fill_null("baseline"),
+    )
+    return updated, pl.DataFrame(labels, infer_schema_length=None)
+
+
+def facility_pay_period_rollups(payroll: pl.DataFrame) -> pl.DataFrame:
+    return payroll.group_by([PayrollCol.PAY_PERIOD_INDEX, PayrollCol.FACILITY_ID]).agg(
+        pl.len().alias("total_shifts"),
+        pl.sum(PayrollCol.GROSS_PAY).alias("total_gross_pay"),
+        pl.sum(PayrollCol.PAID_HOURS).alias("total_paid_hours"),
+        pl.sum(PayrollCol.OVERTIME_HOURS).alias("total_overtime_hours"),
+        pl.sum(PayrollCol.PREMIUM_PAY).alias("total_premium_pay"),
+        pl.sum(PayrollCol.IS_ANOMALY).alias("synthetic_anomaly_count"),
+        pl.sum(PayrollCol.ANOMALY_DOLLARS).alias("synthetic_anomaly_dollars"),
     )
 
 
-def _select_anomaly_assignments(
-    rows: list[dict[str, object]],
-    target_count: int,
-    plan: AnomalyPlan | None,
-    rng: np.random.Generator,
-) -> list[tuple[int, str, dict[str, float]]]:
-    available = set(range(len(rows)))
-    assignments: list[tuple[int, str, dict[str, float]]] = []
-    controls = plan.targeted_controls if plan is not None else ()
-    for control in controls:
-        if len(assignments) >= target_count:
-            break
-        candidates = [
-            idx
-            for idx in available
-            if _matches_period_and_subgroup(
-                rows[idx],
-                control.start_period,
-                control.end_period,
-                control.subgroup_filters,
-            )
-        ]
-        if not candidates:
-            continue
-        count = _control_target_count(control, len(candidates), target_count)
-        count = min(count, len(candidates), target_count - len(assignments))
-        if count <= 0:
-            continue
-        chosen = rng.choice(candidates, count, replace=False)
-        categories = _choose_categories(control.category_weights, count, rng)
-        for idx, category in zip(chosen, categories, strict=False):
-            int_idx = int(idx)
-            assignments.append((int_idx, str(category), control.severity_multipliers))
-            available.remove(int_idx)
-    remaining_count = min(target_count - len(assignments), len(available))
-    if remaining_count > 0:
-        chosen = rng.choice(list(available), remaining_count, replace=False)
-        weights = plan.category_weights if plan is not None else {}
-        categories = _choose_categories(weights, remaining_count, rng)
-        for idx, category in zip(chosen, categories, strict=False):
-            assignments.append((int(idx), str(category), {}))
-    return assignments
-
-
-def _control_target_count(
-    control: TargetedAnomalyControl,
-    candidates: int,
-    global_target: int,
-) -> int:
-    if control.target_count is not None:
-        return control.target_count
-    base_rate = min(global_target / max(candidates * 8, 1), 0.35)
-    return max(round(candidates * base_rate * control.propensity_multiplier), 1)
-
-
-def _choose_categories(
-    category_weights: dict[str, float],
-    count: int,
-    rng: np.random.Generator,
-) -> np.ndarray:
-    category_values = ANOMALY_CATEGORIES
-    probabilities = None
-    if category_weights:
-        category_values = [cat for cat in ANOMALY_CATEGORIES if cat in category_weights]
-        weights = np.array(
-            [category_weights[cat] for cat in category_values],
-            dtype=float,
-        )
-        probabilities = weights / weights.sum() if weights.sum() > 0 else None
-    return rng.choice(category_values, count, p=probabilities)
-
-
-def _severity_multiplier(
-    plan: AnomalyPlan | None,
-    category: str,
-    overrides: dict[str, float] | None = None,
-) -> float:
-    multiplier = 1.0
-    if plan is not None:
-        multiplier = plan.severity_multipliers.get(category, multiplier)
-    if overrides:
-        multiplier = overrides.get(category, multiplier)
-    return max(multiplier, 0.0)
-
-
-def _apply_drift_plan(
-    rows: list[dict[str, object]],
-    plan: DriftPlan,
-    rng: np.random.Generator,
-) -> None:
-    pay_codes = list(plan.pay_code_mix_shift)
-    pay_code_probabilities = None
-    if pay_codes:
-        weights = np.array(
-            [plan.pay_code_mix_shift[code] for code in pay_codes],
-            dtype=float,
-        )
-        pay_code_probabilities = weights / weights.sum() if weights.sum() > 0 else None
-    for row in rows:
-        if not _matches_period_and_subgroup(
-            row,
-            plan.start_period,
-            plan.end_period,
-            plan.subgroup_filters,
-        ):
-            continue
-        if pay_codes:
-            row[PayrollCol.PAY_CODE] = str(
-                rng.choice(pay_codes, p=pay_code_probabilities),
-            )
-            row[PayrollCol.OOD_PAY_CODE_CONTEXT] = "scenario_pay_code_drift"
-        _multiply_numeric(row, PayrollCol.OVERTIME_HOURS, plan.overtime_multiplier)
-        _multiply_numeric(row, PayrollCol.DEDUCTIONS, plan.deduction_multiplier)
-        _multiply_numeric(row, PayrollCol.GROSS_PAY, plan.gross_pay_multiplier)
-        if plan.payroll_total_multiplier is not None:
-            noise = (
-                rng.normal(0, plan.multiplier_noise) if plan.multiplier_noise else 0.0
-            )
-            _multiply_numeric(
-                row,
-                PayrollCol.GROSS_PAY,
-                max(plan.payroll_total_multiplier + noise, 0.0),
-            )
-        _recompute_net_pay(row)
-
-
-def _apply_change_point(rows: list[dict[str, object]], event: ChangePointEvent) -> None:
-    for row in rows:
-        if not _matches_period_and_subgroup(
-            row,
-            event.start_period,
-            event.end_period,
-            event.subgroup_filters,
-        ):
-            continue
-        if event.pay_code is not None:
-            row[PayrollCol.PAY_CODE] = event.pay_code
-            row[PayrollCol.OOD_PAY_CODE_CONTEXT] = "scenario_change_point_pay_code"
-        if event.field in row and isinstance(row[event.field], int | float):
-            row[event.field] = round(
-                _as_float(row[event.field]) * event.multiplier + event.additive_shift,
-                2,
-            )
-        _recompute_net_pay(row)
-
-
-def _matches_period_and_subgroup(
-    row: dict[str, object],
-    start_period: int | None,
-    end_period: int | None,
-    subgroup_filters: dict[str, object],
-) -> bool:
-    period = _as_int(row[PayrollCol.PAY_PERIOD_INDEX])
-    if start_period is not None and period < start_period:
-        return False
-    if end_period is not None and period > end_period:
-        return False
-    for column, expected in subgroup_filters.items():
-        actual = row.get(column)
-        if isinstance(expected, (list, tuple, set)):
-            if actual not in expected:
-                return False
-        elif actual != expected:
-            return False
-    return True
-
-
-def _multiply_numeric(
-    row: dict[str, object],
-    column: str,
-    multiplier: float | None,
-) -> None:
-    if multiplier is None or row.get(column) is None:
-        return
-    row[column] = round(_as_float(row[column]) * multiplier, 2)
-
-
-def _recompute_net_pay(row: dict[str, object]) -> None:
-    if row.get(PayrollCol.DEDUCTIONS) is None:
-        return
-    row[PayrollCol.NET_PAY] = round(
-        _as_float(row[PayrollCol.GROSS_PAY]) - _as_float(row[PayrollCol.DEDUCTIONS]),
-        2,
+def employee_pay_period_rollups(payroll: pl.DataFrame) -> pl.DataFrame:
+    return payroll.group_by([PayrollCol.PAY_PERIOD_INDEX, PayrollCol.EMPLOYEE_ID]).agg(
+        pl.len().alias("total_shifts"),
+        pl.sum(PayrollCol.GROSS_PAY).alias("total_gross_pay"),
+        pl.sum(PayrollCol.PAID_HOURS).alias("total_paid_hours"),
+        pl.sum(PayrollCol.OVERTIME_HOURS).alias("total_overtime_hours"),
+        pl.sum(PayrollCol.PREMIUM_PAY).alias("total_premium_pay"),
     )
-
-
-def _pay_code_for_row(
-    rng: np.random.Generator,
-    pay_type: str,
-    overtime_hours: float,
-    variable_pay: float,
-    pay_period_index: int,
-    config: PayrollConfig,
-) -> tuple[str, str]:
-    late_period_start = max(config.pay_periods - 3, 1)
-    if pay_period_index >= late_period_start:
-        novelty_rate = 0.055 + 0.015 * (pay_period_index - late_period_start)
-        if rng.random() < novelty_rate:
-            return str(
-                rng.choice(LATE_PERIOD_PAY_CODES),
-            ), "late_period_new_or_rare_pay_code"
-    if variable_pay > 0 and rng.random() < 0.55:
-        return str(rng.choice(["BON", "COM", "RET"])), "standard_pay_code"
-    if pay_type == "salaried":
-        return "SAL", "standard_pay_code"
-    if overtime_hours > 6 and rng.random() < 0.45:
-        return "OT", "standard_pay_code"
-    if rng.random() < 0.01:
-        return "MISC", "rare_pay_code"
-    return "REG", "standard_pay_code"
 
 
 def write_synthetic_data(config: PayrollConfig = PayrollConfig()) -> GeneratedPayroll:
     config.data_dir.mkdir(parents=True, exist_ok=True)
     generated = generate_payroll(config)
+    generated.payroll.write_csv(config.data_dir / "synthetic_snf_shift_payroll.csv")
     generated.payroll.write_csv(config.data_dir / "synthetic_payroll.csv")
     generated.labels.write_csv(config.data_dir / "synthetic_payroll_labels.csv")
+    generated.facility_rollups.write_csv(
+        config.data_dir / "synthetic_snf_facility_rollups.csv",
+    )
     return generated
+
+
+def scenario_metadata(scenario: ScenarioSpec | None) -> dict[str, object]:
+    family = _scenario_family(scenario)
+    return {
+        "name": scenario.name if scenario is not None else "default",
+        "scenario_family": family,
+        "implemented_scenarios": [
+            ScenarioFamily.OVERTIME_STAFFING_PRESSURE,
+            ScenarioFamily.PREMIUM_MISMATCH,
+        ],
+        "future_scenarios": {
+            key.value: value for key, value in FUTURE_SCENARIOS.items()
+        },
+        "policy_assumptions": "Synthetic configurable policy; not legal or payroll advice.",
+    }
 
 
 def scenario_summary(
     payroll: pl.DataFrame,
     scenario: str = "default",
-    subgroup_dimension: str = PayrollCol.DEPARTMENT,
+    subgroup_dimension: str = PayrollCol.FACILITY_ID,
 ) -> pl.DataFrame:
     anomalies = payroll.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
     total_anomalies = anomalies.height
@@ -651,180 +578,363 @@ def scenario_summary(
                     "anomaly_share": anomalies_count / max(total_anomalies, 1),
                 },
             )
-    if subgroup_dimension in payroll.columns:
-        concentration = payroll.group_by(
-            [subgroup_dimension, PayrollCol.PAY_PERIOD_INDEX],
-        ).agg(
-            pl.len().alias("records"),
-            pl.sum(PayrollCol.IS_ANOMALY).alias("anomalies"),
-            pl.sum(PayrollCol.ANOMALY_DOLLARS).alias("anomaly_dollars"),
-        )
-        for row in concentration.to_dicts():
-            anomalies_count = int(row["anomalies"] or 0)
-            if anomalies_count == 0:
-                continue
-            rows.append(
-                {
-                    "scenario": scenario,
-                    "scope": "subgroup_period",
-                    "subgroup_dimension": subgroup_dimension,
-                    "subgroup": str(row[subgroup_dimension]),
-                    PayrollCol.PAY_PERIOD_INDEX: row[PayrollCol.PAY_PERIOD_INDEX],
-                    "records": row["records"],
-                    "anomalies": anomalies_count,
-                    "anomaly_rate": anomalies_count / max(float(row["records"]), 1.0),
-                    "anomaly_dollars": float(row["anomaly_dollars"] or 0.0),
-                    "anomaly_share": anomalies_count / max(total_anomalies, 1),
-                },
-            )
     mix = payroll.group_by(PayrollCol.ANOMALY_CATEGORY).agg(
         pl.len().alias("records"),
         pl.sum(PayrollCol.IS_ANOMALY).alias("anomalies"),
         pl.sum(PayrollCol.ANOMALY_DOLLARS).alias("anomaly_dollars"),
     )
     for row in mix.to_dicts():
-        anomalies_count = int(row["anomalies"] or 0)
         rows.append(
             {
                 "scenario": scenario,
-                "scope": "category_mix",
+                "scope": "category",
                 "subgroup_dimension": PayrollCol.ANOMALY_CATEGORY,
                 "subgroup": str(row[PayrollCol.ANOMALY_CATEGORY]),
                 PayrollCol.PAY_PERIOD_INDEX: None,
                 "records": row["records"],
-                "anomalies": anomalies_count,
-                "anomaly_rate": anomalies_count / max(float(row["records"]), 1.0),
+                "anomalies": int(row["anomalies"] or 0),
+                "anomaly_rate": float(row["anomalies"] or 0)
+                / max(float(row["records"]), 1.0),
                 "anomaly_dollars": float(row["anomaly_dollars"] or 0.0),
-                "anomaly_share": anomalies_count / max(total_anomalies, 1),
+                "anomaly_share": float(row["anomalies"] or 0) / max(total_anomalies, 1),
             },
         )
     return pl.DataFrame(rows, infer_schema_length=None)
 
 
 def scenario_sanity_summary(
-    scored: pl.DataFrame,
+    scenarios: dict[str, pl.DataFrame] | list[tuple[str, pl.DataFrame]] | pl.DataFrame,
     scenario: str = "default",
-    *,
-    score_column: str = ScoreCol.FINAL_ANOMALY_SCORE,
-    score_thresholds: tuple[float, ...] = (0.45, 0.55, 0.65),
-    subgroup_dimension: str = PayrollCol.DEPARTMENT,
-    concentration_min_share: float = 0.20,
+    score_thresholds: tuple[float, ...] = (),
 ) -> pl.DataFrame:
-    total_rows = scored.height
-    total_anomalies = _as_int(_scalar(scored, pl.sum(PayrollCol.IS_ANOMALY)) or 0)
-    total_dollars = _as_float(
-        _scalar(scored, pl.sum(PayrollCol.ANOMALY_DOLLARS)) or 0.0,
-    )
-    score_exprs = []
-    if score_column in scored.columns:
-        score_exprs = [
-            pl.col(score_column).quantile(0.50).alias("score_p50"),
-            pl.col(score_column).quantile(0.75).alias("score_p75"),
-            pl.col(score_column).quantile(0.90).alias("score_p90"),
-            pl.col(score_column).quantile(0.95).alias("score_p95"),
-        ]
-    score_stats = scored.select(score_exprs).row(0, named=True) if score_exprs else {}
-    threshold_counts = {
-        f"candidates_at_{threshold:.2f}": _candidate_count(
-            scored,
-            score_column,
-            threshold,
+    if isinstance(scenarios, pl.DataFrame):
+        score_col = "final_anomaly_score"
+        category_mix = (
+            scenarios.group_by(PayrollCol.ANOMALY_CATEGORY)
+            .agg(pl.len().alias("count"))
+            .sort(PayrollCol.ANOMALY_CATEGORY)
         )
-        for threshold in score_thresholds
-    }
-    category_rows = _category_mix_rows(scored, total_anomalies)
-    concentration = _subgroup_period_concentration(scored, subgroup_dimension)
-    max_concentration = _as_float(
-        concentration.get("max_subgroup_period_anomaly_share", 0.0),
-    )
-    zero_thresholds = [
-        f"{threshold:.2f}"
-        for threshold in score_thresholds
-        if threshold_counts[f"candidates_at_{threshold:.2f}"] == 0
-    ]
-    return pl.DataFrame(
-        [
-            {
-                "scenario": scenario,
-                "row_count": total_rows,
-                "anomaly_count": total_anomalies,
-                "anomaly_rate": total_anomalies / max(total_rows, 1),
-                "anomaly_dollars": total_dollars,
-                **score_stats,
-                **threshold_counts,
-                "category_mix": category_rows,
-                **concentration,
-                "zero_threshold_candidates": ",".join(zero_thresholds),
-                "has_zero_threshold_candidates": bool(zero_thresholds),
-                "insufficient_subgroup_concentration": max_concentration
-                < concentration_min_share,
-                "sparse_condition": bool(zero_thresholds)
-                or max_concentration < concentration_min_share,
-            },
-        ],
-        infer_schema_length=None,
-    )
-
-
-def _candidate_count(scored: pl.DataFrame, score_column: str, threshold: float) -> int:
-    if score_column not in scored.columns:
-        return 0
-    return scored.filter(pl.col(score_column) >= threshold).height
-
-
-def _category_mix_rows(scored: pl.DataFrame, total_anomalies: int) -> str:
-    if PayrollCol.ANOMALY_CATEGORY not in scored.columns:
-        return ""
-    rows = (
-        scored.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
-        .group_by(PayrollCol.ANOMALY_CATEGORY)
-        .agg(pl.len().alias("count"))
-        .sort("count", descending=True)
-    )
-    return ";".join(
-        f"{row[PayrollCol.ANOMALY_CATEGORY]}={int(row['count']) / max(total_anomalies, 1):.2f}"
-        for row in rows.to_dicts()
-    )
-
-
-def _subgroup_period_concentration(
-    scored: pl.DataFrame,
-    subgroup_dimension: str,
-) -> dict[str, object]:
-    if subgroup_dimension not in scored.columns or scored.is_empty():
-        return {
-            "max_subgroup_period": "",
-            "max_subgroup_period_anomalies": 0,
-            "max_subgroup_period_anomaly_share": 0.0,
+        row: dict[str, object] = {
+            "scenario": scenario,
+            "row_count": scenarios.height,
+            "anomaly_count": scenarios.filter(
+                pl.col(PayrollCol.IS_ANOMALY) == 1,
+            ).height,
+            "anomaly_dollars": float(
+                scenarios.select(pl.sum(PayrollCol.ANOMALY_DOLLARS)).item() or 0.0,
+            ),
+            "score_p50": float(
+                scenarios.select(pl.col(score_col).quantile(0.50)).item() or 0.0,
+            ),
+            "score_p90": float(
+                scenarios.select(pl.col(score_col).quantile(0.90)).item() or 0.0,
+            ),
+            "category_mix": ";".join(
+                f"{item[PayrollCol.ANOMALY_CATEGORY]}={item['count']}"
+                for item in category_mix.to_dicts()
+            ),
+            "max_subgroup_period_anomaly_share": _max_subgroup_period_anomaly_share(
+                scenarios,
+            ),
+            "zero_threshold_candidates": _first_zero_candidate_threshold(
+                scenarios,
+                score_col,
+                score_thresholds,
+            ),
+            "sparse_condition": "none" if scenarios.height else "empty",
         }
-    total_anomalies = _as_int(_scalar(scored, pl.sum(PayrollCol.IS_ANOMALY)) or 0)
-    grouped = (
-        scored.group_by([subgroup_dimension, PayrollCol.PAY_PERIOD_INDEX])
-        .agg(pl.sum(PayrollCol.IS_ANOMALY).alias("anomalies"))
-        .sort("anomalies", descending=True)
+        for threshold in score_thresholds:
+            row[f"candidates_at_{threshold:.2f}"] = scenarios.filter(
+                pl.col(score_col) >= threshold,
+            ).height
+        return pl.DataFrame([row], infer_schema_length=None)
+    items = scenarios.items() if isinstance(scenarios, dict) else scenarios
+    frames = [scenario_summary(frame, name) for name, frame in items]
+    return pl.concat(frames, how="diagonal") if frames else pl.DataFrame()
+
+
+def _max_subgroup_period_anomaly_share(scenarios: pl.DataFrame) -> float:
+    if PayrollCol.FACILITY_ID not in scenarios.columns:
+        return 0.0
+    grouped = scenarios.group_by(
+        [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+    ).agg(
+        pl.sum(PayrollCol.IS_ANOMALY).alias("anomalies"),
     )
-    if grouped.is_empty():
-        return {
-            "max_subgroup_period": "",
-            "max_subgroup_period_anomalies": 0,
-            "max_subgroup_period_anomaly_share": 0.0,
-        }
-    row = grouped.row(0, named=True)
-    anomalies = int(row["anomalies"] or 0)
+    total = float(scenarios.select(pl.sum(PayrollCol.IS_ANOMALY)).item() or 0.0)
+    if total <= 0:
+        return 0.0
+    return float(grouped.select(pl.max("anomalies") / total).item() or 0.0)
+
+
+def _first_zero_candidate_threshold(
+    scenarios: pl.DataFrame,
+    score_col: str,
+    score_thresholds: tuple[float, ...],
+) -> str:
+    for threshold in score_thresholds:
+        if scenarios.filter(pl.col(score_col) >= threshold).height == 0:
+            return f"{threshold:.2f}"
+    return f"{max(score_thresholds):.2f}" if score_thresholds else "none"
+
+
+def _role_level(role: SNFRole) -> int:
     return {
-        "max_subgroup_period": f"{row[subgroup_dimension]}|period={row[PayrollCol.PAY_PERIOD_INDEX]}",
-        "max_subgroup_period_anomalies": anomalies,
-        "max_subgroup_period_anomaly_share": anomalies / max(total_anomalies, 1),
-    }
+        SNFRole.CNA: 1,
+        SNFRole.DIETARY: 1,
+        SNFRole.HOUSEKEEPING: 1,
+        SNFRole.MED_AIDE: 2,
+        SNFRole.LPN: 3,
+        SNFRole.MAINTENANCE: 3,
+        SNFRole.RN: 4,
+        SNFRole.THERAPY: 4,
+        SNFRole.ADMIN: 4,
+    }[role]
 
 
-def _scalar(frame: pl.DataFrame, expr: pl.Expr) -> Any:
-    return frame.select(expr).item()
+def _role_shift_probabilities(role: SNFRole) -> np.ndarray:
+    if role in {SNFRole.RN, SNFRole.LPN, SNFRole.CNA, SNFRole.MED_AIDE}:
+        return np.array([0.43, 0.31, 0.26])
+    return np.array([0.76, 0.18, 0.06])
 
 
-def _as_float(value: object) -> float:
-    return float(cast(Any, value))
+def _add_fatigue_context(
+    timed: pl.DataFrame,
+    policy: SNFPayPolicyConfig,
+) -> pl.DataFrame:
+    return timed.sort(
+        [PayrollCol.EMPLOYEE_ID, PayrollCol.SHIFT_DATE, PayrollCol.SHIFT_START_HOUR],
+    ).with_columns(
+        pl.len()
+        .over([PayrollCol.EMPLOYEE_ID, PayrollCol.SHIFT_DATE])
+        .alias(PayrollCol.SAME_DAY_SHIFT_COUNT),
+        (
+            (
+                pl.col(PayrollCol.SHIFT_DATE).cast(pl.Datetime)
+                - pl.col(PayrollCol.SHIFT_DATE)
+                .shift(1)
+                .over(PayrollCol.EMPLOYEE_ID)
+                .cast(pl.Datetime)
+            ).dt.total_hours()
+            - pl.col(PayrollCol.SCHEDULED_HOURS)
+            .shift(1)
+            .over(PayrollCol.EMPLOYEE_ID)
+            .fill_null(8)
+        )
+        .fill_null(24.0)
+        .clip(0, None)
+        .alias(PayrollCol.REST_GAP_HOURS),
+        pl.when(
+            pl.col(PayrollCol.SHIFT_DATE)
+            .diff()
+            .over(PayrollCol.EMPLOYEE_ID)
+            .dt.total_days()
+            == 1,
+        )
+        .then(1)
+        .otherwise(0)
+        .cum_sum()
+        .over(PayrollCol.EMPLOYEE_ID)
+        .alias(PayrollCol.CONSECUTIVE_WORKED_DAYS),
+    )
 
 
-def _as_int(value: object) -> int:
-    return int(cast(Any, value))
+def _is_weekend(value: date) -> bool:
+    return value.weekday() >= 5
+
+
+def _shift_diff_rate(shift_type: ShiftType, policy: SNFPayPolicyConfig) -> float:
+    if shift_type == ShiftType.EVENING:
+        return policy.evening_diff_rate
+    if shift_type == ShiftType.NIGHT:
+        return policy.night_diff_rate
+    if shift_type == ShiftType.DOUBLE:
+        return policy.evening_diff_rate
+    return 0.0
+
+
+def _primary_pay_code_category(
+    overtime_hours: float,
+    premium_pay: float,
+    shift_type: ShiftType,
+    is_weekend: bool,
+) -> PayCodeCategory:
+    if overtime_hours > 0:
+        return PayCodeCategory.OVERTIME
+    if is_weekend:
+        return PayCodeCategory.WEEKEND_DIFF
+    if premium_pay > 0 and shift_type in {
+        ShiftType.EVENING,
+        ShiftType.NIGHT,
+        ShiftType.DOUBLE,
+    }:
+        return PayCodeCategory.SHIFT_DIFF
+    return PayCodeCategory.REGULAR
+
+
+def _pay_code(
+    category: PayCodeCategory,
+    shift_type: ShiftType,
+    is_weekend: bool,
+) -> str:
+    if category == PayCodeCategory.OVERTIME:
+        return "SNF_OT"
+    if category == PayCodeCategory.WEEKEND_DIFF:
+        return "SNF_WKND"
+    if category == PayCodeCategory.SHIFT_DIFF:
+        return "SNF_NDIFF" if shift_type == ShiftType.NIGHT else "SNF_EDIFF"
+    return "SNF_REG"
+
+
+def _late_pay_code_rate(row: dict[str, object]) -> float:
+    period = _row_int(row, PayrollCol.PAY_PERIOD_INDEX)
+    if period < 9:
+        return 0.0
+    return min(0.05 + (period - 9) * 0.015, 0.12)
+
+
+def _employment_status(row: dict[str, Any]) -> str:
+    termination = row.get(PayrollCol.TERMINATION_DATE)
+    if termination is not None and row[PayrollCol.SHIFT_DATE] > termination:
+        return "terminated"
+    return "active"
+
+
+def _scenario_family(scenario: ScenarioSpec | None) -> ScenarioFamily:
+    if scenario is None:
+        return ScenarioFamily.OVERTIME_STAFFING_PRESSURE
+    value = (
+        scenario.metadata.get("scenario_family")
+        or scenario.metadata.get("regime")
+        or scenario.name
+    )
+    text = str(value).replace("-", "_")
+    if "premium" in text or "differential" in text:
+        return ScenarioFamily.PREMIUM_MISMATCH
+    if "baseline" in text:
+        return ScenarioFamily.BASELINE
+    return ScenarioFamily.OVERTIME_STAFFING_PRESSURE
+
+
+def _scenario_target_count(
+    scenario: ScenarioSpec | None,
+    rows: list[dict[str, object]],
+) -> int:
+    if (
+        scenario is not None
+        and scenario.anomaly_plan is not None
+        and scenario.anomaly_plan.target_count is not None
+    ):
+        return min(scenario.anomaly_plan.target_count, len(rows))
+    return min(max(40, len(rows) // 90), max(len(rows) // 10, 1))
+
+
+def _scenario_candidates(
+    rows: list[dict[str, object]],
+    family: ScenarioFamily,
+) -> list[int]:
+    if family == ScenarioFamily.PREMIUM_MISMATCH:
+        return [
+            idx
+            for idx, row in enumerate(rows)
+            if _row_float(row, PayrollCol.PREMIUM_PAY) > 0
+        ]
+    return [
+        idx
+        for idx, row in enumerate(rows)
+        if _row_float(row, PayrollCol.PAID_HOURS) >= 8
+    ]
+
+
+def _inject_overtime_pressure(
+    row: dict[str, object],
+    policy: SNFPayPolicyConfig,
+    rng: np.random.Generator,
+) -> SNFAnomalyCategory:
+    original_gross = _row_float(row, PayrollCol.GROSS_PAY)
+    row[PayrollCol.SHIFT_TYPE] = ShiftType.DOUBLE
+    row[PayrollCol.SCHEDULED_HOURS] = max(
+        _row_float(row, PayrollCol.SCHEDULED_HOURS),
+        16.0,
+    )
+    row[PayrollCol.WORKED_HOURS] = round(rng.uniform(15.5, 18.0), 2)
+    row[PayrollCol.PAID_HOURS] = row[PayrollCol.WORKED_HOURS]
+    row[PayrollCol.REGULAR_HOURS] = policy.overtime_daily_hours
+    row[PayrollCol.OVERTIME_HOURS] = round(
+        _row_float(row, PayrollCol.PAID_HOURS) - policy.overtime_daily_hours,
+        2,
+    )
+    row[PayrollCol.REST_GAP_HOURS] = round(rng.uniform(2.0, 6.0), 2)
+    base = _row_float(row, PayrollCol.BASE_RATE)
+    premium = _row_float(row, PayrollCol.PREMIUM_PAY)
+    gross = (
+        policy.overtime_daily_hours * base
+        + _row_float(row, PayrollCol.OVERTIME_HOURS) * base * policy.overtime_multiplier
+        + premium
+    )
+    row[PayrollCol.GROSS_PAY] = round(gross, 2)
+    row[PayrollCol.NET_PAY] = round(gross - _row_float(row, PayrollCol.DEDUCTIONS), 2)
+    row[PayrollCol.ANOMALY_DOLLARS] = round(abs(gross - original_gross), 2)
+    return SNFAnomalyCategory.OVERTIME_DOUBLE_SHIFT
+
+
+def _inject_premium_mismatch(
+    row: dict[str, object],
+    policy: SNFPayPolicyConfig,
+    rng: np.random.Generator,
+) -> SNFAnomalyCategory:
+    original_gross = _row_float(row, PayrollCol.GROSS_PAY)
+    paid_hours = _row_float(row, PayrollCol.PAID_HOURS)
+    premium_add = paid_hours * float(
+        rng.choice(
+            [
+                policy.evening_diff_rate,
+                policy.night_diff_rate,
+                policy.weekend_diff_rate,
+            ],
+        ),
+    )
+    row[PayrollCol.SHIFT_TYPE] = ShiftType.DAY
+    row[PayrollCol.IS_WEEKEND] = 0
+    row[PayrollCol.PAY_CODE] = "SNF_NDIFF"
+    row[PayrollCol.PAY_CODE_CATEGORY] = PayCodeCategory.SHIFT_DIFF
+    row[PayrollCol.PREMIUM_PAY] = round(
+        _row_float(row, PayrollCol.PREMIUM_PAY) + premium_add,
+        2,
+    )
+    row[PayrollCol.GROSS_PAY] = round(original_gross + premium_add, 2)
+    row[PayrollCol.NET_PAY] = round(
+        _row_float(row, PayrollCol.NET_PAY) + premium_add,
+        2,
+    )
+    row[PayrollCol.ANOMALY_DOLLARS] = round(premium_add, 2)
+    return SNFAnomalyCategory.UNSUPPORTED_SHIFT_DIFFERENTIAL
+
+
+def _validate_rollups(payroll: pl.DataFrame, rollups: pl.DataFrame) -> None:
+    expected = payroll.group_by(
+        [PayrollCol.PAY_PERIOD_INDEX, PayrollCol.FACILITY_ID],
+    ).agg(
+        pl.sum(PayrollCol.GROSS_PAY).round(2).alias("gross"),
+        pl.sum(PayrollCol.PAID_HOURS).round(2).alias("hours"),
+    )
+    actual = rollups.select(
+        PayrollCol.PAY_PERIOD_INDEX,
+        PayrollCol.FACILITY_ID,
+        pl.col("total_gross_pay").round(2).alias("gross"),
+        pl.col("total_paid_hours").round(2).alias("hours"),
+    )
+    if not expected.sort(expected.columns).equals(actual.sort(actual.columns)):
+        raise ValueError(
+            "facility rollups do not reconcile to shift-level payroll lines",
+        )
+
+
+def _row_float(row: dict[str, object], column: str) -> float:
+    value = row[column]
+    return float(cast(float | int | str, value))
+
+
+def _row_int(row: dict[str, object], column: str) -> int:
+    value = row[column]
+    return int(cast(int | str, value))

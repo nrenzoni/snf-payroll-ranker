@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import polars as pl
 
 from payroll_anomaly_ranking.columns import (
     REQUIRED_PAYROLL_COLUMNS,
     AggregateCol,
+    ApprovalStatus,
     PayrollCol,
 )
 
@@ -29,6 +30,7 @@ class PayrollAggregations:
     pay_rate_changes: pl.DataFrame
     pay_code_distribution: pl.DataFrame
     distribution_summary: pl.DataFrame
+    facility_approval_summary: pl.DataFrame = field(default_factory=pl.DataFrame)
 
 
 def validate_payroll(payroll: pl.DataFrame) -> ValidationResults:
@@ -40,69 +42,74 @@ def validate_payroll(payroll: pl.DataFrame) -> ValidationResults:
             {
                 "check": "required_column",
                 "column": column,
-                "message": f"Missing required column: {column}",
+                "message": f"Missing required SNF payroll column: {column}",
             },
         )
     if missing:
         return ValidationResults(pl.DataFrame(failures), pl.DataFrame(warnings))
-    if payroll.filter(pl.col(PayrollCol.EMPLOYEE_ID).is_null()).height:
-        failures.append(
-            {
-                "check": "null_identifier",
-                "column": PayrollCol.EMPLOYEE_ID,
-                "message": "Employee identifiers cannot be null",
-            },
-        )
-    if payroll.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX).is_null()).height:
-        failures.append(
-            {
-                "check": "null_period",
-                "column": PayrollCol.PAY_PERIOD_INDEX,
-                "message": "Pay periods cannot be null",
-            },
-        )
-    if payroll.filter(
-        pl.col(PayrollCol.HIRE_DATE) > pl.col(PayrollCol.PAY_PERIOD_END),
-    ).height:
-        failures.append(
-            {
-                "check": "invalid_lifecycle_dates",
-                "column": PayrollCol.HIRE_DATE,
-                "message": "Hire date after pay period end",
-            },
-        )
-    negative_normal = payroll.filter(
-        (pl.col(PayrollCol.IS_ANOMALY) == 0)
-        & ((pl.col(PayrollCol.GROSS_PAY) < 0) | (pl.col(PayrollCol.REGULAR_HOURS) < 0)),
-    )
-    if negative_normal.height:
-        failures.append(
-            {
-                "check": "negative_normal_payroll",
-                "column": PayrollCol.GROSS_PAY,
-                "message": "Normal records have negative payroll values",
-            },
-        )
-    warning_checks = {
-        "missing_deduction": payroll.filter(
-            pl.col(PayrollCol.DEDUCTIONS).is_null()
-            | (pl.col(PayrollCol.DEDUCTIONS) == 0),
+    failure_checks = {
+        "null_identifier": payroll.filter(
+            pl.col(PayrollCol.EMPLOYEE_ID).is_null(),
         ).height,
-        "negative_net_pay": payroll.filter(pl.col(PayrollCol.NET_PAY) < 0).height,
-        "net_exceeds_gross": payroll.filter(
-            pl.col(PayrollCol.NET_PAY) > pl.col(PayrollCol.GROSS_PAY) * 1.05,
+        "null_shift_identifier": payroll.filter(
+            pl.col(PayrollCol.SHIFT_ID).is_null(),
         ).height,
-        "large_manual_adjustment": payroll.filter(
-            pl.col(PayrollCol.MANUAL_ADJUSTMENT).abs()
-            > pl.col(PayrollCol.GROSS_PAY) * 0.25,
+        "null_period": payroll.filter(
+            pl.col(PayrollCol.PAY_PERIOD_INDEX).is_null(),
         ).height,
-        "late_period_pay_code_ood_context": payroll.filter(
-            pl.col(PayrollCol.OOD_PAY_CODE_CONTEXT).is_in(
-                ["late_period_new_or_rare_pay_code", "rare_pay_code"],
+        "invalid_lifecycle_dates": payroll.filter(
+            pl.col(PayrollCol.HIRE_DATE) > pl.col(PayrollCol.SHIFT_DATE),
+        ).height,
+        "negative_normal_payroll": payroll.filter(
+            (pl.col(PayrollCol.IS_ANOMALY) == 0)
+            & (
+                (pl.col(PayrollCol.GROSS_PAY) < 0)
+                | (pl.col(PayrollCol.PAID_HOURS) < 0)
+                | (pl.col(PayrollCol.SCHEDULED_HOURS) < 0)
             ),
-        ).height
-        if PayrollCol.OOD_PAY_CODE_CONTEXT in payroll.columns
-        else 0,
+        ).height,
+    }
+    for check, count in failure_checks.items():
+        if count:
+            failures.append(
+                {
+                    "check": check,
+                    "column": None,
+                    "message": f"{count} rows failed {check}",
+                },
+            )
+    warning_checks = {
+        "paid_hours_exceed_scheduled": payroll.filter(
+            pl.col(PayrollCol.PAID_HOURS) > pl.col(PayrollCol.SCHEDULED_HOURS) + 1.5,
+        ).height,
+        "missing_approval_context": payroll.filter(
+            pl.col(PayrollCol.APPROVAL_STATUS).is_in(
+                [ApprovalStatus.MISSING, ApprovalStatus.PENDING],
+            ),
+        ).height,
+        "unsupported_premium_context": payroll.filter(
+            (pl.col(PayrollCol.PREMIUM_PAY) > 0)
+            & (pl.col(PayrollCol.SHIFT_TYPE) == "Day")
+            & (pl.col(PayrollCol.IS_WEEKEND) == 0),
+        ).height,
+        "duplicate_shift_signature": payroll.filter(
+            pl.struct(
+                [
+                    PayrollCol.EMPLOYEE_ID,
+                    PayrollCol.SHIFT_DATE,
+                    PayrollCol.SHIFT_TYPE,
+                    PayrollCol.FACILITY_ID,
+                    PayrollCol.PAY_CODE,
+                ],
+            ).is_duplicated(),
+        ).height,
+        "extreme_overtime": payroll.filter(
+            pl.col(PayrollCol.OVERTIME_HOURS) > 8,
+        ).height,
+        "rest_gap_risk": payroll.filter(pl.col(PayrollCol.REST_GAP_HOURS) < 8).height,
+        "missed_punch": payroll.filter(pl.col(PayrollCol.MISSED_PUNCH) == 1).height,
+        "manual_edit": payroll.filter(pl.col(PayrollCol.MANUAL_EDIT) == 1).height,
+        "negative_net_pay": payroll.filter(pl.col(PayrollCol.NET_PAY) < 0).height,
     }
     for check, count in warning_checks.items():
         if count:
@@ -110,13 +117,23 @@ def validate_payroll(payroll: pl.DataFrame) -> ValidationResults:
                 {
                     "check": check,
                     "column": None,
-                    "message": f"{count} records may require payroll exception review",
+                    "message": f"{count} SNF shift-level records may require payroll approval review",
                 },
             )
     return ValidationResults(pl.DataFrame(failures), pl.DataFrame(warnings))
 
 
 def payroll_aggregations(payroll: pl.DataFrame) -> PayrollAggregations:
+    facility_summary = payroll.group_by(
+        [PayrollCol.PAY_PERIOD_INDEX, PayrollCol.FACILITY_ID],
+    ).agg(
+        pl.len().alias(AggregateCol.TOTAL_SHIFTS),
+        pl.sum(PayrollCol.GROSS_PAY).alias(AggregateCol.TOTAL_GROSS_PAY),
+        pl.sum(PayrollCol.PAID_HOURS).alias(AggregateCol.TOTAL_PAID_HOURS),
+        pl.sum(PayrollCol.OVERTIME_HOURS).alias(AggregateCol.TOTAL_OVERTIME_HOURS),
+        pl.sum(PayrollCol.PREMIUM_PAY).alias(AggregateCol.TOTAL_PREMIUM_PAY),
+        pl.sum(PayrollCol.IS_ANOMALY).alias(AggregateCol.TRUE_ANOMALIES),
+    )
     return PayrollAggregations(
         payroll_volume=payroll.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(
             pl.len().alias(AggregateCol.RECORDS),
@@ -128,11 +145,14 @@ def payroll_aggregations(payroll: pl.DataFrame) -> PayrollAggregations:
         .group_by(PayrollCol.PAY_PERIOD_INDEX)
         .agg(pl.n_unique(PayrollCol.EMPLOYEE_ID).alias(AggregateCol.ACTIVE_EMPLOYEES)),
         department_payroll=payroll.group_by(
-            [PayrollCol.PAY_PERIOD_INDEX, PayrollCol.DEPARTMENT],
-        ).agg(pl.sum(PayrollCol.GROSS_PAY).alias(AggregateCol.DEPARTMENT_GROSS_PAY)),
+            [PayrollCol.PAY_PERIOD_INDEX, PayrollCol.FACILITY_ID],
+        ).agg(
+            pl.sum(PayrollCol.GROSS_PAY).alias(AggregateCol.DEPARTMENT_GROSS_PAY),
+        ),
         overtime=payroll.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(
             pl.mean(PayrollCol.OVERTIME_HOURS).alias(AggregateCol.MEAN_OVERTIME_HOURS),
             pl.sum(PayrollCol.OVERTIME_HOURS).alias(AggregateCol.TOTAL_OVERTIME_HOURS),
+            pl.max(PayrollCol.OVERTIME_HOURS).alias(AggregateCol.MAX_OVERTIME_HOURS),
         ),
         manual_adjustments=payroll.group_by(PayrollCol.PAY_PERIOD_INDEX).agg(
             pl.sum(PayrollCol.MANUAL_ADJUSTMENT).alias(
@@ -142,9 +162,7 @@ def payroll_aggregations(payroll: pl.DataFrame) -> PayrollAggregations:
                 AggregateCol.MANUAL_ADJUSTMENT_MEAN,
             ),
         ),
-        pay_rate_changes=payroll.sort(
-            [PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX],
-        )
+        pay_rate_changes=payroll.sort([PayrollCol.EMPLOYEE_ID, PayrollCol.SHIFT_DATE])
         .with_columns(
             pl.col(PayrollCol.PAY_RATE)
             .diff()
@@ -160,12 +178,15 @@ def payroll_aggregations(payroll: pl.DataFrame) -> PayrollAggregations:
             .alias(AggregateCol.PAY_RATE_CHANGES),
         ),
         pay_code_distribution=payroll.group_by(
-            [PayrollCol.PAY_PERIOD_INDEX, PayrollCol.PAY_CODE],
-        ).agg(pl.len().alias(AggregateCol.RECORDS)),
+            [PayrollCol.PAY_PERIOD_INDEX, PayrollCol.PAY_CODE_CATEGORY],
+        ).agg(
+            pl.len().alias(AggregateCol.RECORDS),
+        ),
         distribution_summary=payroll.select(
             pl.col(PayrollCol.GROSS_PAY).quantile(0.25).alias(AggregateCol.GROSS_Q25),
             pl.median(PayrollCol.GROSS_PAY).alias(AggregateCol.GROSS_MEDIAN),
             pl.col(PayrollCol.GROSS_PAY).quantile(0.75).alias(AggregateCol.GROSS_Q75),
             pl.mean(PayrollCol.NET_PAY).alias(AggregateCol.MEAN_NET_PAY),
         ),
+        facility_approval_summary=facility_summary,
     )
