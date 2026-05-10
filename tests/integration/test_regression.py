@@ -659,6 +659,7 @@ def test_plot_helper_input_tables_include_rich_context_columns() -> None:
 def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
     notebook_06 = Path("notebooks/06_internal_statistical_diagnostics.py").read_text()
     notebook_07 = Path("notebooks/07_simulation_and_stress_testing.py").read_text()
+    notebook_08 = Path("notebooks/08_snf_payroll_approval_case_studies.py").read_text()
     execution_helper = Path("notebooks/common/execution.py").read_text()
     readme = Path("README.md").read_text()
     agent_instructions = Path("AGENTS.md").read_text()
@@ -667,6 +668,7 @@ def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
     assert "LetsPlot.setup_html()" in notebook_07
     assert "from common.execution import notebook_fast_mode" in notebook_06
     assert "from common.execution import notebook_fast_mode" in notebook_07
+    assert "from common.execution import notebook_fast_mode" in notebook_08
     assert (
         "from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig"
         in notebook_06
@@ -675,12 +677,16 @@ def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
         "from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig"
         in notebook_07
     )
+    assert "PipelineIncludeConfig" in notebook_08
     assert "NOTEBOOK_FAST = notebook_fast_mode()" in notebook_06
     assert "NOTEBOOK_FAST = notebook_fast_mode()" in notebook_07
+    assert "NOTEBOOK_FAST = notebook_fast_mode()" in notebook_08
     assert "PipelineIncludeConfig.scored_only()" in notebook_06
     assert "PipelineIncludeConfig.scored_only()" in notebook_07
+    assert "active_pipeline_include" in notebook_08
     assert "if NOTEBOOK_FAST" in notebook_06
     assert "if NOTEBOOK_FAST" in notebook_07
+    assert "if NOTEBOOK_FAST" in notebook_08
     assert "INTERVAL_SAMPLES = 75" in notebook_06
     assert "QUEUE_ITERATIONS = 300" in notebook_07
     assert "DIAGNOSTIC_SCENARIOS" in notebook_06
@@ -690,7 +696,7 @@ def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
     assert 'os.getenv("NOTEBOOK_FAST") == "1"' in execution_helper
     assert "reduced diagnostic workload" in execution_helper
     assert "scored-only pipeline artifacts" in readme
-    assert "scored-only pipeline artifacts" in agent_instructions
+    assert "minimal pipeline artifacts" in agent_instructions
     assert (
         "--run-path notebooks --output /tmp/06_internal_statistical_diagnostics.fast.ipynb"
         in readme

@@ -20,21 +20,39 @@
 
 # %%
 import polars as pl
+from common.execution import notebook_fast_mode
 
 from payroll_anomaly_ranking.columns import (
     PayrollCol,
     ReviewCol,
 )
 from payroll_anomaly_ranking.config import PayrollConfig
-from payroll_anomaly_ranking.pipeline import run_pipeline
+from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig, run_pipeline
 from payroll_anomaly_ranking.scenarios import diagnostic_scenario_presets
+
+config = PayrollConfig(employee_count=140, pay_periods=12, review_budgets=(10, 25))
+NOTEBOOK_FAST = notebook_fast_mode()
+active_pipeline_include = (
+    PipelineIncludeConfig(
+        validation=False,
+        aggregations=False,
+        evaluation=True,
+        backtest=False,
+        rolling_origin=False,
+        review_queues=True,
+        leakage_checks=False,
+    )
+    if NOTEBOOK_FAST
+    else PipelineIncludeConfig.all()
+)
 
 
 def _case_study_run(name: str):
     scenario = diagnostic_scenario_presets((name,))[name]
     return run_pipeline(
-        PayrollConfig(employee_count=140, pay_periods=12, review_budgets=(10, 25)),
+        config,
         scenario=scenario,
+        include=active_pipeline_include,
     )
 
 
