@@ -13,34 +13,38 @@ The system SHALL generate and use synthetic payroll data that contains no real e
 - **THEN** employee and manager identifiers are synthetic stable identifiers rather than real names, emails, addresses, bank details, or government identifiers
 
 ### Requirement: Employee-pay-period payroll records
-The system SHALL generate payroll records at employee-pay-period grain with realistic payroll, HR, and timekeeping-like fields.
+The system SHALL generate shift-level SNF payroll, schedule, and timeclock records as the primary synthetic data grain, with pay-period and facility rollups derived from the shift-level records.
 
-#### Scenario: Core payroll schema is generated
+#### Scenario: Core SNF shift-level schema is generated
 - **WHEN** the synthetic data generator runs
-- **THEN** each output payroll row includes employee identifier, pay period, department, job family, location, employment status, pay type, regular hours, overtime hours, pay rate, gross pay, deductions, net pay, tenure, and lifecycle dates where applicable
+- **THEN** each primary payroll row includes synthetic shift or payroll-line identifier, employee identifier, facility, unit, role, license type, pay period, shift date, shift type, scheduled hours, worked hours, pay code, pay-code category, base rate, applied rate or multiplier, gross pay, premium pay amount, timeclock context, schedule context, approval status, employment status, tenure, and lifecycle dates where applicable
 
-#### Scenario: Realistic payroll variation is present
-- **WHEN** generated records are analyzed
-- **THEN** the data includes variation across departments, job levels, hourly and salaried workers, tenure, promotions, bonuses, commissions, retro pay, deductions, overtime, terminations, and seasonal periods
+#### Scenario: Pay-period facility rollups are generated
+- **WHEN** shift-level payroll records are generated
+- **THEN** the system derives pay-period/facility rollups with payroll amount, paid hours, overtime hours, premium dollars, exception counts, and estimated approval context without using evaluation-only labels as inputs
+
+#### Scenario: Generic corporate workforce values are replaced
+- **WHEN** synthetic data is generated for this project
+- **THEN** departments and job families are SNF-specific rather than corporate values such as Sales, Engineering, commissions, or remote office roles
 
 ### Requirement: Injected anomaly labels
-The system SHALL inject known payroll anomaly categories and retain labels for evaluation-only artifacts.
+The system SHALL inject known SNF payroll anomaly categories and retain labels for evaluation-only artifacts.
 
-#### Scenario: Supported anomaly categories are injected
-- **WHEN** the data generator injects anomalies
-- **THEN** generated labels include categories such as duplicate payment, overtime spike, pay after termination, gross pay spike, incorrect pay rate, missing deduction, negative net pay, retro pay outlier, department payroll spike, and new employee large payment
+#### Scenario: Supported SNF anomaly categories are injected
+- **WHEN** the data generator injects implemented anomalies
+- **THEN** generated labels include overtime/double-shift staffing pressure anomalies and premium pay or shift differential mismatch anomalies
 
 #### Scenario: Evaluation labels are retained separately from model features
 - **WHEN** model features are built
-- **THEN** injected anomaly labels are available for evaluation but are not included as training or scoring features
+- **THEN** injected anomaly labels are available for evaluation but are not included as training, scoring, threshold-baseline, exposure-estimation, or administrator-facing queue features
 
-#### Scenario: Evaluation labels are absent from analyst outputs
-- **WHEN** analyst-facing review outputs are generated
+#### Scenario: Evaluation labels are absent from administrator outputs
+- **WHEN** administrator-facing approval outputs are generated
 - **THEN** injected anomaly labels, injected anomaly categories, and injected anomaly dollar impacts are excluded from those outputs
 
 #### Scenario: Evaluation labels remain available for synthetic analysis
 - **WHEN** synthetic evaluation outputs are generated
-- **THEN** injected anomaly labels and injected anomaly dollar impacts are available in separate evaluation artifacts for metrics, category error analysis, and notebook interpretation
+- **THEN** injected anomaly labels and injected anomaly dollar impacts are available in separate evaluation artifacts for metrics, case-study error analysis, and notebook interpretation
 
 ### Requirement: Reproducible data generation
 The system SHALL make synthetic data generation reproducible through configuration and random seeds.
@@ -78,15 +82,15 @@ The notebooks SHALL demonstrate hard validation failures separately from payroll
 - **THEN** hard failures are presented as pipeline-stopping data issues and warnings are presented as payroll exceptions that may require analyst review
 
 ### Requirement: Synthetic pay-code field
-The system SHALL generate a synthetic `pay_code` field for employee-pay-period payroll records.
+The system SHALL generate synthetic SNF pay-code and pay-code-category fields for shift-level payroll records.
 
-#### Scenario: Pay code is generated in core payroll schema
-- **WHEN** synthetic payroll records are generated
-- **THEN** each payroll row includes a synthetic pay code suitable for feature engineering, OOD detection, data dictionary display, and validation checks
+#### Scenario: SNF pay code is generated in core payroll schema
+- **WHEN** synthetic shift-level payroll records are generated
+- **THEN** each payroll line includes a synthetic pay code and pay-code category suitable for feature engineering, premium eligibility checks, OOD detection, data dictionary display, and validation checks
 
 #### Scenario: Pay code is not real payroll metadata
 - **WHEN** synthetic pay codes are documented or displayed
-- **THEN** the documentation identifies them as synthetic codes and not real company payroll configuration
+- **THEN** the documentation identifies them as synthetic SNF illustrative codes and not real company or vendor payroll configuration
 
 ### Requirement: Temporal pay-code OOD generation
 The system SHALL generate reproducible late-period pay-code novelty and rarity for out-of-distribution demonstrations.
@@ -104,11 +108,15 @@ The system SHALL generate reproducible late-period pay-code novelty and rarity f
 - **THEN** it includes `pay_code`, its business meaning, its synthetic nature, and its validation or OOD expectation
 
 ### Requirement: Scenario-controlled payroll simulation
-The system SHALL support configurable synthetic payroll simulation scenarios for internal statistical diagnostics.
+The system SHALL support configurable synthetic SNF payroll simulation scenarios for implemented case studies and future scenario documentation.
 
 #### Scenario: Scenario controls are applied
-- **WHEN** synthetic payroll data is generated with a diagnostic scenario configuration
-- **THEN** the generated records reflect the configured scenario controls while retaining reproducibility for a fixed seed
+- **WHEN** synthetic SNF payroll data is generated with a scenario configuration
+- **THEN** the generated schedule, timeclock, payroll line, anomaly label, and rollup records reflect the configured scenario controls while retaining reproducibility for a fixed seed
+
+#### Scenario: Scenario metadata is generated
+- **WHEN** a scenario-controlled run is written
+- **THEN** metadata identifies the scenario name, implemented scenario family, documented future scenario families, seed, policy assumptions, and key generation settings
 
 ### Requirement: Drift and change-point controls
 The system SHALL generate synthetic payroll datasets with controlled temporal drift and change-point patterns for diagnostic evaluation.
@@ -125,18 +133,26 @@ The system SHALL support configurable anomaly mixes across synthetic payroll sce
 - **THEN** injected anomaly labels reflect the configured mix and remain excluded from scoring features and analyst-facing outputs
 
 ### Requirement: Diagnostic scenario catalog
-The system SHALL provide a catalog of named internal diagnostic scenarios for synthetic payroll generation.
+The system SHALL provide a catalog of named SNF payroll scenarios with implementation status.
 
-#### Scenario: Named diagnostic scenarios are available
-- **WHEN** diagnostic generation is requested
-- **THEN** users can select documented scenarios covering baseline, drift, targeted anomaly, subgroup, and review-capacity stress conditions
+#### Scenario: Implemented scenarios are available
+- **WHEN** diagnostic or notebook generation is requested
+- **THEN** users can select documented implemented scenarios covering overtime/double-shift staffing pressure and premium pay or shift differential mismatch
+
+#### Scenario: Future scenarios are documented
+- **WHEN** users inspect the scenario catalog
+- **THEN** the catalog documents future potential scenarios for agency and float labor, census and acuity, credential and license mismatch, PBJ category mismatch, meal break premiums, new hire orientation, termination and final pay, retro and rate corrections, union or contract policy variation, new-client bootstrap, and payroll close adjustment concentration without claiming they are implemented
 
 ### Requirement: Targeted anomaly generation controls
-The system SHALL support targeted anomaly generation controls for internal diagnostic signal analysis.
+The system SHALL support targeted SNF anomaly generation controls for implemented case-study signal analysis.
 
-#### Scenario: Targeted anomalies are injected
-- **WHEN** targeted anomaly controls specify categories, employee groups, periods, or dollar impact ranges
-- **THEN** the synthetic data includes matching injected anomalies with evaluation-only labels and impacts
+#### Scenario: Targeted SNF anomalies are injected
+- **WHEN** targeted anomaly controls specify facilities, units, roles, shift types, pay-code categories, periods, or exposure ranges
+- **THEN** the synthetic data includes matching observable shift-level changes with evaluation-only labels and impacts
+
+#### Scenario: Anomaly injection preserves realistic source context
+- **WHEN** implemented SNF anomalies are injected
+- **THEN** the generator modifies schedule, timeclock, pay-code, premium, or hours context consistently enough for features and explanations to detect the issue without relying on labels
 
 ### Requirement: Plot-calibrated internal diagnostic scenarios
 The system SHALL generate internal diagnostic scenarios calibrated to produce informative plots without excessive runtime.
@@ -151,3 +167,25 @@ The system SHALL produce scenario contrast summaries for internal diagnostics.
 #### Scenario: Scenario contrasts are summarized
 - **WHEN** multiple synthetic diagnostic scenarios are generated or compared
 - **THEN** outputs summarize key differences in population mix, temporal drift, anomaly mix, severity, and expected diagnostic behavior
+
+### Requirement: Typed SNF generator contracts
+The system SHALL use typed configuration and result contracts for SNF synthetic generation.
+
+#### Scenario: Generator returns named result object
+- **WHEN** SNF synthetic generation completes
+- **THEN** the public generator returns a named dataclass result containing Polars DataFrames for facilities, employees, schedules, timeclock records, payroll lines, labels, rollups, metadata, and validation outputs rather than a raw tuple or loose dictionary
+
+#### Scenario: Controlled vocabularies use enums
+- **WHEN** SNF domain values are defined for roles, license types, unit types, shift types, pay-code categories, approval statuses, labor sources, source-to-check values, recommendations, scenario families, or anomaly categories
+- **THEN** they are represented by `StrEnum` values and schema constants rather than ad hoc plain strings
+
+### Requirement: Early generator validation
+The system SHALL fail early for invalid SNF generator configuration, policy, scenario, schema, referential, or reconciliation conditions.
+
+#### Scenario: Invalid configuration fails before generation
+- **WHEN** the SNF generator is configured with invalid facility counts, pay periods, policy windows, unknown enum values, unsupported scenario names, or impossible target counts
+- **THEN** generation fails with a clear validation error before downstream feature engineering or notebooks run
+
+#### Scenario: Rollups reconcile to shift lines
+- **WHEN** pay-period/facility rollups are generated
+- **THEN** validation verifies that rollup hours, gross pay, overtime hours, and premium dollars reconcile to the underlying shift-level payroll lines within configured tolerances

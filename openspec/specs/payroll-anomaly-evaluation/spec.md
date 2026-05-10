@@ -2,51 +2,51 @@
 Define temporal validation, review-budget metrics, and model comparison for payroll anomaly evaluation.
 ## Requirements
 ### Requirement: Temporal anomaly evaluation
-The system SHALL evaluate anomaly detection using temporal validation rather than random row splits.
+The system SHALL evaluate SNF shift-level anomaly ranking using temporal validation rather than random row splits.
 
 #### Scenario: Holdout periods are scored after training periods
 - **WHEN** the evaluation pipeline runs
-- **THEN** models, thresholds, and score weights are selected using earlier training or validation pay periods and evaluated on later pay periods
+- **THEN** models, thresholds, score weights, and facility-normalization references are selected using earlier training or validation pay periods and evaluated on later pay periods
 
 #### Scenario: Backtesting scores each period independently
 - **WHEN** backtesting evaluation is enabled
 - **THEN** each scored pay period uses only prior periods for feature baselines, model fitting, threshold selection, and score calibration where applicable
 
 ### Requirement: Review-queue metrics
-The system SHALL report metrics aligned with payroll analyst review capacity.
+The system SHALL report metrics aligned with SNF weekly payroll approval capacity.
 
-#### Scenario: Precision and recall at review budgets are reported
+#### Scenario: Precision and recall at approval budgets are reported
 - **WHEN** predictions are evaluated
-- **THEN** the results include precision@K and recall@K for configured review budgets such as top 10, 25, and 50 records per pay period
+- **THEN** the results include precision@K and recall@K for configured administrator approval budgets such as top 10, 25, and 50 shift-level records per pay period or facility-pay-period
 
 #### Scenario: Ranking quality is reported
 - **WHEN** predictions are evaluated against injected labels
 - **THEN** the results include rank-oriented metrics such as average anomaly rank or mean reciprocal rank where applicable
 
 ### Requirement: Cost-sensitive evaluation
-The system SHALL estimate and report dollars-at-risk captured by ranked anomaly outputs.
+The system SHALL estimate and report approval exposure captured by ranked SNF anomaly outputs.
 
-#### Scenario: Dollars captured at K is calculated
-- **WHEN** top-ranked anomaly records are evaluated
-- **THEN** the system reports dollars-at-risk captured@K and the share of total injected anomaly dollar impact captured by the review budget
+#### Scenario: Exposure captured at K is calculated
+- **WHEN** top-ranked shift-level records are evaluated
+- **THEN** the system reports estimated exposure captured@K, injected dollars-at-risk captured@K for evaluation-only analysis, and the share of total injected anomaly dollar impact captured by the approval budget
 
 ### Requirement: Model and category comparison
-The system SHALL compare rule-based, statistical, ML, and hybrid scoring approaches across overall and category-level results.
+The system SHALL compare manual threshold, deterministic rule-based, statistical, ML, and hybrid scoring approaches across overall, facility-level, and case-study category results.
 
 #### Scenario: Model comparison table is produced
 - **WHEN** evaluation completes
-- **THEN** an output table compares candidate scoring methods using review-queue, classification, and dollar-impact metrics where applicable
+- **THEN** an output table compares candidate scoring methods using approval-budget, classification, review-volume, exposure, and dollar-impact metrics where applicable
 
 #### Scenario: Error analysis identifies misses
 - **WHEN** evaluation results are summarized
-- **THEN** the notebook discusses false positives, false negatives, legitimate exceptions, subtle missed anomalies, and practical improvements
+- **THEN** the notebook discusses false positives, false negatives, legitimate staffing or premium exceptions, subtle missed SNF anomalies, and practical improvements
 
 ### Requirement: Business review-budget evaluation notebook
-The notebooks SHALL present review-budget metrics including precision@K, recall@K, F1@K, PR-AUC, average anomaly rank, mean reciprocal rank, and dollars-at-risk captured@K.
+The notebooks SHALL present approval-budget metrics including precision@K, recall@K, F1@K, PR-AUC, average anomaly rank, mean reciprocal rank, exposure captured@K, and dollars-at-risk captured@K.
 
-#### Scenario: Review-budget metrics are displayed
-- **WHEN** the modeling, evaluation, and error analysis notebook runs
-- **THEN** it displays review-budget metrics for configured top-K budgets, including precision, recall, F1, PR-AUC, average anomaly rank, mean reciprocal rank, dollars captured, and dollar capture rate
+#### Scenario: Approval-budget metrics are displayed
+- **WHEN** the modeling, evaluation, or SNF case-study notebook runs
+- **THEN** it displays approval-budget metrics for configured top-K budgets, including precision, recall, F1, PR-AUC, average anomaly rank, mean reciprocal rank, estimated exposure captured, synthetic dollars captured, and dollar capture rate
 
 ### Requirement: Temporal validation explanation
 The notebooks SHALL explain temporal validation and SHALL avoid endorsing random split framing. A notebook MAY show random row splits only as an explicitly labeled anti-pattern when it is immediately compared against temporal validation.
@@ -158,11 +158,11 @@ The system SHALL provide internal Bayesian-style diagnostics for review-budget p
 - **THEN** outputs summarize uncertainty for precision, recall, dollar capture, and queue yield at configured review budgets
 
 ### Requirement: Hierarchical subgroup diagnostics
-The system SHALL evaluate anomaly-ranking performance across hierarchical payroll subgroups.
+The system SHALL evaluate anomaly-ranking performance across hierarchical SNF payroll subgroups.
 
-#### Scenario: Subgroup diagnostics are reported
-- **WHEN** subgroup fields such as department, location, job family, pay type, tenure band, or anomaly category are available
-- **THEN** diagnostic outputs report performance, volume, and dollar-impact summaries at overall and subgroup levels
+#### Scenario: SNF subgroup diagnostics are reported
+- **WHEN** subgroup fields such as facility, unit, role, license type, shift type, pay-code category, approval status, tenure band, or anomaly category are available
+- **THEN** diagnostic outputs report performance, volume, review demand, and dollar-impact summaries at overall and subgroup levels
 
 ### Requirement: Expected-pay calibration diagnostics
 The system SHALL evaluate calibration of expected-pay estimates and intervals.
@@ -233,3 +233,25 @@ The system SHALL validate whether internal diagnostic plots provide useful signa
 #### Scenario: Plot usefulness is assessed
 - **WHEN** internal diagnostic plot outputs are generated
 - **THEN** validation outputs identify whether plots contain adequate variation, contrasts, sample sizes, and non-empty series for interpretation
+
+### Requirement: Manual threshold baseline evaluation
+The system SHALL evaluate automated SNF approval ranking against manually configured threshold baselines.
+
+#### Scenario: Threshold baseline metrics are reported
+- **WHEN** evaluation runs on scored SNF shift-level records
+- **THEN** results report approval-budget and exposure metrics for gross pay, total hours, overtime hours, premium dollars, paid-vs-scheduled variance, and facility payroll variance thresholds
+
+#### Scenario: Threshold overflagging is summarized
+- **WHEN** manual threshold baselines and automated ranking are compared
+- **THEN** evaluation summarizes false positives, reviewed records required, missed high-exposure anomalies, and estimated exposure captured per reviewed record
+
+### Requirement: SNF case-study evaluation
+The system SHALL provide case-study-specific evaluation outputs for the implemented SNF scenarios.
+
+#### Scenario: Overtime case-study metrics are produced
+- **WHEN** overtime or double-shift staffing pressure scenarios are evaluated
+- **THEN** outputs compare automated ranking against manual overtime and total-hours thresholds for review volume, precision, recall, exposure capture, and missed high-risk shifts
+
+#### Scenario: Premium mismatch case-study metrics are produced
+- **WHEN** premium pay or shift differential mismatch scenarios are evaluated
+- **THEN** outputs compare automated ranking against manual gross-pay and premium-dollar thresholds for review volume, precision, recall, exposure capture, and missed unsupported premiums
