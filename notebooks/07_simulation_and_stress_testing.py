@@ -60,8 +60,14 @@ LetsPlot.setup_html()
 
 # %%
 config = PayrollConfig(employee_count=220, pay_periods=14, review_budgets=(10, 25))
+FAST_MODE_CONFIG = PayrollConfig(
+    employee_count=90,
+    pay_periods=10,
+    review_budgets=(10, 25),
+)
 QUEUE_SCENARIOS = ("baseline", "queue-stress", "calendar-drift", "exposure-heavy")
 QUEUE_THRESHOLD_GRID = (0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70)
+FAST_MODE_THRESHOLD_GRID = (0.45, 0.60)
 QUEUE_ITERATIONS = 300
 OPERATING_THRESHOLD = 0.60
 CAPACITY_SHOCK_PERIODS = (8, 9, 10, 11)
@@ -69,10 +75,14 @@ CAPACITY_SHOCK_START_GUIDE = min(CAPACITY_SHOCK_PERIODS) - 0.5
 CAPACITY_SHOCK_END_GUIDE = max(CAPACITY_SHOCK_PERIODS) + 0.5
 FAST_MODE_QUEUE_SCENARIOS = ("baseline", "queue-stress")
 FAST_MODE_ITERATIONS = 20
-FAST_MODE_NOTE = "Dense defaults: 4 queue scenarios, 220 employees, 14 pay periods, threshold grid (0.30 through 0.70 by 0.05), iterations=300. Fast mode: reduce to FAST_MODE_QUEUE_SCENARIOS or FAST_MODE_ITERATIONS."
+FAST_MODE_NOTE = "Dense defaults: 4 queue scenarios, 220 employees, 14 pay periods, threshold grid (0.30 through 0.70 by 0.05), iterations=300. Fast mode: reduce to FAST_MODE_CONFIG, FAST_MODE_QUEUE_SCENARIOS, FAST_MODE_THRESHOLD_GRID, or FAST_MODE_ITERATIONS."
 NOTEBOOK_FAST = notebook_fast_mode()
+active_config = FAST_MODE_CONFIG if NOTEBOOK_FAST else config
 active_queue_scenarios = FAST_MODE_QUEUE_SCENARIOS if NOTEBOOK_FAST else QUEUE_SCENARIOS
 active_queue_iterations = FAST_MODE_ITERATIONS if NOTEBOOK_FAST else QUEUE_ITERATIONS
+active_queue_threshold_grid = (
+    FAST_MODE_THRESHOLD_GRID if NOTEBOOK_FAST else QUEUE_THRESHOLD_GRID
+)
 active_pipeline_include = (
     PipelineIncludeConfig.scored_only()
     if NOTEBOOK_FAST
@@ -81,16 +91,16 @@ active_pipeline_include = (
 queue_spec = QueueSimulationSpec(
     iterations=active_queue_iterations,
     review_budget=10,
-    score_thresholds=QUEUE_THRESHOLD_GRID,
+    score_thresholds=active_queue_threshold_grid,
     fixed_capacity=8,
     period_capacity_multipliers={8: 0.6, 9: 0.6, 10: 0.7, 11: 0.7},
     capacity_sd=2.0,
-    seed=config.seed,
+    seed=active_config.seed,
     scenario="queue-stress",
 )
 scenarios = diagnostic_scenario_presets(active_queue_scenarios)
 queue_focus = run_pipeline(
-    config,
+    active_config,
     scenario=scenarios["queue-stress"],
     include=active_pipeline_include,
 )
@@ -115,12 +125,12 @@ queue_sanity = pl.concat(
     [
         scenario_sanity_summary(
             run_pipeline(
-                config,
+                active_config,
                 scenario=scenario,
                 include=active_pipeline_include,
             ).scored,
             scenario=name,
-            score_thresholds=QUEUE_THRESHOLD_GRID,
+            score_thresholds=active_queue_threshold_grid,
         )
         for name, scenario in scenarios.items()
     ],
@@ -189,13 +199,13 @@ candidate_thresholds = pl.DataFrame(candidate_rows)
 
 # %%
 adaptive_queue_spec = QueueSimulationSpec(
-    iterations=QUEUE_ITERATIONS,
+    iterations=active_queue_iterations,
     review_budget=10,
     adaptive_threshold_quantile=0.90,
     fixed_capacity=8,
     period_capacity_multipliers={8: 0.6, 9: 0.6, 10: 0.7, 11: 0.7},
     capacity_sd=2.0,
-    seed=config.seed,
+    seed=active_config.seed,
     scenario="queue-stress",
 )
 
@@ -529,7 +539,7 @@ policy_comparison = pl.concat([fixed_policy, adaptive_policy])
 
 # %%
 comparison = compare_scenarios(
-    config,
+    active_config,
     scenarios,
     queue_spec,
 ).with_columns(

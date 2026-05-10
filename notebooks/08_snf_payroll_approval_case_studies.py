@@ -82,7 +82,6 @@ premium_results.analyst_review_queue.select(
         PayrollCol.ROLE,
         PayrollCol.SHIFT_DATE,
         PayrollCol.SHIFT_TYPE,
-        PayrollCol.PAY_CODE,
         PayrollCol.PREMIUM_PAY,
         ReviewCol.RECOMMENDED_ACTION,
         ReviewCol.SOURCE_TO_CHECK,

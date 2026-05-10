@@ -53,6 +53,11 @@ LetsPlot.setup_html()
 
 # %%
 config = PayrollConfig(employee_count=220, pay_periods=14, review_budgets=(10, 25))
+FAST_MODE_CONFIG = PayrollConfig(
+    employee_count=90,
+    pay_periods=10,
+    review_budgets=(10, 25),
+)
 DIAGNOSTIC_SCENARIOS = (
     "baseline",
     "rule-friendly",
@@ -65,11 +70,12 @@ DIAGNOSTIC_SCENARIOS = (
 )
 DIAGNOSTIC_SEEDS = (42, 43, 44)
 INTERVAL_SAMPLES = 75
-FAST_MODE_SCENARIOS = ("baseline", "subgroup-drift", "queue-stress")
+FAST_MODE_SCENARIOS = ("baseline", "subgroup-drift")
 FAST_MODE_SEEDS = (42,)
-FAST_MODE_SAMPLE_COUNT = 25
-FAST_MODE_NOTE = "Dense defaults: 8 scenarios, 3 seeds, 220 employees, 14 pay periods, samples=75. Fast mode: reduce to FAST_MODE_SCENARIOS, FAST_MODE_SEEDS, or FAST_MODE_SAMPLE_COUNT."
+FAST_MODE_SAMPLE_COUNT = 10
+FAST_MODE_NOTE = "Dense defaults: 8 scenarios, 3 seeds, 220 employees, 14 pay periods, samples=75. Fast mode: reduce to FAST_MODE_CONFIG, FAST_MODE_SCENARIOS, FAST_MODE_SEEDS, or FAST_MODE_SAMPLE_COUNT."
 NOTEBOOK_FAST = notebook_fast_mode()
+active_config = FAST_MODE_CONFIG if NOTEBOOK_FAST else config
 active_scenarios = FAST_MODE_SCENARIOS if NOTEBOOK_FAST else DIAGNOSTIC_SCENARIOS
 active_seeds = FAST_MODE_SEEDS if NOTEBOOK_FAST else DIAGNOSTIC_SEEDS
 active_interval_samples = FAST_MODE_SAMPLE_COUNT if NOTEBOOK_FAST else INTERVAL_SAMPLES
@@ -80,7 +86,7 @@ active_pipeline_include = (
 )
 scenarios = diagnostic_scenario_presets(active_scenarios)
 results = run_pipeline(
-    config,
+    active_config,
     scenario=scenarios["subgroup-drift"],
     include=active_pipeline_include,
 )
@@ -91,7 +97,7 @@ sanity = pl.concat(
     [
         scenario_sanity_summary(
             run_pipeline(
-                config,
+                active_config,
                 scenario=scenario,
                 include=active_pipeline_include,
             ).scored,
@@ -112,10 +118,10 @@ intervals = review_budget_interval_summary(
     scored,
     k=10,
     samples=active_interval_samples,
-    seed=config.seed,
+    seed=active_config.seed,
 )
 unit_metrics = run_diagnostic_comparison_units(
-    config,
+    active_config,
     scenarios=scenarios,
     seeds=active_seeds,
     k=10,
@@ -249,10 +255,10 @@ exposure
 # %%
 alt_results = run_pipeline(
     PayrollConfig(
-        employee_count=160,
-        pay_periods=14,
+        employee_count=80 if NOTEBOOK_FAST else 160,
+        pay_periods=10 if NOTEBOOK_FAST else 14,
         review_budgets=(10, 25),
-        seed=config.seed + 1,
+        seed=active_config.seed + 1,
     ),
     include=active_pipeline_include,
 )
@@ -288,7 +294,7 @@ def perturb_gross_pay(frame: pl.DataFrame) -> pl.DataFrame:
 sensitivity = perturbation_sensitivity(
     scored,
     perturb_gross_pay,
-    lambda frame: score_payroll(frame, config),
+    lambda frame: score_payroll(frame, active_config),
 )
 sensitivity.head(10)
 
