@@ -72,6 +72,10 @@ The Jupytext-paired notebook index is `notebooks/payroll_anomaly_detection.py`. 
 - `notebooks/03_modeling_evaluation_and_error_analysis.py`: temporal validation, automated ranking, manual-threshold comparison, approval-budget metrics, and error analysis.
 - `notebooks/04_review_queue_explainability_and_thresholds.py`: administrator-safe approval queue, case cards, recommended actions, thresholds, and feedback workflow.
 - `notebooks/05_production_monitoring_and_deployment_path.py`: intended production flow from payroll, schedule, timeclock, HR lifecycle, and facility reference extracts through validation, scoring, administrator review, feedback, monitoring, and retraining.
+- `notebooks/06_internal_statistical_diagnostics.py`: internal statistical diagnostics for review-budget uncertainty, subgroup behavior, expected-pay calibration, robustness, and perturbation sensitivity.
+- `notebooks/07_simulation_and_stress_testing.py`: internal queue-capacity and scenario stress testing for threshold policy, overload probability, and missed exposure.
+- `notebooks/08_snf_payroll_approval_case_studies.py`: business-facing SNF proof notebook showing how hybrid ranking improves overtime and premium review compared with manual thresholds.
+- `notebooks/09_model_ablation_and_ml_value.py`: data-science validation notebook covering ablation, incremental ML value, temporal validation evidence, uncertainty, and robustness diagnostics.
 
 Notebook-only plotting code lives in Jupytext notebook sources and shared plotting adapters under `notebooks/common/`. The runtime package remains free of Jupyter and Lets-Plot imports.
 
