@@ -78,4 +78,10 @@ ggtitle: Any = getattr(lp, "ggtitle")
 labs: Any = getattr(lp, "labs")
 scale_color_gradient: Any = getattr(lp, "scale_color_gradient")
 scale_fill_gradient: Any = getattr(lp, "scale_fill_gradient")
+element_text: Any = getattr(lp, "element_text")
+theme: Any = getattr(lp, "theme")
 theme_minimal: Any = getattr(lp, "theme_minimal")
+
+
+def rotated_x_labels() -> Any:
+    return theme(axis_text_x=element_text(angle=45, hjust=1))

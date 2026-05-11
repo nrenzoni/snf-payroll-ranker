@@ -31,6 +31,7 @@ from common.plots import (
     geom_tile,
     ggplot,
     labs,
+    rotated_x_labels,
     theme_minimal,
 )
 
@@ -264,6 +265,7 @@ overtime_value = overtime_scorecard.with_columns(
         fill="Method type",
     )
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %% [markdown]
@@ -352,6 +354,7 @@ premium_value = premium_scorecard.with_columns(
         fill="Method type",
     )
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %%

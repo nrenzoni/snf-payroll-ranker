@@ -37,6 +37,7 @@ from common.plots import (
     ggplot,
     ggtitle,
     labs,
+    rotated_x_labels,
     scale_color_gradient,
     scale_fill_gradient,
     theme_minimal,
@@ -195,6 +196,7 @@ candidate_thresholds = pl.DataFrame(candidate_rows)
         size="Synthetic anomaly dollars",
     )
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %%

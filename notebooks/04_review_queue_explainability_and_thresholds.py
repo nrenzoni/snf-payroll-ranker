@@ -19,7 +19,15 @@
 # **Executive takeaway:** The administrator-safe approval queue turns model and rule signals into a short weekly checklist: what to review, which source to check, and what action to take before payroll approval.
 
 # %%
-from common.plots import LetsPlot, aes, geom_bar, ggplot, labs, theme_minimal
+from common.plots import (
+    LetsPlot,
+    aes,
+    geom_bar,
+    ggplot,
+    labs,
+    rotated_x_labels,
+    theme_minimal,
+)
 
 from payroll_anomaly_ranking.columns import PayrollCol, ReviewCol
 from payroll_anomaly_ranking.config import PayrollConfig
@@ -82,6 +90,7 @@ summary = results.facility_approval_summary
         y="Queued records",
     )
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %% [markdown]

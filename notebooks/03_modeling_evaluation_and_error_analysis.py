@@ -19,7 +19,15 @@
 # **Executive takeaway:** SNF payroll approval ranking should be evaluated by temporal approval-budget performance and estimated exposure captured, then compared directly with manual threshold baselines.
 
 # %%
-from common.plots import LetsPlot, aes, geom_bar, ggplot, labs, theme_minimal
+from common.plots import (
+    LetsPlot,
+    aes,
+    geom_bar,
+    ggplot,
+    labs,
+    rotated_x_labels,
+    theme_minimal,
+)
 
 from payroll_anomaly_ranking.columns import PayrollCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
@@ -82,6 +90,7 @@ category_errors = results.category_error_analysis
         y="Synthetic anomalies",
     )
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %% [markdown]

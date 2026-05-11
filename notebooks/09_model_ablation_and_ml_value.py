@@ -32,6 +32,7 @@ from common.plots import (
     geom_tile,
     ggplot,
     labs,
+    rotated_x_labels,
     theme_minimal,
 )
 
@@ -263,6 +264,7 @@ budget_ladder = method_ladder.filter(pl.col(MetricCol.K) == top_budget).with_col
         fill="Method family",
     )
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %%
@@ -296,6 +298,7 @@ component_heatmap = _component_heatmap_data(results.scored)
         fill="Score",
     )
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %% [markdown]
@@ -317,6 +320,7 @@ threshold_errors.sort("missed_synthetic_dollars", descending=True)
         y="Missed synthetic anomaly dollars",
     )
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %% [markdown]

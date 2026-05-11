@@ -20,7 +20,15 @@
 
 # %%
 import polars as pl
-from common.plots import LetsPlot, aes, geom_bar, ggplot, labs, theme_minimal
+from common.plots import (
+    LetsPlot,
+    aes,
+    geom_bar,
+    ggplot,
+    labs,
+    rotated_x_labels,
+    theme_minimal,
+)
 
 from payroll_anomaly_ranking.columns import PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
@@ -77,6 +85,7 @@ facility_volume
         y="Shift-level payroll lines",
     )
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %% [markdown]

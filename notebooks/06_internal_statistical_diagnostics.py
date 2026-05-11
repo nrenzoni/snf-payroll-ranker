@@ -29,6 +29,7 @@ from common.plots import (
     geom_tile,
     ggplot,
     ggtitle,
+    rotated_x_labels,
     theme_minimal,
 )
 
@@ -138,6 +139,7 @@ intervals
     + geom_point()
     + ggtitle("Bayesian-Style Review Budget Intervals")
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %% [markdown]
@@ -152,6 +154,7 @@ intervals
     + geom_tile()
     + ggtitle("Pairwise Component Superiority")
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %% [markdown]
@@ -164,6 +167,7 @@ intervals
     + geom_errorbar(aes(ymin="lower_95", ymax="upper_95"), width=0.2)
     + ggtitle("Effect-Size Intervals")
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %% [markdown]
@@ -192,6 +196,7 @@ department_subgroups = top_subgroups.filter(pl.col("dimension") == "department")
     + geom_errorbar(aes(ymin="lower_95", ymax="upper_95"), width=0.2)
     + ggtitle("Subgroup Pooled Anomaly Rates")
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %% [markdown]
@@ -231,6 +236,7 @@ calibration
     + geom_point()
     + ggtitle("Expected Pay Coverage")
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %% [markdown]
@@ -242,6 +248,7 @@ calibration
     + geom_point()
     + ggtitle("Expected Pay Residuals")
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %%
