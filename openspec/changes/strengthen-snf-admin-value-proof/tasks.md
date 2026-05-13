@@ -30,3 +30,13 @@
 - [x] 5.2 Replace the business-facing rolling precision plot in notebook `08` with a yield-focused rolling-origin stability view and narrative that does not imply perfect operational precision.
 - [x] 5.3 Add targeted regression coverage for the new rolling-origin facility-period metrics.
 - [x] 5.4 Re-run notebook `08`, smoke tests, targeted evaluation tests, and `uv run prek run --all-files`.
+
+## 6. Analyst Deliverable Polish
+
+- [x] 6.1 Remove dashboard-like raw DataFrame outputs from the main notebook flow so `08` keeps only one concrete final ranked-output table.
+- [x] 6.2 Make the main repeated-world and manual-threshold proof plots scenario-clear, either by explicit scenario aesthetics, scenario-specific filtering, or concise scenario summaries.
+- [x] 6.3 Add concise quantified takeaway callouts after major proof visuals so the deliverable states the operational implication rather than requiring readers to infer it.
+- [x] 6.4 Rework appendix queue-stress policies and metrics so stress evidence shows meaningful contrast across review policies instead of uniformly saturated overload probability.
+- [x] 6.5 Remove remaining hard probability gradient limits from notebook plots and keep Lets-Plot scales render-safe.
+- [x] 6.6 Refine case-study visuals and the final queue table so they explain why records rank highly while preserving review-safe, administrator-facing language.
+- [x] 6.7 Re-run notebook `08`, targeted notebook/diagnostic tests, smoke tests, and `uv run prek run --all-files`.

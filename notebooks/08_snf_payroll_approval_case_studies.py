@@ -16,7 +16,7 @@
 # %% [markdown]
 # # SNF Payroll Approval Value Proof
 #
-# **Executive takeaway:** Hybrid anomaly ranking is not just a more complicated threshold. Across repeated synthetic SNF payroll worlds, it gives facility administrators a better use of limited review time because it captures more estimated risk per review than broad manual thresholds and it remains stronger than rule-only, statistics-only, and ML-only ranking on the main overtime and premium scenarios.
+# **Executive takeaway:** Hybrid anomaly ranking is not just a more complicated threshold. Across controlled SNF payroll simulations, it gives facility administrators a better use of limited review time because it captures more estimated risk per review than broad manual thresholds and it remains stronger than rule-only, statistics-only, and ML-only ranking on the main overtime and premium scenarios.
 #
 # This notebook is business-facing and explanation-heavy on purpose. Synthetic labels and synthetic anomaly dollars appear only in evaluation sections to prove whether the ranking works. The final concrete output remains review-safe and framed as pre-payroll verification, not confirmed fraud or confirmed payroll error.
 
@@ -41,6 +41,7 @@ from common.plots import (
 )
 
 from payroll_anomaly_ranking.columns import (
+    FeatureCol,
     MetricCol,
     PayrollCol,
     ReviewCol,
@@ -85,6 +86,72 @@ active_pipeline_include = (
 )
 proof_seeds = (11, 19) if NOTEBOOK_FAST else (11, 19, 29)
 main_scenarios = diagnostic_scenario_presets(BUSINESS_PROOF_MAIN_SCENARIOS)
+primary_scenario = "overtime-staffing-pressure"
+primary_scenario_label = primary_scenario.replace("-", " ")
+
+
+def _format_money(value: float) -> str:
+    return f"${value:,.0f}"
+
+
+def _single_value(frame: pl.DataFrame, column: str) -> float:
+    if frame.is_empty():
+        return 0.0
+    return float(frame.select(pl.col(column).first()).item() or 0.0)
+
+
+def _ranking_takeaway(frame: pl.DataFrame, budget: int) -> str:
+    budget_rows = frame.filter(pl.col(MetricCol.K) == budget)
+    hybrid_value = _single_value(
+        budget_rows.filter(pl.col("method") == "hybrid"),
+        "mean",
+    )
+    next_best = (
+        budget_rows.filter(pl.col("method") != "hybrid")
+        .sort("mean", descending=True)
+        .head(1)
+    )
+    next_best_value = _single_value(next_best, "mean")
+    next_best_method = (
+        next_best.select(pl.col("method").first()).item()
+        if not next_best.is_empty()
+        else "the next best method"
+    )
+    lift = hybrid_value - next_best_value
+    return (
+        f"Takeaway: at {budget} reviews per facility-period in the "
+        f"{primary_scenario_label} scenario, hybrid captures "
+        f"{_format_money(hybrid_value)} estimated exposure per review, "
+        f"{_format_money(lift)} more than {next_best_method}."
+    )
+
+
+def _win_rate_takeaway(frame: pl.DataFrame) -> str:
+    weakest = frame.sort("win_probability").head(1)
+    comparator = (
+        weakest.select(pl.col("comparator").first()).item()
+        if not weakest.is_empty()
+        else "the closest comparator"
+    )
+    probability = _single_value(weakest, "win_probability")
+    return (
+        "Takeaway: hybrid's toughest repeated-world comparison is against "
+        f"{comparator}, where it still wins {probability:.0%} of matched "
+        "scenario-budget comparisons on exposure per review."
+    )
+
+
+def _threshold_takeaway(frame: pl.DataFrame) -> str:
+    manual_pack = frame.filter(pl.col("method") == "calibrated manual threshold pack")
+    manual_burden = _single_value(manual_pack, "mean")
+    manual_value = _single_value(manual_pack, "mean_exposure_per_review")
+    return (
+        "Takeaway: in this scenario, the calibrated manual threshold pack "
+        f"creates about {manual_burden:.1f} native reviews and captures "
+        f"{_format_money(manual_value)} estimated exposure per review. The "
+        "plot shows whether simpler threshold rules buy that value efficiently "
+        "or mostly expand review work."
+    )
 
 
 def _case_study_run(name: str):
@@ -109,6 +176,11 @@ def _threshold_missed_hybrid_records(
     manual_pack_flag = pl.col(ScoreCol.THRESHOLD_MANUAL_PACK_FLAG).fill_null(0)
     return (
         latest.filter(manual_pack_flag == 0)
+        .with_columns(
+            (pl.col(PayrollCol.PAID_HOURS) - pl.col(PayrollCol.SCHEDULED_HOURS)).alias(
+                FeatureCol.PAID_MINUS_SCHEDULED_HOURS,
+            ),
+        )
         .sort(ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE, descending=True)
         .select(
             [
@@ -121,7 +193,11 @@ def _threshold_missed_hybrid_records(
                 PayrollCol.SCHEDULED_HOURS,
                 PayrollCol.PAID_HOURS,
                 PayrollCol.OVERTIME_HOURS,
+                FeatureCol.PAID_MINUS_SCHEDULED_HOURS,
                 PayrollCol.PREMIUM_PAY,
+                PayrollCol.REST_GAP_HOURS,
+                PayrollCol.IS_WEEKEND,
+                PayrollCol.PAY_CODE,
                 ScoreCol.ESTIMATED_EXPOSURE,
                 ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE,
             ],
@@ -134,7 +210,12 @@ def _expected_pay_band_rows(scored: pl.DataFrame, *, limit: int = 8) -> pl.DataF
     latest = _latest_period(scored)
     return (
         latest.filter(pl.col(ScoreCol.THRESHOLD_MANUAL_PACK_FLAG).fill_null(0) == 0)
-        .sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True)
+        .with_columns(
+            (
+                pl.col(PayrollCol.GROSS_PAY) - pl.col(ScoreCol.EXPECTED_GROSS_PAY_P90)
+            ).alias("gross_pay_above_p90"),
+        )
+        .sort("gross_pay_above_p90", descending=True)
         .with_row_index("queue_row", offset=1)
         .select(
             [
@@ -144,6 +225,7 @@ def _expected_pay_band_rows(scored: pl.DataFrame, *, limit: int = 8) -> pl.DataF
                 PayrollCol.GROSS_PAY,
                 ScoreCol.EXPECTED_GROSS_PAY_P10,
                 ScoreCol.EXPECTED_GROSS_PAY_P90,
+                "gross_pay_above_p90",
             ],
         )
         .head(limit)
@@ -167,16 +249,33 @@ def _scenario_labels(frame: pl.DataFrame) -> pl.DataFrame:
 
 def _appendix_queue_stress(frame: pl.DataFrame) -> pl.DataFrame:
     policies = {
-        "steady capacity": QueueSimulationSpec(
+        "fixed top-k capacity": QueueSimulationSpec(
             iterations=5 if NOTEBOOK_FAST else 12,
             review_budget=active_config.review_budgets[0],
-            score_threshold=0.45,
             fixed_capacity=active_config.review_budgets[0],
             capacity_sd=0.0,
             seed=17,
             scenario="queue stress",
         ),
-        "capacity shock": QueueSimulationSpec(
+        "broad threshold": QueueSimulationSpec(
+            iterations=5 if NOTEBOOK_FAST else 12,
+            review_budget=active_config.review_budgets[0],
+            score_threshold=0.35,
+            fixed_capacity=active_config.review_budgets[0],
+            capacity_sd=0.0,
+            seed=17,
+            scenario="queue stress",
+        ),
+        "adaptive top decile": QueueSimulationSpec(
+            iterations=5 if NOTEBOOK_FAST else 12,
+            review_budget=active_config.review_budgets[0],
+            adaptive_threshold_quantile=0.90,
+            fixed_capacity=active_config.review_budgets[0],
+            capacity_sd=0.0,
+            seed=17,
+            scenario="queue stress",
+        ),
+        "threshold capacity shock": QueueSimulationSpec(
             iterations=5 if NOTEBOOK_FAST else 12,
             review_budget=active_config.review_budgets[0],
             score_threshold=0.45,
@@ -189,11 +288,11 @@ def _appendix_queue_stress(frame: pl.DataFrame) -> pl.DataFrame:
             seed=17,
             scenario="queue stress",
         ),
-        "catch-up staffing": QueueSimulationSpec(
+        "threshold catch-up staffing": QueueSimulationSpec(
             iterations=5 if NOTEBOOK_FAST else 12,
             review_budget=active_config.review_budgets[0],
             score_threshold=0.45,
-            fixed_capacity=active_config.review_budgets[0],
+            fixed_capacity=round(active_config.review_budgets[0] * 1.5),
             period_capacity_multipliers={
                 max(active_config.pay_periods - 2, 2): 1.4,
                 max(active_config.pay_periods - 1, 3): 1.4,
@@ -215,6 +314,10 @@ def _appendix_queue_stress(frame: pl.DataFrame) -> pl.DataFrame:
         (pl.col("avg_missed_estimated_exposure") / 1_000).alias(
             "avg_missed_estimated_exposure_k",
         ),
+        (
+            pl.col("avg_reviewed_records")
+            / pl.max_horizontal(pl.col("avg_candidate_queue_size"), pl.lit(1.0))
+        ).alias("reviewed_to_candidate_ratio"),
     )
 
 
@@ -294,13 +397,14 @@ hybrid_win_rates = _scenario_labels(
 # %% [markdown]
 # ## Repeated-World Method Value
 #
-# The chart below compares rankable methods at fixed facility review budgets. That is the fair comparison for rules, robust statistics, ML-only scoring, and hybrid ranking, because each method can produce an ordered queue.
+# The chart below compares rankable methods at fixed facility review budgets for the overtime staffing-pressure scenario. That scenario-specific view keeps the comparison readable; the win-rate heatmap that follows shows whether the result generalizes across all main scenarios.
 #
 # The metric shown is estimated exposure captured per reviewed record. In plain language: if an administrator spends one review on this method, how much likely payroll risk does that review tend to cover?
 
 # %%
 exposure_frontier = ranking_intervals.filter(
-    pl.col("metric") == MetricCol.EXPOSURE_PER_REVIEW,
+    (pl.col("metric") == MetricCol.EXPOSURE_PER_REVIEW)
+    & (pl.col("scenario") == primary_scenario),
 )
 (
     ggplot(exposure_frontier, aes(MetricCol.K, "mean"))
@@ -316,8 +420,11 @@ exposure_frontier = ranking_intervals.filter(
     + theme_minimal()
 )
 
+# %%
+print(_ranking_takeaway(exposure_frontier, active_config.review_budgets[0]))
+
 # %% [markdown]
-# **How to read this:** each point is the average across repeated scenario runs, and the error bars show empirical variation across those runs. If the hybrid line stays above the other lines, that means hybrid usually makes better use of scarce facility review time, not just in one favorable simulation.
+# **How to read this:** each point is the average across repeated overtime staffing-pressure runs, and the error bars show empirical variation across those runs. If the hybrid line stays above the other lines, that means hybrid usually makes better use of scarce facility review time, not just in one favorable simulation.
 
 # %% [markdown]
 # ## Hybrid Win Rate Against Simpler Methods
@@ -337,9 +444,12 @@ exposure_frontier = ranking_intervals.filter(
         y="Scenario",
         fill="Hybrid win probability",
     )
-    + scale_fill_gradient(low="#f8fafc", high="#1d4ed8", limits=[0, 1])
+    + scale_fill_gradient(low="#f8fafc", high="#1d4ed8", breaks=[0, 0.5, 1])
     + theme_minimal()
 )
+
+# %%
+print(_win_rate_takeaway(hybrid_win_rates))
 
 # %% [markdown]
 # **What this proves:** this is the notebook's anti-"one-off" view. A dark cell means hybrid beats that comparator in most repeated worlds for that scenario and review budget setting.
@@ -367,6 +477,8 @@ threshold_tradeoff = threshold_burden.join(
     threshold_value,
     on=["scenario", "scenario_label", "method"],
     how="left",
+).filter(
+    pl.col("scenario") == primary_scenario,
 )
 (
     ggplot(
@@ -384,8 +496,11 @@ threshold_tradeoff = threshold_burden.join(
     + theme_minimal()
 )
 
+# %%
+print(_threshold_takeaway(threshold_tradeoff))
+
 # %% [markdown]
-# **Why this matters for facility admins:** a threshold can be simple and still be inefficient. A threshold sitting far to the right with modest vertical value means it creates a lot of review work without proportionate risk capture. The calibrated manual threshold pack is the fairest manual baseline because it is tuned to the observed payroll context without using labels.
+# **Why this matters for facility admins:** this scenario-specific view isolates the overtime staffing-pressure question instead of pooling unlike payroll worlds. A threshold can be simple and still be inefficient. A threshold sitting far to the right with modest vertical value means it creates a lot of review work without proportionate risk capture. The calibrated manual threshold pack is the fairest manual baseline because it is tuned to the observed payroll context without using labels.
 
 # %% [markdown]
 # ## Case Study 1: Overtime, Double Shifts, And Staffing Pressure
@@ -398,25 +513,39 @@ overtime_thresholds = _method_labels(
     evaluate_scores(overtime_results.scored, active_config).threshold_baseline_metrics,
     column="baseline",
 )
-overtime_thresholds.sort(MetricCol.EXPOSURE_PER_REVIEW, descending=True)
+overtime_threshold_top = overtime_thresholds.sort(
+    MetricCol.EXPOSURE_PER_REVIEW,
+    descending=True,
+).head(1)
+
+# %%
+print(
+    "Overtime case-study baseline check: the strongest threshold baseline is "
+    f"{overtime_threshold_top.select(pl.col('baseline').first()).item()}, "
+    "but the plot below focuses on high-ranked records the calibrated manual "
+    "pack did not send to review.",
+)
 
 # %%
 overtime_missed = _threshold_missed_hybrid_records(overtime_results.scored)
 (
     ggplot(
         overtime_missed,
-        aes(PayrollCol.OVERTIME_HOURS, ScoreCol.ESTIMATED_EXPOSURE),
+        aes(FeatureCol.PAID_MINUS_SCHEDULED_HOURS, ScoreCol.ESTIMATED_EXPOSURE),
     )
     + geom_point(
-        aes(color=ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE, size=PayrollCol.PAID_HOURS),
+        aes(
+            color=ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE,
+            size=PayrollCol.REST_GAP_HOURS,
+        ),
         alpha=0.8,
     )
     + ggtitle("Overtime records missed by the manual threshold pack")
     + labs(
-        x="Overtime hours",
+        x="Paid hours above scheduled hours",
         y="Estimated exposure",
         color="Hybrid score",
-        size="Paid hours",
+        size="Rest gap hours",
     )
     + theme_minimal()
 )
@@ -435,7 +564,18 @@ premium_thresholds = _method_labels(
     evaluate_scores(premium_results.scored, active_config).threshold_baseline_metrics,
     column="baseline",
 )
-premium_thresholds.sort(MetricCol.EXPOSURE_PER_REVIEW, descending=True)
+premium_threshold_top = premium_thresholds.sort(
+    MetricCol.EXPOSURE_PER_REVIEW,
+    descending=True,
+).head(1)
+
+# %%
+print(
+    "Premium case-study baseline check: the strongest threshold baseline is "
+    f"{premium_threshold_top.select(pl.col('baseline').first()).item()}, "
+    "but the plot below focuses on high-ranked premium records the calibrated "
+    "manual pack did not send to review.",
+)
 
 # %%
 premium_missed = _threshold_missed_hybrid_records(premium_results.scored)
@@ -445,7 +585,7 @@ premium_missed = _threshold_missed_hybrid_records(premium_results.scored)
         aes(PayrollCol.PREMIUM_PAY, ScoreCol.ESTIMATED_EXPOSURE),
     )
     + geom_point(
-        aes(color=ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE, size=PayrollCol.PAID_HOURS),
+        aes(color=ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE, size=PayrollCol.IS_WEEKEND),
         alpha=0.8,
     )
     + ggtitle("Premium records missed by the manual threshold pack")
@@ -453,7 +593,7 @@ premium_missed = _threshold_missed_hybrid_records(premium_results.scored)
         x="Premium pay",
         y="Estimated exposure",
         color="Hybrid score",
-        size="Paid hours",
+        size="Weekend flag",
     )
     + theme_minimal()
 )
@@ -464,7 +604,7 @@ premium_missed = _threshold_missed_hybrid_records(premium_results.scored)
 # %% [markdown]
 # ## Expected Pay Bands Make The Statistical Logic Concrete
 #
-# Robust statistics become more persuasive when they are shown as an expected pay band instead of an abstract score. The chart below focuses on threshold-missed records that hybrid still prioritizes.
+# Robust statistics become more persuasive when they are shown as an expected pay band instead of an abstract score. The chart below focuses on threshold-missed records that sit furthest above their expected pay band.
 
 # %%
 expected_pay_bands = _expected_pay_band_rows(premium_results.scored)
@@ -481,12 +621,20 @@ expected_pay_bands = _expected_pay_band_rows(premium_results.scored)
         color="#cbd5e1",
     )
     + geom_point(color="#1d4ed8", size=3)
-    + ggtitle("Threshold-missed records versus expected pay bands")
+    + ggtitle("Threshold-missed records above expected pay bands")
     + labs(
-        x="Highest-ranked threshold-missed records",
+        x="Records furthest above expected band",
         y="Gross pay",
     )
     + theme_minimal()
+)
+
+# %%
+largest_band_overage = _single_value(expected_pay_bands, "gross_pay_above_p90")
+print(
+    "Expected-pay-band takeaway: the largest threshold-missed record shown is "
+    f"{_format_money(largest_band_overage)} above the comparable-context "
+    "90th-percentile pay band.",
 )
 
 # %% [markdown]
@@ -511,6 +659,19 @@ rolling_yield = overtime_results.rolling_origin_metrics
     + theme_minimal()
 )
 
+# %%
+rolling_min = float(
+    rolling_yield.select(pl.min(MetricCol.EXPOSURE_PER_REVIEW)).item() or 0.0,
+)
+rolling_max = float(
+    rolling_yield.select(pl.max(MetricCol.EXPOSURE_PER_REVIEW)).item() or 0.0,
+)
+print(
+    "Rolling-origin takeaway: overtime review yield ranges from "
+    f"{_format_money(rolling_min)} to {_format_money(rolling_max)} estimated "
+    "exposure per reviewed record as validation and test periods move forward.",
+)
+
 # %% [markdown]
 # **Operational meaning:** this plot is not claiming perfect precision. The rolling-origin calculation ranks records within each facility and pay period, then measures whether the same review capacity continues to surface meaningful estimated exposure as payroll conditions move forward. Precision remains available as evaluation context, but real SNF review will always include legitimate high-risk-looking records that deserve administrator judgment rather than automatic rejection.
 
@@ -528,6 +689,7 @@ final_queue = premium_results.analyst_review_queue.select(
         PayrollCol.SHIFT_DATE,
         PayrollCol.SHIFT_TYPE,
         ReviewCol.PRIMARY_REASON,
+        ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE,
         ReviewCol.SOURCE_TO_CHECK,
         ReviewCol.RECOMMENDED_ACTION,
         ReviewCol.DOLLARS_AT_RISK,
@@ -552,16 +714,20 @@ appendix_queue = _appendix_queue_stress(appendix_scored)
 (
     ggplot(
         appendix_queue,
-        aes("policy", PayrollCol.PAY_PERIOD_INDEX, fill="overload_probability"),
+        aes(
+            "policy",
+            PayrollCol.PAY_PERIOD_INDEX,
+            fill="avg_missed_estimated_exposure_k",
+        ),
     )
     + geom_tile()
-    + ggtitle("Appendix stress view: overload probability by queue policy and period")
+    + ggtitle("Appendix stress view: missed exposure by queue policy and period")
     + labs(
         x="Queue policy",
         y="Pay period",
-        fill="Overload probability",
+        fill="Missed exposure ($K)",
     )
-    + scale_fill_gradient(low="#f8fafc", high="#b91c1c", limits=[0, 1])
+    + scale_fill_gradient(low="#f8fafc", high="#b91c1c")
     + theme_minimal()
 )
 
@@ -572,6 +738,7 @@ appendix_risk = (
         pl.max("overload_probability").alias("max_overload_probability"),
         pl.max("avg_missed_estimated_exposure_k").alias("max_missed_exposure_k"),
         pl.mean("avg_candidate_queue_size").alias("mean_candidate_queue_size"),
+        pl.mean("reviewed_to_candidate_ratio").alias("mean_reviewed_share"),
     )
     .sort("max_missed_exposure_k")
 )
@@ -581,18 +748,30 @@ appendix_risk = (
         aes("policy", "max_missed_exposure_k"),
     )
     + geom_point(
-        aes(color="max_overload_probability", size="mean_candidate_queue_size"),
+        aes(color="max_overload_probability", size="mean_reviewed_share"),
     )
     + ggtitle("Appendix stress ranking")
     + labs(
         x="Queue policy",
         y="Maximum missed estimated exposure ($K)",
         color="Max overload probability",
-        size="Mean candidate queue size",
+        size="Mean reviewed share",
     )
-    + scale_color_gradient(low="#0f766e", high="#b91c1c", limits=[0, 1])
+    + scale_color_gradient(low="#0f766e", high="#b91c1c", breaks=[0, 0.5, 1])
     + coord_flip()
     + theme_minimal()
+)
+
+# %%
+best_stress_policy = appendix_risk.sort("max_missed_exposure_k").head(1)
+worst_stress_policy = appendix_risk.sort("max_missed_exposure_k", descending=True).head(
+    1,
+)
+print(
+    "Appendix stress takeaway: the lowest missed-exposure policy is "
+    f"{best_stress_policy.select(pl.col('policy').first()).item()}, while "
+    f"{worst_stress_policy.select(pl.col('policy').first()).item()} leaves the "
+    "largest maximum missed estimated exposure under queue stress.",
 )
 
 # %% [markdown]

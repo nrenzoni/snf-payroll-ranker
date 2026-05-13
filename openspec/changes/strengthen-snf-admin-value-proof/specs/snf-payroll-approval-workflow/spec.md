@@ -38,3 +38,11 @@ The SNF case-study notebook SHALL separate stress evidence from the primary busi
 #### Scenario: Appendix stress evidence avoids alias overclaim
 - **WHEN** stress appendix comparisons are generated
 - **THEN** the notebook uses true stress diagnostics or clearly labeled stress constructions rather than presenting simple scenario aliases as distinct stress worlds
+
+#### Scenario: Appendix stress evidence remains informative
+- **WHEN** queue-stress appendix evidence is generated
+- **THEN** it compares review policies or metrics that produce visible operational contrast, such as missed estimated exposure, candidate queue size, reviewed-to-candidate ratio, adaptive thresholds, capacity shocks, or catch-up staffing effects
+
+#### Scenario: Notebook probability scales render safely
+- **WHEN** notebook plots use probability-like color scales
+- **THEN** the plots avoid hard scale limits that can trigger renderer-domain errors while preserving readable legends or breaks

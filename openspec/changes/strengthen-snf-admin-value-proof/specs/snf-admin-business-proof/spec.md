@@ -39,3 +39,18 @@ The business-facing SNF notebook SHALL present rolling-origin stability as opera
 #### Scenario: Rolling-origin stability remains credible
 - **WHEN** the notebook shows rolling-origin evidence
 - **THEN** the headline plot uses facility-period yield or value-capture metrics and the surrounding narrative states that synthetic labels are evaluation-only and that real SNF payroll review will include legitimate high-risk-looking records
+
+### Requirement: Analyst-ready proof presentation
+The business-facing SNF notebook SHALL present proof visuals and takeaways in a form suitable for a facility-admin deliverable rather than as exploratory analysis output.
+
+#### Scenario: Main proof avoids dashboard artifacts
+- **WHEN** the notebook renders the main proof flow
+- **THEN** it avoids raw intermediate DataFrame outputs and keeps only one concrete administrator-facing ranked-output table
+
+#### Scenario: Main proof visuals are scenario-clear
+- **WHEN** repeated-world or manual-threshold evidence spans multiple scenario families
+- **THEN** each plot or adjacent takeaway makes the scenario scope explicit so readers can distinguish pooled proof from scenario-specific proof
+
+#### Scenario: Proof visuals include operational takeaways
+- **WHEN** a major proof visual is shown
+- **THEN** the notebook includes a concise quantified takeaway or interpretation that explains the operational implication for facility payroll approval
