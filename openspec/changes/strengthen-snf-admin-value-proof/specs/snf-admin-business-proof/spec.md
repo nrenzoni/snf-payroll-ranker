@@ -32,3 +32,10 @@ The business-facing SNF notebook SHALL keep the main narrative focused on busine
 #### Scenario: Stress diagnostics are appendix-only
 - **WHEN** subgroup drift, calendar drift, or queue-stress evidence is presented
 - **THEN** it appears in a clearly labeled appendix section after the main business-proof narrative
+
+### Requirement: Realistic rolling stability narrative
+The business-facing SNF notebook SHALL present rolling-origin stability as operational review yield over time, not as a promise of perfect precision.
+
+#### Scenario: Rolling-origin stability remains credible
+- **WHEN** the notebook shows rolling-origin evidence
+- **THEN** the headline plot uses facility-period yield or value-capture metrics and the surrounding narrative states that synthetic labels are evaluation-only and that real SNF payroll review will include legitimate high-risk-looking records

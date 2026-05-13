@@ -9,6 +9,7 @@ import pytest
 from payroll_anomaly_ranking.columns import (
     MODEL_FEATURE_COLUMNS,
     FeatureCol,
+    MetricCol,
     OutputName,
     PayrollCol,
     ReviewCol,
@@ -22,6 +23,10 @@ from payroll_anomaly_ranking.data import (
     scenario_summary,
 )
 from payroll_anomaly_ranking.diagnostics import (
+    business_proof_hybrid_win_rates,
+    business_proof_metric_intervals,
+    business_proof_ranking_units,
+    business_proof_threshold_units,
     calibration_plot_inputs,
     expected_pay_calibration,
     pairwise_component_superiority,
@@ -92,7 +97,7 @@ def test_end_to_end_smoke() -> None:
     assert validation.warnings.height >= 0
     assert "final_anomaly_score" in scored.columns
     assert evaluation.metrics.height == 2
-    assert evaluation.model_comparison.height == 4
+    assert evaluation.model_comparison.height == 6
     assert evaluation.category_error_analysis.height > 0
     assert evaluation.uncertainty_bucket_metrics.height > 0
     assert evaluation.risk_coverage_analysis.height > 0
@@ -656,6 +661,77 @@ def test_plot_helper_input_tables_include_rich_context_columns() -> None:
     assert calibration.height >= 2
 
 
+def test_threshold_scoring_emits_facility_variance_and_manual_pack_flags() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    scored = score_payroll(
+        add_rule_flags(build_features(generate_payroll(config).payroll)),
+        config,
+    )
+
+    assert {
+        ScoreCol.THRESHOLD_FACILITY_VARIANCE_FLAG,
+        ScoreCol.THRESHOLD_MANUAL_PACK_FLAG,
+    } <= set(scored.columns)
+    assert scored.select(pl.sum(ScoreCol.THRESHOLD_FACILITY_VARIANCE_FLAG)).item() >= 0
+
+
+def test_threshold_baseline_metrics_include_manual_pack_and_burden_columns() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    scored = score_payroll(
+        add_rule_flags(build_features(generate_payroll(config).payroll)),
+        config,
+    )
+    threshold_metrics = evaluate_scores(scored, config).threshold_baseline_metrics
+
+    assert {
+        "manual_threshold_pack",
+        "facility_payroll_variance_threshold",
+    } <= set(threshold_metrics.get_column("baseline").to_list())
+    assert {
+        MetricCol.NATIVE_REVIEW_BURDEN,
+        MetricCol.EXPOSURE_PER_REVIEW,
+        MetricCol.MISSED_ESTIMATED_EXPOSURE,
+    } <= set(threshold_metrics.columns)
+
+
+def test_business_proof_diagnostics_emit_plot_ready_tables() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    scenarios = diagnostic_scenario_presets(
+        ("baseline", "overtime-staffing-pressure", "premium-mismatch"),
+    )
+    ranking_units = business_proof_ranking_units(
+        config,
+        scenarios=scenarios,
+        seeds=(42,),
+        review_budgets=(5,),
+    )
+    threshold_units = business_proof_threshold_units(
+        config,
+        scenarios=scenarios,
+        seeds=(42,),
+    )
+    intervals = business_proof_metric_intervals(
+        ranking_units,
+        metric_columns=(MetricCol.EXPOSURE_PER_REVIEW,),
+        group_columns=("scenario", "method", MetricCol.K),
+    )
+    win_rates = business_proof_hybrid_win_rates(
+        ranking_units,
+        metric=MetricCol.EXPOSURE_PER_REVIEW,
+    )
+
+    assert ranking_units.height > 0
+    assert threshold_units.height > 0
+    assert {"method", "method_type", MetricCol.EXPOSURE_PER_REVIEW} <= set(
+        ranking_units.columns,
+    )
+    assert {"method", MetricCol.NATIVE_REVIEW_BURDEN} <= set(threshold_units.columns)
+    assert {"mean", "lower_95", "upper_95", "samples"} <= set(intervals.columns)
+    assert {"comparator", "win_probability", "mean_delta", "samples"} <= set(
+        win_rates.columns,
+    )
+
+
 def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
     notebook_06 = Path("notebooks/06_internal_statistical_diagnostics.py").read_text()
     notebook_07 = Path("notebooks/07_simulation_and_stress_testing.py").read_text()
@@ -906,6 +982,18 @@ def test_rolling_origin_validation_stability_and_leakage_checks() -> None:
         rolling.stability_summary.row(0, named=True)["origin_count"]
         == rolling.metrics.height
     )
+    assert {
+        MetricCol.REVIEW_VOLUME,
+        MetricCol.EXPOSURE_PER_REVIEW,
+        MetricCol.DOLLARS_CAPTURED_AT_K,
+        MetricCol.DOLLAR_CAPTURE_RATE,
+    } <= set(rolling.metrics.columns)
+    assert (
+        rolling.metrics.get_column(MetricCol.REVIEW_VOLUME) > config.review_budgets[0]
+    ).all()
+    assert (rolling.metrics.get_column(MetricCol.EXPOSURE_PER_REVIEW) >= 0).all()
+    assert (rolling.metrics.get_column(MetricCol.DOLLAR_CAPTURE_RATE) >= 0).all()
+    assert (rolling.metrics.get_column(MetricCol.DOLLAR_CAPTURE_RATE) <= 1).all()
     assert checks.get_column("passed").all()
 
 

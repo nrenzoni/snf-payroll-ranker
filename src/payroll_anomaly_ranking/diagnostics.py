@@ -6,11 +6,12 @@ from dataclasses import replace
 import numpy as np
 import polars as pl
 
-from payroll_anomaly_ranking.columns import PayrollCol, ScoreCol
+from payroll_anomaly_ranking.columns import MetricCol, PayrollCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.evaluation import (
     dollars_captured_at_k,
     precision_recall_at_k,
+    threshold_baseline_metrics,
 )
 from payroll_anomaly_ranking.scenarios import ScenarioSpec, diagnostic_scenario_presets
 
@@ -21,6 +22,17 @@ SCORE_SIGNALS = {
     "ml": ScoreCol.ML_SCORE,
     "exposure": ScoreCol.EXPOSURE_SCORE,
 }
+BUSINESS_PROOF_METHODS = (
+    ("rule", ScoreCol.RULE_SCORE, "deterministic rules"),
+    ("statistical", ScoreCol.STATISTICAL_SCORE, "robust statistics"),
+    ("ml", ScoreCol.ML_SCORE, "unsupervised ML"),
+    ("hybrid", ScoreCol.FINAL_ANOMALY_SCORE, "hybrid ranking"),
+)
+BUSINESS_PROOF_MAIN_SCENARIOS = (
+    "baseline",
+    "overtime-staffing-pressure",
+    "premium-mismatch",
+)
 
 
 def review_budget_interval_summary(
@@ -114,6 +126,150 @@ def component_superiority_summary(
             },
         )
     return pl.DataFrame(rows)
+
+
+def business_proof_ranking_units(
+    config: PayrollConfig = PayrollConfig(),
+    scenarios: Mapping[str, ScenarioSpec | None] | None = None,
+    seeds: tuple[int, ...] = (42, 43),
+    review_budgets: tuple[int, ...] | None = None,
+) -> pl.DataFrame:
+    from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig, run_pipeline
+
+    scenario_map = scenarios or diagnostic_scenario_presets(
+        BUSINESS_PROOF_MAIN_SCENARIOS,
+    )
+    budgets = review_budgets or config.review_budgets
+    rows: list[dict[str, object]] = []
+    for scenario_name, scenario in scenario_map.items():
+        for seed in seeds:
+            seed_config = replace(config, seed=seed)
+            scored = run_pipeline(
+                seed_config,
+                scenario=scenario,
+                include=PipelineIncludeConfig.scored_only(),
+            ).scored
+            for budget in budgets:
+                unit = f"{scenario_name}|seed={seed}|budget={budget}"
+                for method, score_col, method_type in BUSINESS_PROOF_METHODS:
+                    rows.append(
+                        {
+                            "scenario": scenario_name,
+                            "seed": seed,
+                            "unit": unit,
+                            "method": method,
+                            "method_type": method_type,
+                            **_facility_budget_metrics(scored, score_col, budget),
+                        },
+                    )
+    return pl.DataFrame(rows, infer_schema_length=None)
+
+
+def business_proof_threshold_units(
+    config: PayrollConfig = PayrollConfig(),
+    scenarios: Mapping[str, ScenarioSpec | None] | None = None,
+    seeds: tuple[int, ...] = (42, 43),
+) -> pl.DataFrame:
+    from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig, run_pipeline
+
+    scenario_map = scenarios or diagnostic_scenario_presets(
+        BUSINESS_PROOF_MAIN_SCENARIOS,
+    )
+    rows: list[dict[str, object]] = []
+    for scenario_name, scenario in scenario_map.items():
+        for seed in seeds:
+            seed_config = replace(config, seed=seed)
+            scored = run_pipeline(
+                seed_config,
+                scenario=scenario,
+                include=PipelineIncludeConfig.scored_only(),
+            ).scored
+            thresholds = threshold_baseline_metrics(scored, seed_config).with_columns(
+                pl.lit(scenario_name).alias("scenario"),
+                pl.lit(seed).alias("seed"),
+                pl.concat_str(
+                    [
+                        pl.lit(scenario_name),
+                        pl.lit("|seed="),
+                        pl.lit(str(seed)),
+                    ],
+                ).alias("unit"),
+                pl.col("baseline").alias("method"),
+                pl.lit("manual threshold").alias("method_type"),
+            )
+            rows.extend(thresholds.to_dicts())
+    return pl.DataFrame(rows, infer_schema_length=None)
+
+
+def business_proof_metric_intervals(
+    units: pl.DataFrame,
+    metric_columns: tuple[str, ...],
+    group_columns: tuple[str, ...],
+) -> pl.DataFrame:
+    if units.is_empty():
+        return pl.DataFrame()
+    long = units.unpivot(
+        index=list(group_columns),
+        on=[column for column in metric_columns if column in units.columns],
+        variable_name="metric",
+        value_name="value",
+    )
+    return long.group_by([*group_columns, "metric"]).agg(
+        pl.mean("value").alias("mean"),
+        pl.col("value").quantile(0.025).alias("lower_95"),
+        pl.col("value").quantile(0.975).alias("upper_95"),
+        pl.len().alias("samples"),
+    )
+
+
+def business_proof_hybrid_win_rates(
+    ranking_units: pl.DataFrame,
+    metric: str = MetricCol.EXPOSURE_PER_REVIEW,
+) -> pl.DataFrame:
+    if ranking_units.is_empty() or metric not in ranking_units.columns:
+        return pl.DataFrame()
+    rows: list[dict[str, object]] = []
+    comparators = sorted(
+        method
+        for method in ranking_units.get_column("method").unique().to_list()
+        if method != "hybrid"
+    )
+    scenarios = ranking_units.get_column("scenario").unique().to_list()
+    budgets = sorted(ranking_units.get_column(MetricCol.K).unique().to_list())
+    for scenario in scenarios:
+        for budget in budgets:
+            frame = ranking_units.filter(
+                (pl.col("scenario") == scenario) & (pl.col(MetricCol.K) == budget),
+            )
+            for comparator in comparators:
+                deltas = []
+                for unit in frame.get_column("unit").unique().to_list():
+                    unit_rows = frame.filter(pl.col("unit") == unit)
+                    hybrid_rows = unit_rows.filter(pl.col("method") == "hybrid")
+                    comparator_rows = unit_rows.filter(pl.col("method") == comparator)
+                    if hybrid_rows.is_empty() or comparator_rows.is_empty():
+                        continue
+                    deltas.append(
+                        float(hybrid_rows.select(metric).item())
+                        - float(comparator_rows.select(metric).item()),
+                    )
+                if not deltas:
+                    continue
+                values = np.array(deltas, dtype=float)
+                rows.append(
+                    {
+                        "scenario": scenario,
+                        MetricCol.K: float(budget),
+                        "comparator": comparator,
+                        "metric": metric,
+                        "win_probability": float((values > 0).mean()),
+                        "mean_delta": float(values.mean()),
+                        "lower_95": float(np.quantile(values, 0.025)),
+                        "upper_95": float(np.quantile(values, 0.975)),
+                        "samples": len(values),
+                    },
+                )
+    return pl.DataFrame(rows, infer_schema_length=None)
 
 
 def run_diagnostic_comparison_units(
@@ -495,6 +651,54 @@ def _metrics_for_signal(scored: pl.DataFrame, signal: str, k: int) -> dict[str, 
     return {
         **precision_recall_at_k(ranked, k),
         **dollars_captured_at_k(ranked, k),
+    }
+
+
+def _facility_budget_metrics(
+    scored: pl.DataFrame,
+    signal: str,
+    budget: int,
+) -> dict[str, float]:
+    ranked = scored.with_columns(
+        pl.col(signal)
+        .rank("ordinal", descending=True)
+        .over([PayrollCol.PAY_PERIOD_INDEX, PayrollCol.FACILITY_ID])
+        .alias("_method_rank"),
+    )
+    reviewed = ranked.filter(pl.col("_method_rank") <= budget)
+    missed = ranked.filter(
+        (pl.col("_method_rank") > budget) & (pl.col(PayrollCol.IS_ANOMALY) == 1),
+    )
+    true_positives = reviewed.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height
+    total_anomalies = ranked.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height
+    total_dollars = float(
+        ranked.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+        .select(pl.sum(PayrollCol.ANOMALY_DOLLARS))
+        .item()
+        or 0.0,
+    )
+    captured_dollars = float(
+        reviewed.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+        .select(pl.sum(PayrollCol.ANOMALY_DOLLARS))
+        .item()
+        or 0.0,
+    )
+    exposure = float(reviewed.select(pl.sum(ScoreCol.ESTIMATED_EXPOSURE)).item() or 0.0)
+    return {
+        MetricCol.K: float(budget),
+        MetricCol.REVIEW_VOLUME: reviewed.height,
+        MetricCol.NATIVE_REVIEW_BURDEN: reviewed.height,
+        MetricCol.PRECISION_AT_K: true_positives / max(reviewed.height, 1),
+        MetricCol.RECALL_AT_K: true_positives / max(total_anomalies, 1),
+        MetricCol.EXPOSURE_CAPTURED_AT_K: exposure,
+        MetricCol.EXPOSURE_PER_REVIEW: exposure / max(reviewed.height, 1),
+        MetricCol.DOLLARS_CAPTURED_AT_K: captured_dollars,
+        MetricCol.DOLLAR_CAPTURE_RATE: captured_dollars / total_dollars
+        if total_dollars
+        else 0.0,
+        MetricCol.MISSED_ESTIMATED_EXPOSURE: float(
+            missed.select(pl.sum(ScoreCol.ESTIMATED_EXPOSURE)).item() or 0.0,
+        ),
     }
 
 

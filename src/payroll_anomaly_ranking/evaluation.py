@@ -255,21 +255,24 @@ def threshold_baseline_metrics(
     config: PayrollConfig = PayrollConfig(),
 ) -> pl.DataFrame:
     rows: list[dict[str, object]] = []
+    calibrated = scored
     thresholds = {
+        "manual_threshold_pack": ScoreCol.THRESHOLD_MANUAL_PACK_FLAG,
         "gross_pay_threshold": ScoreCol.THRESHOLD_GROSS_PAY_FLAG,
         "total_hours_threshold": ScoreCol.THRESHOLD_TOTAL_HOURS_FLAG,
         "overtime_hours_threshold": ScoreCol.THRESHOLD_OVERTIME_HOURS_FLAG,
         "premium_dollars_threshold": ScoreCol.THRESHOLD_PREMIUM_DOLLARS_FLAG,
         "paid_vs_scheduled_threshold": ScoreCol.THRESHOLD_PAID_VS_SCHEDULED_FLAG,
+        "facility_payroll_variance_threshold": ScoreCol.THRESHOLD_FACILITY_VARIANCE_FLAG,
     }
-    auto_top = scored.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(
+    auto_top = calibrated.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(
         min(config.review_budgets[0], scored.height),
     )
     auto_false_positives = auto_top.filter(pl.col(PayrollCol.IS_ANOMALY) == 0).height
     for name, flag in thresholds.items():
-        if flag not in scored.columns:
+        if flag not in calibrated.columns:
             continue
-        reviewed = scored.filter(pl.col(flag) == 1)
+        reviewed = calibrated.filter(pl.col(flag) == 1)
         true_positive = reviewed.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height
         false_positive = reviewed.filter(pl.col(PayrollCol.IS_ANOMALY) == 0).height
         exposure = float(
@@ -285,11 +288,21 @@ def threshold_baseline_metrics(
             {
                 "baseline": name,
                 MetricCol.REVIEW_VOLUME: reviewed.height,
+                MetricCol.NATIVE_REVIEW_BURDEN: reviewed.height,
                 MetricCol.PRECISION_AT_K: true_positive / max(reviewed.height, 1),
                 MetricCol.RECALL_AT_K: true_positive
-                / max(scored.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height, 1),
+                / max(calibrated.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height, 1),
                 MetricCol.EXPOSURE_CAPTURED_AT_K: exposure,
+                MetricCol.EXPOSURE_PER_REVIEW: exposure / max(reviewed.height, 1),
                 MetricCol.DOLLARS_CAPTURED_AT_K: synthetic,
+                MetricCol.MISSED_ESTIMATED_EXPOSURE: float(
+                    calibrated.filter(
+                        (pl.col(flag) == 0) & (pl.col(PayrollCol.IS_ANOMALY) == 1),
+                    )
+                    .select(pl.sum(ScoreCol.ESTIMATED_EXPOSURE))
+                    .item()
+                    or 0.0,
+                ),
                 MetricCol.FALSE_POSITIVES_AVOIDED: max(
                     false_positive - auto_false_positives,
                     0,
@@ -375,8 +388,11 @@ def rolling_origin_evaluation(
             pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= selected_threshold,
         )
         budget = min(config.review_budgets[0], test.height)
-        top = test.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(budget)
-        queue_sets.append(set(top.get_column(PayrollCol.RECORD_ID).to_list()))
+        facility_period_metrics, reviewed_ids = _facility_period_review_metrics(
+            test,
+            budget,
+        )
+        queue_sets.append(reviewed_ids)
         metric_rows.append(
             {
                 "origin": origin,
@@ -388,7 +404,7 @@ def rolling_origin_evaluation(
                 "validation_f1": validation_f1,
                 "threshold_precision": _precision(test_at_threshold),
                 "threshold_recall": _recall(test, test_at_threshold),
-                **precision_recall_at_k(test, budget),
+                **facility_period_metrics,
                 "test_score_mean": float(
                     test.select(pl.mean(ScoreCol.FINAL_ANOMALY_SCORE)).item() or 0.0,
                 ),
@@ -433,6 +449,53 @@ def rolling_origin_evaluation(
         ],
     )
     return RollingOriginResults(metrics, settings, stability)
+
+
+def _facility_period_review_metrics(
+    scored: pl.DataFrame,
+    budget: int,
+) -> tuple[dict[str, float], set[int]]:
+    ranked = scored.with_columns(
+        pl.col(ScoreCol.FINAL_ANOMALY_SCORE)
+        .rank("ordinal", descending=True)
+        .over([PayrollCol.PAY_PERIOD_INDEX, PayrollCol.FACILITY_ID])
+        .alias("_facility_period_rank"),
+    )
+    reviewed = ranked.filter(pl.col("_facility_period_rank") <= budget)
+    true_positive = reviewed.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height
+    total_anomalies = ranked.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height
+    exposure = float(reviewed.select(pl.sum(ScoreCol.ESTIMATED_EXPOSURE)).item() or 0.0)
+    captured_dollars = float(
+        reviewed.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+        .select(pl.sum(PayrollCol.ANOMALY_DOLLARS))
+        .item()
+        or 0.0,
+    )
+    total_dollars = float(
+        ranked.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+        .select(pl.sum(PayrollCol.ANOMALY_DOLLARS))
+        .item()
+        or 0.0,
+    )
+    precision = true_positive / max(reviewed.height, 1)
+    recall = true_positive / max(total_anomalies, 1)
+    return (
+        {
+            MetricCol.K: float(budget),
+            MetricCol.REVIEW_VOLUME: float(reviewed.height),
+            MetricCol.NATIVE_REVIEW_BURDEN: float(reviewed.height),
+            MetricCol.PRECISION_AT_K: precision,
+            MetricCol.RECALL_AT_K: recall,
+            MetricCol.F1_AT_K: _f1(precision, recall),
+            MetricCol.EXPOSURE_CAPTURED_AT_K: exposure,
+            MetricCol.EXPOSURE_PER_REVIEW: exposure / max(reviewed.height, 1),
+            MetricCol.DOLLARS_CAPTURED_AT_K: captured_dollars,
+            MetricCol.DOLLAR_CAPTURE_RATE: captured_dollars / total_dollars
+            if total_dollars
+            else 0.0,
+        },
+        set(reviewed.get_column(PayrollCol.RECORD_ID).to_list()),
+    )
 
 
 def leakage_checks(analyst_queue: pl.DataFrame) -> pl.DataFrame:

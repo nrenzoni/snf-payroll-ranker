@@ -34,3 +34,14 @@ The system SHALL produce plot-ready repeated-world comparison artifacts for faci
 #### Scenario: Repeated-world superiority summaries are available
 - **WHEN** scenario-by-seed business-proof diagnostics run
 - **THEN** outputs include per-method win rates, mean deltas or empirical intervals, and scenario-budget comparison series suitable for notebook plots
+
+### Requirement: Facility-period rolling-origin stability metrics
+The system SHALL produce rolling-origin stability metrics that reflect facility-admin review capacity rather than only whole-period ranking.
+
+#### Scenario: Rolling-origin metrics use facility-period review framing
+- **WHEN** rolling-origin evaluation runs on scored SNF shift-level records
+- **THEN** each origin reports facility-period review volume, precision, recall, estimated exposure captured per review, synthetic dollars captured, and dollar capture rate using ranking within each facility and pay period
+
+#### Scenario: Rolling-origin proof avoids precision-only claims
+- **WHEN** business-facing notebook evidence uses rolling-origin evaluation
+- **THEN** the primary stability view emphasizes review yield or value capture over time, with precision treated as supporting evaluation context rather than a claim of perfect operational detection

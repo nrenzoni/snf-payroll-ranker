@@ -16,7 +16,7 @@ from payroll_anomaly_ranking.columns import (
     RuleCol,
     ScoreCol,
 )
-from payroll_anomaly_ranking.config import PayrollConfig
+from payroll_anomaly_ranking.config import PayrollConfig, SNFPayPolicyConfig
 
 FEATURE_COLUMNS = MODEL_FEATURE_COLUMNS
 
@@ -138,6 +138,49 @@ def add_hybrid_scores(
     payroll: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
 ) -> pl.DataFrame:
+    policy = SNFPayPolicyConfig()
+    periods = sorted(payroll.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list())
+    reference_periods = periods[
+        : max(1, min(config.reference_window_periods, len(periods) - 1))
+    ]
+    reference = payroll.filter(
+        pl.col(PayrollCol.PAY_PERIOD_INDEX).is_in(reference_periods),
+    )
+    if reference.is_empty():
+        reference = payroll
+    manual_gross_threshold = _quantile_or_default(reference, PayrollCol.GROSS_PAY, 0.95)
+    manual_total_hours_threshold = _quantile_or_default(
+        reference,
+        PayrollCol.PAID_HOURS,
+        0.97,
+    )
+    manual_overtime_threshold = _quantile_or_default(
+        reference,
+        PayrollCol.OVERTIME_HOURS,
+        0.95,
+    )
+    manual_premium_threshold = _quantile_or_default(
+        reference,
+        PayrollCol.PREMIUM_PAY,
+        0.95,
+    )
+    manual_paid_vs_scheduled_threshold = _quantile_or_default(
+        reference.with_columns(
+            pl.col(PayrollCol.PAID_HOURS)
+            .sub(pl.col(PayrollCol.SCHEDULED_HOURS))
+            .clip(0, None)
+            .alias("_manual_paid_minus_scheduled"),
+        ),
+        "_manual_paid_minus_scheduled",
+        0.95,
+    )
+    manual_facility_variance_threshold = _quantile_or_default(
+        reference.with_columns(
+            _facility_variance_ratio_expr().alias("_manual_facility_variance_ratio"),
+        ),
+        "_manual_facility_variance_ratio",
+        0.95,
+    )
     expected_gross = pl.coalesce(
         pl.col(FeatureCol.GROSS_PAY_ROLLING_MEDIAN),
         pl.col(FeatureCol.PEER_GROSS_MEDIAN),
@@ -177,6 +220,7 @@ def add_hybrid_scores(
         pl.col(PayrollCol.GROSS_PAY).abs().fill_null(0)
         * (pl.col(RuleCol.SEVERITY_SCORE).fill_null(0) / 100),
     )
+    facility_variance_ratio = _facility_variance_ratio_expr()
     scored = payroll.with_columns(
         (pl.col(RuleCol.SEVERITY_SCORE) / 100).clip(0, 1).alias(ScoreCol.RULE_SCORE),
         exposure.alias(ScoreCol.ESTIMATED_EXPOSURE),
@@ -203,21 +247,42 @@ def add_hybrid_scores(
         )
         .clip(0, 1)
         .alias(ScoreCol.PREMIUM_ELIGIBILITY_SCORE),
-        (pl.col(PayrollCol.GROSS_PAY) > 1500)
+        (pl.col(PayrollCol.GROSS_PAY) > policy.gross_pay_threshold)
         .cast(pl.Int64)
         .alias(ScoreCol.THRESHOLD_GROSS_PAY_FLAG),
-        (pl.col(PayrollCol.PAID_HOURS) > 16)
+        (pl.col(PayrollCol.PAID_HOURS) > policy.total_hours_threshold)
         .cast(pl.Int64)
         .alias(ScoreCol.THRESHOLD_TOTAL_HOURS_FLAG),
-        (pl.col(PayrollCol.OVERTIME_HOURS) > 8)
+        (pl.col(PayrollCol.OVERTIME_HOURS) > policy.overtime_hours_threshold)
         .cast(pl.Int64)
         .alias(ScoreCol.THRESHOLD_OVERTIME_HOURS_FLAG),
-        (pl.col(PayrollCol.PREMIUM_PAY) > 100)
+        (pl.col(PayrollCol.PREMIUM_PAY) > policy.premium_dollars_threshold)
         .cast(pl.Int64)
         .alias(ScoreCol.THRESHOLD_PREMIUM_DOLLARS_FLAG),
-        (pl.col(FeatureCol.PAID_MINUS_SCHEDULED_HOURS).fill_null(0) > 2)
+        (
+            pl.col(FeatureCol.PAID_MINUS_SCHEDULED_HOURS).fill_null(0)
+            > policy.paid_vs_scheduled_threshold
+        )
         .cast(pl.Int64)
         .alias(ScoreCol.THRESHOLD_PAID_VS_SCHEDULED_FLAG),
+        (facility_variance_ratio > policy.facility_variance_threshold)
+        .cast(pl.Int64)
+        .alias(ScoreCol.THRESHOLD_FACILITY_VARIANCE_FLAG),
+        (
+            (pl.col(PayrollCol.GROSS_PAY) > manual_gross_threshold)
+            | (pl.col(PayrollCol.PAID_HOURS) > manual_total_hours_threshold)
+            | (pl.col(PayrollCol.OVERTIME_HOURS) > manual_overtime_threshold)
+            | (pl.col(PayrollCol.PREMIUM_PAY) > manual_premium_threshold)
+            | (
+                pl.col(PayrollCol.PAID_HOURS)
+                .sub(pl.col(PayrollCol.SCHEDULED_HOURS))
+                .clip(0, None)
+                > manual_paid_vs_scheduled_threshold
+            )
+            | (facility_variance_ratio > manual_facility_variance_threshold)
+        )
+        .cast(pl.Int64)
+        .alias(ScoreCol.THRESHOLD_MANUAL_PACK_FLAG),
     )
     scored = scored.with_columns(
         pl.col(ScoreCol.EXPOSURE_SCORE).alias(ScoreCol.DOLLAR_SCORE),
@@ -250,6 +315,27 @@ def score_payroll(
         config,
     )
     return add_uncertainty_scores(scored, config)
+
+
+def _facility_variance_ratio_expr() -> pl.Expr:
+    facility_baseline = pl.coalesce(
+        pl.col(FeatureCol.FACILITY_ROLE_SHIFT_GROSS_MEDIAN),
+        pl.col(FeatureCol.PEER_GROSS_MEDIAN),
+        pl.col(PayrollCol.EXPECTED_SHIFT_GROSS_PAY),
+        pl.col(PayrollCol.GROSS_PAY),
+    )
+    return (
+        pl.col(PayrollCol.GROSS_PAY)
+        - facility_baseline.fill_null(pl.col(PayrollCol.GROSS_PAY))
+    ).clip(0, None) / facility_baseline.fill_null(pl.col(PayrollCol.GROSS_PAY)).clip(
+        1,
+        None,
+    )
+
+
+def _quantile_or_default(frame: pl.DataFrame, column: str, quantile: float) -> float:
+    value = frame.select(pl.col(column).quantile(quantile)).item()
+    return float(value or 0.0)
 
 
 def add_uncertainty_scores(
