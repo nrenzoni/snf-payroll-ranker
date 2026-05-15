@@ -19,8 +19,8 @@
 # **Executive takeaway:** SNF payroll approval ranking should be evaluated by temporal approval-budget performance and estimated exposure captured, then compared directly with manual threshold baselines.
 
 # %%
+from common.display import setup_notebook_html
 from common.plots import (
-    LetsPlot,
     aes,
     geom_bar,
     ggplot,
@@ -34,7 +34,7 @@ from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.evaluation import evaluate_scores
 from payroll_anomaly_ranking.pipeline import run_pipeline
 
-LetsPlot.setup_html()
+setup_notebook_html()
 
 results = run_pipeline(
     PayrollConfig(employee_count=180, pay_periods=14, review_budgets=(10, 25, 50)),

@@ -19,7 +19,8 @@
 # **Executive takeaway:** The automated flagger uses leakage-safe, facility-normalized SNF features so administrators do not have to rely only on manually configured gross pay, total hours, overtime, or premium-dollar thresholds.
 
 # %%
-from common.plots import LetsPlot, aes, geom_point, ggplot, labs, theme_minimal
+from common.display import setup_notebook_html
+from common.plots import aes, geom_point, ggplot, labs, theme_minimal
 
 from payroll_anomaly_ranking.columns import FeatureCol, PayrollCol, RuleCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
@@ -27,7 +28,7 @@ from payroll_anomaly_ranking.features import build_features
 from payroll_anomaly_ranking.pipeline import run_pipeline
 from payroll_anomaly_ranking.rules import add_rule_flags
 
-LetsPlot.setup_html()
+setup_notebook_html()
 
 config = PayrollConfig(employee_count=160, pay_periods=12, review_budgets=(10, 25))
 results = run_pipeline(config)

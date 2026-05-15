@@ -34,8 +34,12 @@
 # This lightweight cell confirms that the synthetic SNF pipeline can generate the same core outputs used by the notebooks.
 
 # %%
+from common.display import setup_notebook_html
+
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.pipeline import run_pipeline
+
+setup_notebook_html()
 
 results = run_pipeline(
     PayrollConfig(employee_count=120, pay_periods=12, review_budgets=(5, 10)),

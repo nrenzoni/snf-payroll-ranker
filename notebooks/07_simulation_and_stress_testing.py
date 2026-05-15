@@ -22,9 +22,9 @@
 
 # %%
 import polars as pl
+from common.display import setup_notebook_html
 from common.execution import notebook_fast_mode
 from common.plots import (
-    LetsPlot,
     aes,
     coord_flip,
     geom_density,
@@ -57,7 +57,7 @@ from payroll_anomaly_ranking.scenarios import (
     diagnostic_scenario_presets,
 )
 
-LetsPlot.setup_html()
+setup_notebook_html()
 
 # %%
 config = PayrollConfig(employee_count=220, pay_periods=14, review_budgets=(10, 25))

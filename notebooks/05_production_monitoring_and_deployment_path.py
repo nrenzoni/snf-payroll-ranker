@@ -20,10 +20,13 @@
 
 # %%
 import polars as pl
+from common.display import setup_notebook_html
 
 from payroll_anomaly_ranking.columns import PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.pipeline import run_pipeline
+
+setup_notebook_html()
 
 results = run_pipeline(
     PayrollConfig(employee_count=140, pay_periods=12, review_budgets=(10, 25)),

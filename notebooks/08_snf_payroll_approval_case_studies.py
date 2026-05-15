@@ -19,12 +19,21 @@
 # **Executive takeaway:** Hybrid anomaly ranking is not just a more complicated threshold. Across controlled SNF payroll simulations, it gives facility administrators a better use of limited review time because it captures more estimated risk per review than broad manual thresholds and it remains stronger than rule-only, statistics-only, and ML-only ranking on the main overtime and premium scenarios.
 #
 # This notebook is business-facing and explanation-heavy on purpose. Synthetic labels and synthetic anomaly dollars appear only in evaluation sections to prove whether the ranking works. The final concrete output remains review-safe and framed as pre-payroll verification, not confirmed fraud or confirmed payroll error.
+#
+# **What this notebook includes:**
+#
+# 1. A repeated-world comparison of hybrid ranking, simpler ranking methods, and manual thresholds.
+# 2. A win-rate view showing whether hybrid's advantage persists across scenarios rather than one favorable run.
+# 3. A manual threshold burden-versus-value view showing when simple cutoffs create review work efficiently or inefficiently.
+# 4. Two case studies: overtime/double-shift staffing pressure and premium-pay mismatch.
+# 5. A pay-band diagnostic showing how context-adjusted gross-pay expectations can support practical alert thresholds.
+# 6. A rolling-origin stability check, a review-safe final queue example, and an appendix documenting stress diagnostics and simulation assumptions.
 
 # %%
 import polars as pl
+from common.display import setup_notebook_html
 from common.execution import notebook_fast_mode
 from common.plots import (
-    LetsPlot,
     aes,
     coord_flip,
     geom_errorbar,
@@ -64,7 +73,7 @@ from payroll_anomaly_ranking.queue_simulation import (
 )
 from payroll_anomaly_ranking.scenarios import diagnostic_scenario_presets
 
-LetsPlot.setup_html()
+setup_notebook_html()
 
 # %%
 config = PayrollConfig(employee_count=160, pay_periods=12, review_budgets=(5, 10, 25))
@@ -400,6 +409,8 @@ hybrid_win_rates = _scenario_labels(
 # The chart below compares rankable methods at fixed facility review budgets for the overtime staffing-pressure scenario. That scenario-specific view keeps the comparison readable; the win-rate heatmap that follows shows whether the result generalizes across all main scenarios.
 #
 # The metric shown is estimated exposure captured per reviewed record. In plain language: if an administrator spends one review on this method, how much likely payroll risk does that review tend to cover?
+#
+# In this notebook, **exposure** means estimated payroll dollars at risk in the synthetic evaluation. It is an evaluation measure, not a claim that the dollars are confirmed fraud, confirmed overpayment, or automatically recoverable. **Exposure per review** therefore means the estimated at-risk dollars surfaced for each payroll record a facility administrator spends time checking.
 
 # %%
 exposure_frontier = ranking_intervals.filter(
@@ -458,6 +469,8 @@ print(_win_rate_takeaway(hybrid_win_rates))
 # ## Manual Threshold Burden Versus Value
 #
 # Manual thresholds do not naturally produce the same kind of top-K queue as ranking methods. Their native behavior is to create whatever review demand the cutoff produces. For that reason, the fair question is different: how much work do the thresholds create, how much exposure do they capture per review, and how much estimated exposure do they leave behind?
+#
+# **Native review burden** means the number of records a threshold rule would naturally send to review if it were used as-is. For example, a gross-pay cutoff does not know that a facility only has time for 5 or 10 reviews; it flags every record above the cutoff. That native review count is the operational burden an administrator would actually inherit before any extra queue trimming is imposed.
 
 # %%
 threshold_burden = threshold_intervals.filter(
@@ -605,6 +618,8 @@ premium_missed = _threshold_missed_hybrid_records(premium_results.scored)
 # ## Expected Pay Bands Make The Statistical Logic Concrete
 #
 # Robust statistics become more persuasive when they are shown as an expected pay band instead of an abstract score. The chart below focuses on threshold-missed records that sit furthest above their expected pay band.
+#
+# An **expected pay band** is the contextual gross-pay range the system would expect for a comparable payroll record. Here, the band is shown from the 10th to 90th percentile of expected gross pay, using prior employee, role, shift, facility, and payroll context rather than one fixed dollar cutoff. The point is diagnostic: it illustrates how a simple system rule could automatically adjust alert thresholds based on previous gross-pay patterns and comparable context, instead of sending alerts from a static gross-pay limit that may be too strict for one role and too loose for another.
 
 # %%
 expected_pay_bands = _expected_pay_band_rows(premium_results.scored)
@@ -701,6 +716,21 @@ final_queue
 # ## Appendix: Stress Diagnostics
 #
 # The main proof above uses the highest-value recurring scenarios. This appendix is intentionally separate. It does not claim that every stress world is already a polished product scenario. It shows how the review process behaves when demand or payroll conditions shift in harder directions.
+
+# %% [markdown]
+# ### Simulation Assumptions
+#
+# This notebook uses controlled synthetic SNF payroll simulations so that the evaluation can know which records were intentionally made risky and how much estimated payroll exposure they represent. That makes it possible to compare review methods objectively without using real employee payroll data or treating real people as confirmed errors.
+#
+# Key assumptions:
+#
+# 1. Each run creates a synthetic set of facilities, employees, roles, shifts, scheduled hours, paid hours, premiums, and gross pay across multiple pay periods.
+# 2. Scenario presets inject specific operational risk patterns, such as overtime staffing pressure, double-shift/rest-gap pressure, premium mismatch, and queue stress.
+# 3. Synthetic anomaly labels and synthetic exposure dollars are available only because this is a simulation. They are used to evaluate performance, not to create the administrator-facing score.
+# 4. Review budgets represent scarce pre-payroll approval capacity at the facility level. A top-K ranking method is judged by the best records it can place inside that limited capacity.
+# 5. Manual thresholds are evaluated by their native behavior: every record crossing the cutoff becomes review demand, even if that creates more work than the facility can comfortably handle.
+# 6. Expected pay bands are historical/contextual diagnostics. They show how alert thresholds could adapt to previous gross pay and comparable shift context, but they do not by themselves prove an error.
+# 7. Queue stress policies test operational sensitivity: what happens when candidate volume rises, review capacity is fixed, review capacity temporarily drops, or a threshold policy creates more candidate records than reviewers can absorb.
 
 # %%
 appendix_scored = run_pipeline(

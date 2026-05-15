@@ -502,6 +502,15 @@ wheels = [
 ]
 
 [[package]]
+name = "itables"
+version = "2.7.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/85/43/c438b31429d4e8cefc76c7cba80a1c948d2e18d74589fb771ea719474bbf/itables-2.7.3.tar.gz", hash = "sha256:7a9680da20aa6495868265d397f1a8cc03d8fdbc592760d3ddb10b4d6081ff73", size = 2428026, upload-time = "2026-03-22T20:05:14.373Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/79/a5/60a55bd4cb9488d21adcdce88625e1de9bc14ea454677160c162132838cb/itables-2.7.3-py3-none-any.whl", hash = "sha256:b24ebd6a4ab3edab200f41c56e20a12b12b95ec15d3697aeb9bee71d92c008a9", size = 2462653, upload-time = "2026-03-22T20:05:11.819Z" },
+]
+
+[[package]]
 name = "jedi"
 version = "0.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1087,6 +1096,7 @@ dependencies = [
 [package.optional-dependencies]
 notebooks = [
     { name = "ipykernel" },
+    { name = "itables" },
     { name = "jupyterlab" },
     { name = "jupytext" },
     { name = "lets-plot" },
@@ -1105,6 +1115,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "ipykernel", marker = "extra == 'notebooks'", specifier = ">=7.2.0" },
+    { name = "itables", marker = "extra == 'notebooks'", specifier = ">=2.7.3" },
     { name = "jupyterlab", marker = "extra == 'notebooks'", specifier = ">=4.5.7" },
     { name = "jupytext", marker = "extra == 'notebooks'", specifier = ">=1.19.1" },
     { name = "lets-plot", marker = "extra == 'notebooks'", specifier = ">=4.9.0" },

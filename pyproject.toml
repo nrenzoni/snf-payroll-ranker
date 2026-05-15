@@ -13,6 +13,7 @@ dependencies = [
 [project.optional-dependencies]
 notebooks = [
     "ipykernel>=7.2.0",
+    "itables>=2.7.3",
     "jupyterlab>=4.5.7",
     "jupytext>=1.19.1",
     "lets-plot>=4.9.0",

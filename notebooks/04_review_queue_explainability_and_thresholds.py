@@ -19,8 +19,8 @@
 # **Executive takeaway:** The administrator-safe approval queue turns model and rule signals into a short weekly checklist: what to review, which source to check, and what action to take before payroll approval.
 
 # %%
+from common.display import setup_notebook_html
 from common.plots import (
-    LetsPlot,
     aes,
     geom_bar,
     ggplot,
@@ -34,7 +34,7 @@ from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.pipeline import run_pipeline
 from payroll_anomaly_ranking.presentation import compact_case_cards
 
-LetsPlot.setup_html()
+setup_notebook_html()
 
 results = run_pipeline(
     PayrollConfig(employee_count=160, pay_periods=12, review_budgets=(10, 25)),

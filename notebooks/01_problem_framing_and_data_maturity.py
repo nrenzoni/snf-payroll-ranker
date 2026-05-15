@@ -20,8 +20,8 @@
 
 # %%
 import polars as pl
+from common.display import setup_notebook_html
 from common.plots import (
-    LetsPlot,
     aes,
     geom_bar,
     ggplot,
@@ -39,7 +39,7 @@ from payroll_anomaly_ranking.presentation import (
 )
 from payroll_anomaly_ranking.validation import validate_payroll
 
-LetsPlot.setup_html()
+setup_notebook_html()
 
 results = run_pipeline(
     PayrollConfig(employee_count=160, pay_periods=12, review_budgets=(10, 25)),
