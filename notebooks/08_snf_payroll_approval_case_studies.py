@@ -22,7 +22,7 @@
 #
 # **What this notebook includes:**
 #
-# 1. A repeated-world comparison of hybrid ranking, simpler ranking methods, and manual thresholds.
+# 1. A comparison of hybrid ranking, simpler ranking methods, and manual thresholds.
 # 2. A win-rate view showing whether hybrid's advantage persists across scenarios rather than one favorable run.
 # 3. A manual threshold burden-versus-value view showing when simple cutoffs create review work efficiently or inefficiently.
 # 4. Two case studies: overtime/double-shift staffing pressure and premium-pay mismatch.
@@ -44,6 +44,7 @@ from common.plots import (
     ggplot,
     ggtitle,
     labs,
+    rotated_x_labels,
     scale_color_gradient,
     scale_fill_gradient,
     theme_minimal,
@@ -410,7 +411,9 @@ hybrid_win_rates = _scenario_labels(
 #
 # The metric shown is estimated exposure captured per reviewed record. In plain language: if an administrator spends one review on this method, how much likely payroll risk does that review tend to cover?
 #
-# In this notebook, **exposure** means estimated payroll dollars at risk in the synthetic evaluation. It is an evaluation measure, not a claim that the dollars are confirmed fraud, confirmed overpayment, or automatically recoverable. **Exposure per review** therefore means the estimated at-risk dollars surfaced for each payroll record a facility administrator spends time checking.
+# - **exposure** means <u>estimated payroll dollars at risk</u>. It is an evaluation measure, not a claim that the dollars are confirmed fraud, confirmed overpayment, or automatically recoverable.
+#
+# - **Exposure per review** means the estimated at-risk dollars surfaced for each payroll record a facility administrator spends time checking.
 
 # %%
 exposure_frontier = ranking_intervals.filter(
@@ -422,7 +425,7 @@ exposure_frontier = ranking_intervals.filter(
     + geom_line(aes(color="method"))
     + geom_point(aes(color="method"), size=3)
     + geom_errorbar(aes(ymin="lower_95", ymax="upper_95", color="method"), width=0.4)
-    + ggtitle("Repeated-world exposure captured per review")
+    + ggtitle("exposure captured per review (Repeated-world)")
     + labs(
         x="Facility review budget per pay period",
         y="Estimated exposure per review",
@@ -435,7 +438,7 @@ exposure_frontier = ranking_intervals.filter(
 print(_ranking_takeaway(exposure_frontier, active_config.review_budgets[0]))
 
 # %% [markdown]
-# **How to read this:** each point is the average across repeated overtime staffing-pressure runs, and the error bars show empirical variation across those runs. If the hybrid line stays above the other lines, that means hybrid usually makes better use of scarce facility review time, not just in one favorable simulation.
+# **How to read this:** each point is the average across repeated overtime staffing-pressure runs, and the error bars show empirical variation across those runs. (If the hybrid line stays above the other lines, that means hybrid usually makes better use of scarce facility review time, not just in one favorable simulation.)
 
 # %% [markdown]
 # ## Hybrid Win Rate Against Simpler Methods
@@ -468,9 +471,9 @@ print(_win_rate_takeaway(hybrid_win_rates))
 # %% [markdown]
 # ## Manual Threshold Burden Versus Value
 #
-# Manual thresholds do not naturally produce the same kind of top-K queue as ranking methods. Their native behavior is to create whatever review demand the cutoff produces. For that reason, the fair question is different: how much work do the thresholds create, how much exposure do they capture per review, and how much estimated exposure do they leave behind?
+# Manual thresholds do not naturally produce the same kind of top-K queue as ranking methods. They create a review demand dependant on the cutoff produces. So the fair question is: how much work do the thresholds create, how much exposure do they capture per review, and how much estimated exposure do they leave behind?
 #
-# **Native review burden** means the number of records a threshold rule would naturally send to review if it were used as-is. For example, a gross-pay cutoff does not know that a facility only has time for 5 or 10 reviews; it flags every record above the cutoff. That native review count is the operational burden an administrator would actually inherit before any extra queue trimming is imposed.
+# - **Review burden**: the number of records a threshold rule selects for review. For example, a gross-pay cutoff does not know that a facility only has time for 5 or 10 reviews; it flags every record above the cutoff. (This review count is the operational burden an admin receives before any extra queue trimming is imposed.)
 
 # %%
 threshold_burden = threshold_intervals.filter(
@@ -499,7 +502,7 @@ threshold_tradeoff = threshold_burden.join(
         aes("mean", "mean_exposure_per_review"),
     )
     + geom_point(aes(color="method", size="mean_exposure_per_review"), alpha=0.8)
-    + ggtitle("Manual threshold burden versus value")
+    + ggtitle("Manual threshold\nburden versus value")
     + labs(
         x="Average native review burden",
         y="Estimated exposure per review",
@@ -513,7 +516,7 @@ threshold_tradeoff = threshold_burden.join(
 print(_threshold_takeaway(threshold_tradeoff))
 
 # %% [markdown]
-# **Why this matters for facility admins:** this scenario-specific view isolates the overtime staffing-pressure question instead of pooling unlike payroll worlds. A threshold can be simple and still be inefficient. A threshold sitting far to the right with modest vertical value means it creates a lot of review work without proportionate risk capture. The calibrated manual threshold pack is the fairest manual baseline because it is tuned to the observed payroll context without using labels.
+# **Why this matters for facility admins:** this scenario-specific view isolates the overtime staffing-pressure question. A threshold can be simple and still be inefficient. A threshold sitting far to the right with a low vertical value means it creates a lot of review work without proportionate risk capture. The calibrated manual threshold pack is the fairest manual baseline because it is tuned to the observed payroll context without using labels. on a historical rolling basis.
 
 # %% [markdown]
 # ## Case Study 1: Overtime, Double Shifts, And Staffing Pressure
@@ -541,6 +544,7 @@ print(
 
 # %%
 overtime_missed = _threshold_missed_hybrid_records(overtime_results.scored)
+
 (
     ggplot(
         overtime_missed,
@@ -592,6 +596,7 @@ print(
 
 # %%
 premium_missed = _threshold_missed_hybrid_records(premium_results.scored)
+
 (
     ggplot(
         premium_missed,
@@ -612,10 +617,10 @@ premium_missed = _threshold_missed_hybrid_records(premium_results.scored)
 )
 
 # %% [markdown]
-# **Interpretation:** this is where hybrid is especially persuasive to administrators. Many missed records are not the largest premiums. They are the premiums that become questionable when shift type, weekend status, and payroll context do not line up cleanly.
+# **Interpretation:** This shows value of hybrid. Missed records are not the largest premiums. They are the premiums that become questionable when shift type, weekend status, and payroll context do not line up cleanly.
 
 # %% [markdown]
-# ## Expected Pay Bands Make The Statistical Logic Concrete
+# ## Diagnostic: Expected Pay Bands
 #
 # Robust statistics become more persuasive when they are shown as an expected pay band instead of an abstract score. The chart below focuses on threshold-missed records that sit furthest above their expected pay band.
 #
@@ -623,6 +628,7 @@ premium_missed = _threshold_missed_hybrid_records(premium_results.scored)
 
 # %%
 expected_pay_bands = _expected_pay_band_rows(premium_results.scored)
+
 (
     ggplot(expected_pay_bands, aes("queue_row", PayrollCol.GROSS_PAY))
     + geom_segment(
@@ -693,7 +699,7 @@ print(
 # %% [markdown]
 # ## Concrete Final Output
 #
-# The notebook keeps only one final concrete table because the main proof should stay focused on value, not dashboard detail. This is what a facility-admin-safe ranked output looks like in practice.
+# This is what a facility-admin-safe ranked output looks like in practice.
 
 # %%
 final_queue = premium_results.analyst_review_queue.select(
@@ -751,7 +757,7 @@ appendix_queue = _appendix_queue_stress(appendix_scored)
         ),
     )
     + geom_tile()
-    + ggtitle("Appendix stress view: missed exposure by queue policy and period")
+    + ggtitle("Appendix stress view:\nmissed exposure by queue policy and period")
     + labs(
         x="Queue policy",
         y="Pay period",
@@ -759,6 +765,7 @@ appendix_queue = _appendix_queue_stress(appendix_scored)
     )
     + scale_fill_gradient(low="#f8fafc", high="#b91c1c")
     + theme_minimal()
+    + rotated_x_labels()
 )
 
 # %%
