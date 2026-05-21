@@ -1,0 +1,88 @@
+# Decision Log
+
+This log records significant technical decisions made during the design and evolution of the SNF Payroll Anomaly Ranking pipeline. Each entry follows the context / decision / consequences structure.
+
+---
+
+## ADR-001: Polars as the Primary DataFrame Engine
+
+**Context**
+The pipeline processes tens of thousands of shift-level records per pay period with many rolling, grouped, and joined operations. pandas performance and memory usage were acceptable for prototyping but became a friction point when iterating on feature engineering and temporal evaluation.
+
+**Decision**
+Use Polars for all tabular operations. pandas is not used anywhere in the runtime or notebooks.
+
+**Consequences**
+- Positive: Significant speedup in grouped aggregations, rolling windows, and joins. Lower memory footprint during temporal cross-validation.
+- Positive: Native expression API encourages vectorized, declarative transforms rather than row-wise Python callbacks.
+- Negative: Smaller ecosystem of Stack Overflow answers and third-party integrations; team must be comfortable reading Polars documentation.
+- Negative: Some pandas-centric libraries (e.g., certain plotting helpers) require conversion or are avoided.
+
+---
+
+## ADR-002: Shift-Level Modeling Grain
+
+**Context**
+Payroll anomaly detection can be framed at the employee-pay-period aggregate (one row per employee per pay period) or at the shift level (one row per shift). Aggregate views are simpler but hide overtime patterns, double-shift sequences, rest gaps, and shift-specific premium mismatches.
+
+**Decision**
+Model at the shift level. All features, rules, scores, and evaluation metrics are computed per shift. Pay-period/facility summaries are rolled up from shift-level results.
+
+**Consequences**
+- Positive: Overtime, double-shift, rest-gap, schedule/timeclock mismatch, and premium eligibility can be detected with shift context.
+- Positive: Facility approval summaries remain traceable to underlying shift details.
+- Negative: Higher row count and more complex temporal grouping for peer baselines.
+- Negative: Requires careful handling of shift date boundaries and pay period mapping.
+
+---
+
+## ADR-003: Fully Synthetic Data for Privacy and Reproducibility
+
+**Context**
+The project is intended as a public portfolio piece and teaching artifact. Using any real payroll data would introduce legal risk, require de-identification auditing, and make the repository non-reproducible for external reviewers.
+
+**Decision**
+Generate all data synthetically from code. No real employee identifiers, resident data, payroll records, tax records, bank details, HR comments, or production integrations are included. Synthetic labels are injected for evaluation but are never used as model features.
+
+**Consequences**
+- Positive: Repository is fully reproducible from a clean checkout. Anyone can run the pipeline and get identical outputs.
+- Positive: Zero privacy review or legal clearance required for public sharing.
+- Positive: Scenario control (drift, anomaly concentration, calendar effects) is possible via configurable scenario specs.
+- Negative: Synthetic distributions are simpler than real SNF payroll operations; generalization claims must be carefully scoped.
+- Negative: Some real-world edge cases (union policy variation, state-specific compliance, agency billing) are documented but not yet implemented.
+
+---
+
+## ADR-004: Hybrid Scoring Over a Single End-to-End Model
+
+**Context**
+A common approach in anomaly detection is to train a single unsupervised model and use its output score directly. For SNF payroll, this risks missing deterministic compliance issues or misinterpreting legitimate high-dollar shifts as anomalous.
+
+**Decision**
+Build a hybrid approval exception score that combines independent components: deterministic rules, robust statistics, unsupervised ML, peer context, employee history, schedule/timeclock mismatch, premium eligibility, and estimated exposure. Each component is computed independently and combined via configurable weights.
+
+**Consequences**
+- Positive: Inspectable. An administrator can see which components drove a record's ranking.
+- Positive: Tunable. Facility operators can adjust weights to reflect local pay policy or review capacity.
+- Positive: Resilient. If one component fails (e.g., peer group too small), others continue to contribute.
+- Negative: More engineering effort than a single model endpoint.
+- Negative: Requires careful normalization and clipping so components are comparable on a 0-1 scale.
+
+---
+
+## ADR-005: Jupytext-Paired Notebooks Over Raw .ipynb Artifacts
+
+**Context**
+Notebooks are the primary vehicle for business-facing case studies and data-science diagnostics. Raw `.ipynb` files are large JSON blobs that create noisy diffs, merge conflicts, and code-review friction.
+
+**Decision**
+Use Jupytext to pair `.ipynb` outputs with `.py` percent-format sources. The `.py` files are the source of truth. `.ipynb` artifacts are generated on demand and are not edited directly. Shared plotting adapters live in `notebooks/common/plots.py` to keep the runtime package free of Jupyter and plotting dependencies.
+
+**Consequences**
+- Positive: Git diffs are readable Python code. Code review in PRs is natural.
+- Positive: Notebook logic can be linted, formatted, and type-checked alongside runtime code.
+- Positive: Runtime package remains free of heavy notebook dependencies; `uv sync --extra notebooks` is optional.
+- Negative: Reviewers must remember to regenerate paired `.ipynb` when executing the full workload.
+- Negative: Some notebook-only UI state (collapsed cells, widget outputs) is lost in the `.py` source.
+
+---
