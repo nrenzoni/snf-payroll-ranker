@@ -15,7 +15,7 @@ A production-oriented, privacy-safe ML pipeline that prioritizes shift-level pay
 
 ## Table of Contents
 
-- [What Makes This Different](#what-makes-this-different)
+- [Key Points](#key-points)
 - [Quick Start](#quick-start)
 - [What The Workflow Covers](#what-the-workflow-covers)
 - [Sample Outputs](#sample-outputs)
@@ -25,18 +25,19 @@ A production-oriented, privacy-safe ML pipeline that prioritizes shift-level pay
 - [Tech Stack](#tech-stack)
 - [Intended Production Flow](#intended-production-flow)
 - [Development Checks](#development-checks)
+- [Agentic Development](#agentic-development)
 - [Engineering Process](#engineering-process)
 - [Limitations](#limitations)
 
 ---
 
-## What Makes This Different
+## Key Points
 
-- **Leakage-safe temporal validation**: Data is split by pay period, not random rows. Historical features exclude the current and all future periods. Peer baselines are built from prior windows only.
-- **Facility-normalized, transferable features**: Stationary ratios (overtime per scheduled hour, premium pay share, gross pay vs. expected role-shift pay) allow new SNF clients with different pay scales to be bootstrapped without recalibration.
-- **Uncertainty quantification**: Every scored record carries ensemble disagreement, bootstrap intervals, expected gross-pay intervals, peer-group sample-size uncertainty, data-quality flags, and out-of-distribution detection. Risk and uncertainty are reported separately so high-risk records are not hidden solely because uncertainty is high.
-- **Explainable hybrid ranking**: The final score is a weighted combination of rule, statistical, ML, peer, history, schedule/timeclock, premium eligibility, and estimated-exposure components. Administrators can see *which* signals drove a record to the top of the queue.
-- **Administrator-safe outputs**: Review queues include recommended actions, sources to check, SNF context, and review-safe explanations. They do not label employees as confirmed misconduct.
+- **Leakage-safe temporal validation**: pay-period splits, no random row sampling; historical features exclude current/future periods.
+- **Facility-normalized, transferable features**: stationary ratios bootstrappable across new SNF clients with different pay scales.
+- **Uncertainty quantification**: every record carries ensemble disagreement, bootstrap intervals, expected-pay bands, peer/history sample-size uncertainty, data-quality flags, and OOD detection — risk and uncertainty reported separately.
+- **Explainable hybrid ranking**: weighted combination of rule, statistical, ML, peer, history, schedule/timeclock, premium eligibility, and exposure components.
+- **Administrator-safe outputs**: recommended actions, sources to check, SNF context, review-safe explanations — no confirmed-misconduct labeling.
 
 ---
 
@@ -54,22 +55,10 @@ uv sync
 uv run python -m payroll_anomaly_ranking.pipeline
 ```
 
-Expected generated files include:
+Expected generated files:
 
-- `data/synthetic/synthetic_payroll.csv`
-- `data/synthetic/synthetic_snf_shift_payroll.csv`
-- `data/synthetic/synthetic_payroll_labels.csv`
-- `outputs/evaluation/scored_payroll.csv`
-- `outputs/evaluation/review_budget_metrics.csv`
-- `outputs/evaluation/model_comparison.csv`
-- `outputs/evaluation/category_error_analysis.csv`
-- `outputs/evaluation/backtest_metrics.csv`
-- `outputs/evaluation/rolling_origin_metrics.csv`
-- `outputs/evaluation/leakage_checks.csv`
-- `outputs/evaluation/admin_approval_queue.csv`
-- `outputs/evaluation/analyst_review_queue.csv`
-- `outputs/evaluation/evaluation_labeled_review_queue.csv`
-- `outputs/evaluation/facility_approval_summary.csv`
+- `data/synthetic/*.csv`
+- `outputs/evaluation/*.csv`
 
 ### Notebook Reporting Setup
 
@@ -83,54 +72,39 @@ uv sync --extra notebooks
 
 ## What The Workflow Covers
 
-- Shift-level SNF payroll generation with facilities, units, roles, license types, shift types, schedule context, timeclock context, pay-code categories, premium pay, approval status, lifecycle dates, and pay-period/facility rollups.
-- Implemented synthetic exception scenarios for overtime/double-shift staffing pressure and premium pay or shift differential mismatch.
-- Future scenario catalog entries for agency/float labor, census/acuity, credential/license mismatch, PBJ category mismatch, meal premiums, new hire orientation, termination/final pay, retro/rate corrections, union policy variation, new-client bootstrap, and payroll close adjustment concentration.
-- Leakage-safe employee history, role/shift peer, facility-normalized, stationary ratio, schedule/timeclock, premium eligibility, fatigue/rest-gap, and exposure-estimate features.
-- Deterministic SNF approval rules, robust statistical scoring, unsupervised outlier detection, and hybrid automated approval exception ranking.
-- Manual threshold baselines for gross pay, total hours, overtime hours, premium dollars, paid-vs-scheduled variance, and facility payroll variance.
-- Administrator-safe pre-approval queues with recommended action, source to check, approval risk category, SNF context, estimated exposure, and review-safe explanations.
+- Shift-level SNF payroll generation with facility, unit, role, shift, schedule, timeclock, pay-code, premium, and lifecycle context.
+- Synthetic exception scenarios: overtime/double-shift staffing pressure, premium pay / shift differential mismatch.
+- Future scenario catalog: agency/float labor, census/acuity, credential/license mismatch, PBJ category, meal premiums, lifecycle, retro/rate corrections, union policy, new-client bootstrap, payroll close adjustments.
+- Leakage-safe features: employee history, role/shift peer, facility-normalized ratios, schedule/timeclock mismatch, premium eligibility, fatigue/rest-gap, exposure estimates.
+- Deterministic rules, robust statistics, unsupervised outlier detection, and hybrid ranking with manual threshold baselines.
+- Administrator-safe pre-approval queues with recommended actions, sources to check, risk categories, and review-safe explanations.
 
 ---
 
 ## Sample Outputs
 
-### Ranked Approval Queue (Top 5)
-
-A preview of the administrator-facing queue after scoring:
+### Ranked Approval Queue
 
 | rank | employee_id | facility_id | role | shift_type | gross_pay | final_anomaly_score | approval_risk_category | primary_reason | rule_reason_codes |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | SYN-SNF-E00028 | SNF-F001 | Therapy | Double | 727.89 | 0.690 | review before approval | Gross pay materially differs from similar SNF role/shift peers | none |
 | 2 | SYN-SNF-E00020 | SNF-F001 | Med Aide | Evening | 372.94 | 0.564 | confirm if time permits | Paid hours materially exceed scheduled hours | paid_exceeds_scheduled |
-| 3 | SYN-SNF-E00037 | SNF-F001 | LPN | Day | 288.66 | 0.514 | confirm if time permits | Paid hours materially exceed scheduled hours | paid_exceeds_scheduled |
-| 4 | SYN-SNF-E00023 | SNF-F001 | CNA | Night | 275.29 | 0.494 | confirm if time permits | Paid hours materially exceed scheduled hours | paid_exceeds_scheduled |
-| 5 | SYN-SNF-E00023 | SNF-F001 | CNA | Day | 266.63 | 0.457 | confirm if time permits | Paid hours materially exceed scheduled hours | paid_exceeds_scheduled |
 
 ### High-Scoring Shift Records
-
-Examples of shifts flagged by the hybrid score with rule and context detail:
 
 | record_id | employee_id | pay_period_index | facility_id | role | shift_type | gross_pay | final_anomaly_score | pay_period_rank | rule_reason_codes |
 |---|---|---|---|---|---|---|---|---|---|
 | 69 | SYN-SNF-E00002 | 1 | SNF-F006 | CNA | Double | 452.15 | 0.599 | 1 | extreme_overtime;double_shift_rest_gap |
 | 191 | SYN-SNF-E00004 | 1 | SNF-F006 | LPN | Double | 737.09 | 0.533 | 3 | extreme_overtime |
-| 194 | SYN-SNF-E00004 | 1 | SNF-F006 | LPN | Day | 429.67 | 0.412 | 6 | paid_exceeds_scheduled |
-| 313 | SYN-SNF-E00006 | 1 | SNF-F005 | CNA | Double | 470.44 | 0.490 | 3 | extreme_overtime |
-| 556 | SYN-SNF-E00011 | 1 | SNF-F002 | Dietary | Evening | 269.70 | 0.456 | 2 | paid_exceeds_scheduled |
 
 ### Model Comparison at Review Budget k=5
-
-Precision, recall, and PR-AUC for each scoring component on synthetic validation data:
 
 | model | precision_at_k | recall_at_k | f1_at_k | pr_auc |
 |---|---|---|---|---|
 | rule_score | 0.517 | 0.775 | 0.620 | 0.848 |
-| statistical_score | 0.467 | 0.700 | 0.560 | 0.422 |
-| ml_score | 0.567 | 0.850 | 0.680 | 0.869 |
 | hybrid_score | 0.550 | 0.825 | 0.660 | 0.839 |
 
-*Note: Values are from a single representative synthetic run. Full ablation and temporal stability evidence are available in the notebook sequence.*
+*Values from a representative synthetic run. Full ablation and temporal stability evidence in the notebooks.*
 
 ---
 
@@ -149,23 +123,17 @@ Rendered notebooks and case-study walkthroughs are hosted at:
 
 **https://nrenzoni.github.io/payroll-anomaly-ranking/**
 
-The Jupytext-paired notebook index is `notebooks/payroll_anomaly_detection.py`. The existing notebook sequence is being reoriented around SNF payroll approval:
+Active notebooks:
 
-- `notebooks/01_problem_framing_and_data_maturity.py`: SNF payroll approval framing, synthetic-data privacy, schema dictionary, validation warnings, and data maturity visuals.
-- `notebooks/02_feature_engineering_and_baselines.py`: leakage-safe SNF shift-level features, facility normalization, rule flags, and manual threshold baselines.
-- `notebooks/03_modeling_evaluation_and_error_analysis.py`: temporal validation, automated ranking, manual-threshold comparison, approval-budget metrics, and error analysis.
-- `notebooks/04_review_queue_explainability_and_thresholds.py`: administrator-safe approval queue, case cards, recommended actions, thresholds, and feedback workflow.
-- `notebooks/06_internal_statistical_diagnostics.py`: internal statistical diagnostics for review-budget uncertainty, subgroup behavior, expected-pay calibration, robustness, and perturbation sensitivity.
-- `notebooks/07_simulation_and_stress_testing.py`: internal queue-capacity and scenario stress testing for threshold policy, overload probability, and missed exposure.
-- `notebooks/08_snf_payroll_approval_case_studies.py`: business-facing SNF proof notebook showing how hybrid ranking improves overtime and premium review compared with manual thresholds.
-- `notebooks/09_model_ablation_and_ml_value.py`: data-science validation notebook covering ablation, incremental ML value, temporal validation evidence, uncertainty, and robustness diagnostics.
+- `notebooks/08_snf_payroll_approval_case_studies.py`: business-facing proof showing how hybrid ranking improves overtime and premium review vs. manual thresholds.
+- `notebooks/09_model_ablation_and_ml_value.py`: ablation, incremental ML value, temporal validation evidence, uncertainty, and robustness diagnostics.
 
 Notebook-only plotting code lives in Jupytext notebook sources and shared plotting adapters under `notebooks/common/`. The runtime package remains free of Jupyter and Lets-Plot imports.
 
-For fast notebook checks, supported internal notebooks can use reduced diagnostic workload settings and scored-only pipeline artifacts under `NOTEBOOK_FAST=1` so execution checks do not refresh paired `.ipynb` outputs.
+Fast-path notebook validation (reduced workload, `/tmp` output, no paired `.ipynb` churn):
 
 ```bash
-NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/06_internal_statistical_diagnostics.fast.ipynb notebooks/06_internal_statistical_diagnostics.py
+NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/notebook.fast.ipynb notebooks/08_snf_payroll_approval_case_studies.py
 ```
 
 ---
@@ -184,12 +152,6 @@ payroll-anomaly-ranking/
 │   ├── pipeline.py                 # Orchestration & artifact management
 │   └── ...
 ├── notebooks/                      # Jupytext-paired narrative notebooks
-│   ├── 01_problem_framing_and_data_maturity.py
-│   ├── 02_feature_engineering_and_baselines.py
-│   ├── 03_modeling_evaluation_and_error_analysis.py
-│   ├── 04_review_queue_explainability_and_thresholds.py
-│   ├── 06_internal_statistical_diagnostics.py
-│   ├── 07_simulation_and_stress_testing.py
 │   ├── 08_snf_payroll_approval_case_studies.py
 │   ├── 09_model_ablation_and_ml_value.py
 │   └── common/plots.py             # Shared plotting adapters
@@ -246,6 +208,20 @@ Run repository hooks after code or notebook edits:
 ```bash
 uv run prek run --all-files
 ```
+
+---
+
+## Agentic Development
+
+The project is designed for agentic iteration. See [`AGENTS.md`](AGENTS.md) for the full workflow contract.
+
+- **Fast-path notebook validation**: `NOTEBOOK_FAST=1` runs reduced diagnostic workloads and writes executed notebooks only under `/tmp`, avoiding paired `.ipynb` churn on every check.
+- **Pre-commit quality gates**: `uv run prek run --all-files` enforces Ruff lint/format, Pyrefly type checking, YAML validation, and trailing-comma consistency automatically.
+- **Tiered testing**: smoke suite for quick sanity; targeted integration filters (`-k "scoring or uncertainty"`) for focused validation; full suite for pipeline-wide changes.
+- **Lets-Plot render failures surface as exceptions**: `notebooks/common/plots.py` wraps `CheckedPlot` around Lets-Plot to parse generated HTML for embedded error messages and raise `LetsPlotRenderError`, so agent/CI loops detect broken plots instead of accepting silent render failures.
+- **Visualization dependency boundary**: Lets-Plot and Jupyter dependencies are notebook-only; the runtime package under `src/` has zero plotting imports.
+- **Spec-driven changes**: non-trivial behavior changes follow a propose / apply / archive cycle tracked under `openspec/`.
+- **Code standards**: strict typing, named dataclasses for public multi-value returns, Polars expressions over row-wise Python callbacks, schema enums from `columns.py` instead of raw column strings.
 
 ---
 
