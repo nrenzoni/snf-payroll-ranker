@@ -1,0 +1,18 @@
+graph LR
+    A["Synthetic / Ingested Payroll Data"] --> B["Validation & Aggregations"]
+    B --> C["Leakage-Safe Feature Engineering"]
+    C --> D["Deterministic Rule Flags"]
+    C --> E["Robust Statistical Scores"]
+    C --> F["Unsupervised Outlier Detection"]
+    D --> G["Hybrid Scoring"]
+    E --> G
+    F --> G
+    G --> H["Uncertainty Quantification"]
+    H --> I["Administrator Approval Queue"]
+    I --> J["Facility Summary"]
+    G --> K["Temporal Evaluation"]
+
+    style A fill:#e1f5fe
+    style G fill:#fff3e0
+    style I fill:#e8f5e9
+    style K fill:#fce4ec
