@@ -64,9 +64,6 @@ class PayrollCol(StrEnum):
     GROSS_PAY = "gross_pay"
     DEDUCTIONS = "deductions"
     NET_PAY = "net_pay"
-    BONUS = "bonus"
-    COMMISSION = "commission"
-    RETRO_PAY = "retro_pay"
     MANUAL_ADJUSTMENT = "manual_adjustment"
     TENURE_MONTHS = "tenure_months"
     HIRE_DATE = "hire_date"
@@ -421,9 +418,6 @@ MODEL_FEATURE_COLUMNS = [
     PayrollCol.CLOCK_IN_VARIANCE_MINUTES,
     PayrollCol.CLOCK_OUT_VARIANCE_MINUTES,
     PayrollCol.PAY_RATE,
-    PayrollCol.BONUS,
-    PayrollCol.COMMISSION,
-    PayrollCol.RETRO_PAY,
     PayrollCol.MANUAL_ADJUSTMENT,
     FeatureCol.GROSS_PAY_PCT_CHANGE,
     FeatureCol.DEDUCTION_RATIO,

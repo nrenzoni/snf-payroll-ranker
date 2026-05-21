@@ -290,7 +290,7 @@ def test_targeted_anomaly_controls_concentrate_configured_scope() -> None:
             targeted_controls=(
                 TargetedAnomalyControl(
                     start_period=6,
-                    subgroup_filters={PayrollCol.DEPARTMENT: "Operations"},
+                    subgroup_filters={PayrollCol.DEPARTMENT: "Nursing"},
                     category_weights={"overtime_spike": 1.0},
                     target_count=25,
                 ),
@@ -300,11 +300,11 @@ def test_targeted_anomaly_controls_concentrate_configured_scope() -> None:
 
     payroll = generate_payroll(config, scenario=scenario).payroll
     target = payroll.filter(
-        (pl.col(PayrollCol.DEPARTMENT) == "Operations")
+        (pl.col(PayrollCol.DEPARTMENT) == "Nursing")
         & (pl.col(PayrollCol.PAY_PERIOD_INDEX) >= 6),
     )
     outside = payroll.filter(
-        (pl.col(PayrollCol.DEPARTMENT) != "Operations")
+        (pl.col(PayrollCol.DEPARTMENT) != "Nursing")
         | (pl.col(PayrollCol.PAY_PERIOD_INDEX) < 6),
     )
 
@@ -322,7 +322,7 @@ def test_drift_and_change_points_affect_only_configured_scope() -> None:
         drift_plans=(
             DriftPlan(
                 start_period=6,
-                subgroup_filters={PayrollCol.DEPARTMENT: "Operations"},
+                subgroup_filters={PayrollCol.DEPARTMENT: "Nursing"},
                 overtime_multiplier=1.5,
             ),
         ),
@@ -330,7 +330,7 @@ def test_drift_and_change_points_affect_only_configured_scope() -> None:
             ChangePointEvent(
                 name="gross_shift",
                 start_period=7,
-                subgroup_filters={PayrollCol.DEPARTMENT: "Operations"},
+                subgroup_filters={PayrollCol.DEPARTMENT: "Nursing"},
                 field=PayrollCol.GROSS_PAY,
                 multiplier=1.2,
             ),
@@ -352,7 +352,7 @@ def test_drift_and_change_points_affect_only_configured_scope() -> None:
         on=PayrollCol.RECORD_ID,
     )
     outside_scope = joined.filter(
-        (pl.col(PayrollCol.DEPARTMENT) != "Operations")
+        (pl.col(PayrollCol.DEPARTMENT) != "Nursing")
         | (pl.col(PayrollCol.PAY_PERIOD_INDEX) < 6),
     )
 
@@ -361,7 +361,7 @@ def test_drift_and_change_points_affect_only_configured_scope() -> None:
     ).item()
     assert (
         joined.filter(
-            (pl.col(PayrollCol.DEPARTMENT) == "Operations")
+            (pl.col(PayrollCol.DEPARTMENT) == "Nursing")
             & (pl.col(PayrollCol.PAY_PERIOD_INDEX) >= 7)
             & (pl.col("shifted_gross") > pl.col(PayrollCol.GROSS_PAY)),
         ).height
@@ -859,11 +859,11 @@ def test_period_safe_feature_references_and_early_fallbacks() -> None:
             PayrollCol.RECORD_ID: [0, 1, 2, 3, 4],
             PayrollCol.EMPLOYEE_ID: ["a", "b", "a", "b", "c"],
             PayrollCol.PAY_PERIOD_INDEX: [1, 1, 2, 2, 3],
-            PayrollCol.DEPARTMENT: ["Finance"] * 5,
-            PayrollCol.JOB_FAMILY: ["Payroll"] * 5,
-            PayrollCol.LOCATION: ["Remote"] * 5,
-            PayrollCol.PAY_TYPE: ["salaried"] * 5,
-            PayrollCol.PAY_CODE: ["SAL"] * 5,
+            PayrollCol.DEPARTMENT: ["Nursing"] * 5,
+            PayrollCol.JOB_FAMILY: ["CNA"] * 5,
+            PayrollCol.LOCATION: ["SNF-F001"] * 5,
+            PayrollCol.PAY_TYPE: ["hourly"] * 5,
+            PayrollCol.PAY_CODE: ["SNF_REG"] * 5,
             PayrollCol.TENURE_MONTHS: [12] * 5,
             PayrollCol.GROSS_PAY: [1000.0, 3000.0, 2000.0, 4000.0, 5000.0],
             PayrollCol.DEDUCTIONS: [200.0, 600.0, 400.0, 800.0, 1000.0],

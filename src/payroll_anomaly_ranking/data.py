@@ -406,9 +406,6 @@ def generate_payroll_lines(
                 PayrollCol.GROSS_PAY: round(gross, 2),
                 PayrollCol.DEDUCTIONS: round(deductions, 2),
                 PayrollCol.NET_PAY: round(gross - deductions, 2),
-                PayrollCol.BONUS: 0.0,
-                PayrollCol.COMMISSION: 0.0,
-                PayrollCol.RETRO_PAY: 0.0,
                 PayrollCol.MANUAL_ADJUSTMENT: 0.0,
                 PayrollCol.TENURE_MONTHS: max(
                     0,
