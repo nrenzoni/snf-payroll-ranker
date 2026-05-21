@@ -176,7 +176,7 @@ payroll-anomaly-ranking/
 | Validation | Temporal splits, rolling-origin evaluation, backtesting |
 | Uncertainty | Bootstrap intervals, conformal p-values, OOD detection, ensemble disagreement |
 | Notebooks | Jupytext (git-friendly), Lets-Plot |
-| Quality | Ruff, Pyrefly, pre-commit, pytest (smoke + integration) |
+| Quality | Ruff, Pyrefly, prek, pytest (smoke + integration) |
 | Workflow | UV, OpenSpec (spec-driven development) |
 
 ---

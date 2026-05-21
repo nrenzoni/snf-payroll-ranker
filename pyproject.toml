@@ -30,7 +30,7 @@ packages = ["src/payroll_anomaly_ranking"]
 [dependency-groups]
 dev = [
     "payroll-anomaly-ranking[notebooks]",
-    "pre-commit>=4.6.0",
+    "prek>=0.4.1",
     "pyrefly>=0.64.0",
     "pytest>=9.0.1",
     "ruff>=0.15.12",
