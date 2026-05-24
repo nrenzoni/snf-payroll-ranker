@@ -2,19 +2,26 @@
 Define the analyst-facing review queue and notebook deliverables for payroll anomaly review.
 ## Requirements
 ### Requirement: Analyst-ready review queue
-The system SHALL produce a ranked administrator-facing pre-approval exception queue of shift-level SNF payroll records for weekly payroll approval.
+The system SHALL produce an employee-pay-cycle ranked review queue from the active payroll ranking library instead of defining the active queue around deprecated shift-level SNF approval outputs.
 
-#### Scenario: Approval queue fields are populated
-- **WHEN** approval queue generation runs
-- **THEN** each administrator-safe queue row includes rank, synthetic employee identifier, facility, unit, role, shift date, shift type, pay period, final approval exception score, approval risk category, primary reason, secondary reason, recommended action, source to check, actual gross pay, expected gross pay or role-shift baseline, difference from expected, scheduled hours, worked hours, overtime context, premium context, rule flags, and estimated exposure
+#### Scenario: Active queue fields are populated
+- **WHEN** active review queue generation runs
+- **THEN** each queue row includes the employee-pay-cycle identifier, employee identifier, facility, payroll cycle, active priority score, risk or relevance context, explanation context, and any review-safe fields required by the active employee-pay-cycle workflow
 
-#### Scenario: Approval queue is sorted by priority
-- **WHEN** records are exported for approval review
-- **THEN** records are sorted by pay period, facility where applicable, and descending final approval exception score or configured approval priority
+#### Scenario: Active queue is sorted by group priority
+- **WHEN** active records are exported for review
+- **THEN** employee-pay-cycle rows are ordered within their active queue grouping by descending configured priority score
 
-#### Scenario: Approval queue remains review-safe
-- **WHEN** records are exported for administrator approval review
-- **THEN** the queue does not claim confirmed misconduct, confirmed fraud, confirmed payroll error, or known synthetic anomaly status
+#### Scenario: Legacy shift-level queue fields are not treated as active requirements
+- **WHEN** the active queue contract is documented
+- **THEN** deprecated shift-level SNF approval queue fields are identified as legacy historical material rather than active acceptance criteria
+
+### Requirement: Queue contract follows active runtime direction
+The active review queue SHALL be derived from the active employee-pay-cycle runtime and SHALL NOT depend on deprecated shift-level hybrid queue generation.
+
+#### Scenario: Active queue excludes deprecated runtime dependency
+- **WHEN** the active queue contract is implemented or documented
+- **THEN** it does not require deprecated shift-level queue modules, legacy notebook outputs, or historical hybrid score fields to operate
 
 ### Requirement: Human-readable anomaly explanations
 The system SHALL generate concise administrator-readable explanations for flagged SNF shift-level records using rule flags, score drivers, schedule/timeclock context, premium eligibility, historical baselines, peer comparisons, and estimated exposure.

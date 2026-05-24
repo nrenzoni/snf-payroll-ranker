@@ -13,19 +13,26 @@ The system SHALL generate and use synthetic payroll data that contains no real e
 - **THEN** employee and manager identifiers are synthetic stable identifiers rather than real names, emails, addresses, bank details, or government identifiers
 
 ### Requirement: Employee-pay-period payroll records
-The system SHALL generate shift-level SNF payroll, schedule, and timeclock records as the primary synthetic data grain, with pay-period and facility rollups derived from the shift-level records.
+The system SHALL generate employee-pay-cycle payroll records as the primary active synthetic data grain, with any lower-level shift, schedule, or timeclock artifacts treated as optional supporting context rather than the canonical runtime contract.
 
-#### Scenario: Core SNF shift-level schema is generated
+#### Scenario: Core employee-pay-cycle schema is generated
 - **WHEN** the synthetic data generator runs
-- **THEN** each primary payroll row includes synthetic shift or payroll-line identifier, employee identifier, facility, unit, role, license type, pay period, shift date, shift type, scheduled hours, worked hours, pay code, pay-code category, base rate, applied rate or multiplier, gross pay, premium pay amount, timeclock context, schedule context, approval status, employment status, tenure, and lifecycle dates where applicable
+- **THEN** each primary payroll row includes a synthetic employee-pay-cycle identifier, employee identifier, facility, pay period or payroll cycle, role or job context, aggregated hours and pay measures, relevant lifecycle and temporal context, and any active-library label fields needed for research or production-candidacy evaluation
 
-#### Scenario: Pay-period facility rollups are generated
-- **WHEN** shift-level payroll records are generated
-- **THEN** the system derives pay-period/facility rollups with payroll amount, paid hours, overtime hours, premium dollars, exception counts, and estimated approval context without using evaluation-only labels as inputs
+#### Scenario: Supporting lower-level context is optional
+- **WHEN** synthetic data generation includes shift, schedule, or timeclock detail
+- **THEN** those lower-level artifacts are treated as optional supporting context or derived inputs rather than the canonical active modeling grain
 
-#### Scenario: Generic corporate workforce values are replaced
-- **WHEN** synthetic data is generated for this project
-- **THEN** departments and job families are SNF-specific rather than corporate values such as Sales, Engineering, commissions, or remote office roles
+#### Scenario: Active rollups follow the canonical grain
+- **WHEN** active synthetic payroll records are generated
+- **THEN** downstream active scoring, evaluation, and queue contracts use employee-pay-cycle records as their primary input grain
+
+### Requirement: Legacy shift-level synthetic artifacts are non-normative
+Deprecated shift-level synthetic payroll artifacts MAY remain in the repository for historical reference, but they SHALL NOT define the active data contract.
+
+#### Scenario: Legacy synthetic artifacts stay out of active contracts
+- **WHEN** active docs or specs describe the primary synthetic payroll interface
+- **THEN** they identify employee-pay-cycle records as canonical and describe any retained shift-level artifacts as deprecated historical reference only
 
 ### Requirement: Injected anomaly labels
 The system SHALL inject known SNF payroll anomaly categories and retain labels for evaluation-only artifacts.

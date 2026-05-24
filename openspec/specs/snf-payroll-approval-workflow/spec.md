@@ -1,16 +1,12 @@
 ## Purpose
 Define the SNF weekly payroll approval workflow, administrator action context, facility summaries, manual threshold comparisons, and case-study notebook coverage.
 ## Requirements
-### Requirement: Weekly SNF payroll approval assistant
-The system SHALL frame operational outputs as a weekly skilled nursing facility payroll approval assistant for administrator teams rather than as a dedicated payroll analyst workbench.
+### Requirement: Deprecated SNF workflow remains historical reference only
+The older shift-level SNF payroll approval workflow MAY remain in the repository as historical reference material, but it SHALL NOT define the active project direction.
 
-#### Scenario: Approval assistant narrative is present
-- **WHEN** a user opens the README or business-facing notebooks
-- **THEN** the project describes automated pre-payroll approval exception prioritization for SNF administrators, business office managers, DON/scheduling partners, or regional operators
-
-#### Scenario: Analyst-only framing is avoided
-- **WHEN** review outputs or notebook narratives describe the workflow
-- **THEN** they avoid implying that a dedicated payroll analyst team is required to use the system
+#### Scenario: Legacy SNF workflow is clearly demoted
+- **WHEN** contributors inspect specs or docs that mention the older SNF approval workflow
+- **THEN** those materials identify it as deprecated historical reference rather than active runtime, active research, or active production scope
 
 ### Requirement: Administrator action context
 The system SHALL provide administrator-facing action context for prioritized shift-level exceptions.
@@ -55,21 +51,6 @@ The notebooks SHALL include two high-value SNF payroll approval case studies.
 #### Scenario: Premium mismatch case study is shown
 - **WHEN** the SNF case-study notebook or notebook sequence runs
 - **THEN** it demonstrates shift differential, weekend premium, duplicate premium, or premium-without-support exception prioritization compared with manual gross or premium-dollar thresholds
-
-### Requirement: Business-facing SNF ML value proof
-The SNF case-study notebook SHALL demonstrate the operational value of automated hybrid approval ranking for facility administrators using repeated scenario evidence and explanation-rich comparison against manual threshold review.
-
-#### Scenario: Business proof compares repeated scenario worlds
-- **WHEN** the SNF case-study notebook runs
-- **THEN** it compares the calibrated manual threshold pack, deterministic rules, robust statistics, ML-only scoring, and hybrid ranking across repeated scenario and seed worlds for `baseline`, `overtime-staffing-pressure`, and `premium-mismatch` using configured facility review budgets
-
-#### Scenario: Business narrative explains operational value
-- **WHEN** a reviewer reads the SNF case-study notebook
-- **THEN** narrative text explains what each method type does, where it helps facility approval review, and where thresholds, rules, statistics, ML-only scoring, and hybrid ranking each remain limited
-
-#### Scenario: Business-safe concrete output remains visible
-- **WHEN** the main proof narrative concludes
-- **THEN** the notebook shows one concrete final ranked-output table with review-safe queue fields so facility administrators can see what the deployed output looks like without relying on multiple intermediate dashboard tables
 
 ### Requirement: Appendix stress diagnostics
 The SNF case-study notebook SHALL separate stress evidence from the primary business proof.

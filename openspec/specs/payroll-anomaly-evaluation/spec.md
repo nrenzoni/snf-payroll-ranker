@@ -2,26 +2,33 @@
 Define temporal validation, review-budget metrics, and model comparison for payroll anomaly evaluation.
 ## Requirements
 ### Requirement: Temporal anomaly evaluation
-The system SHALL evaluate SNF shift-level anomaly ranking using temporal validation rather than random row splits.
+The system SHALL evaluate employee-pay-cycle ranking with temporally ordered validation as the active default and SHALL treat random row splits as debugging-only anti-pattern checks.
 
 #### Scenario: Holdout periods are scored after training periods
-- **WHEN** the evaluation pipeline runs
-- **THEN** models, thresholds, score weights, and facility-normalization references are selected using earlier training or validation pay periods and evaluated on later pay periods
+- **WHEN** the active evaluation pipeline runs
+- **THEN** models, thresholds, group weighting, and calibration settings are selected using earlier payroll cycles and evaluated on later payroll cycles
 
 #### Scenario: Backtesting scores each period independently
 - **WHEN** backtesting evaluation is enabled
-- **THEN** each scored pay period uses only prior periods for feature baselines, model fitting, threshold selection, and score calibration where applicable
+- **THEN** each scored payroll cycle uses only prior cycles for feature baselines, model fitting, threshold selection, and score calibration where applicable
 
 ### Requirement: Review-queue metrics
-The system SHALL report metrics aligned with SNF weekly payroll approval capacity.
+The system SHALL report employee-pay-cycle grouped ranking metrics that measure review value within facility-cycle queues and aggregate those results for active research and production-candidacy decisions.
 
-#### Scenario: Precision and recall at approval budgets are reported
-- **WHEN** predictions are evaluated
-- **THEN** the results include precision@K and recall@K for configured administrator approval budgets such as top 10, 25, and 50 shift-level records per pay period or facility-pay-period
+#### Scenario: Grouped top-k metrics are reported
+- **WHEN** active predictions are evaluated
+- **THEN** the results include top-k queue metrics computed within facility-cycle groups and aggregated across groups using explicit project-defined aggregation schemes
 
 #### Scenario: Ranking quality is reported
-- **WHEN** predictions are evaluated against injected labels
-- **THEN** the results include rank-oriented metrics such as average anomaly rank or mean reciprocal rank where applicable
+- **WHEN** active predictions are evaluated against available labels
+- **THEN** the results include rank-oriented metrics such as precision@K, recall@K, mean reciprocal rank, and other grouped ranking metrics selected for the active employee-pay-cycle program
+
+### Requirement: Production-candidacy validation
+The active evaluation program SHALL determine whether an employee-pay-cycle scoring approach is promotable into later production work.
+
+#### Scenario: Candidate methods are judged on deployment-relevant evidence
+- **WHEN** an active method is summarized after Phase 1 evaluation
+- **THEN** the evaluation reports whether the method meets the project's current criteria for temporal generalization, facility generalization, top-k ranking value, uncertainty behavior, and explanation readiness
 
 ### Requirement: Cost-sensitive evaluation
 The system SHALL estimate and report approval exposure captured by ranked SNF anomaly outputs.

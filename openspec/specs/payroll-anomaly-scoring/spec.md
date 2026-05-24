@@ -2,15 +2,15 @@
 Define leakage-safe feature engineering and hybrid scoring for payroll anomaly ranking.
 ## Requirements
 ### Requirement: Leakage-safe feature engineering
-The system SHALL compute employee-history and temporal features using only information available before the scored pay period.
+The system SHALL compute employee-pay-cycle features using only information available before the scored payroll cycle and SHALL treat employee-pay-cycle records as the active feature-engineering contract.
 
 #### Scenario: Rolling history excludes current and future periods
-- **WHEN** rolling employee features such as gross pay median, gross pay standard deviation, overtime baseline, or net-to-gross history are computed
-- **THEN** the calculation excludes the current pay period and all future pay periods
+- **WHEN** rolling employee or facility features such as pay medians, gross-pay standard deviation, overtime baseline, or payroll-cycle history are computed
+- **THEN** the calculation excludes the current payroll cycle and all future cycles
 
 #### Scenario: Temporal split avoids random row leakage
 - **WHEN** model training and scoring datasets are prepared
-- **THEN** records are split by pay period rather than random employee-pay-period rows
+- **THEN** active employee-pay-cycle records are split by payroll cycle rather than random employee-cycle rows
 
 ### Requirement: Payroll rule baseline
 The system SHALL calculate deterministic SNF payroll approval rule flags and a rule severity score from shift-level schedule, timeclock, pay-code, pay policy, lifecycle, and payroll-line context.
@@ -27,22 +27,22 @@ The system SHALL calculate robust, stationary, facility-normalized anomaly score
 - **THEN** the system computes robust z-scores, median absolute deviation scores, interquartile outlier flags, percentiles, deviation ratios, and normalized ratios for gross pay, worked hours, overtime hours, premium pay share, paid-vs-scheduled variance, rest-gap context, and estimated exposure
 
 ### Requirement: Machine learning anomaly scoring
-The system SHALL train and apply at least one unsupervised anomaly model on leakage-safe numerical SNF shift-level features.
+The system SHALL support supervised and ranking-oriented employee-pay-cycle scoring interfaces suitable for Phase 1 production-oriented research rather than requiring a single active unsupervised anomaly model.
 
-#### Scenario: Isolation Forest scores SNF shift records
-- **WHEN** the model training pipeline runs on earlier pay periods
-- **THEN** an Isolation Forest model produces normalized anomaly scores for later shift-level payroll records without using injected labels, injected anomaly categories, injected anomaly dollar impacts, or administrator-only evaluation fields as features
+#### Scenario: Multiple formulation interfaces are supported
+- **WHEN** active model training or scoring is implemented
+- **THEN** the runtime contract supports employee-pay-cycle classification, regression, expected-value, or learning-to-rank formulations as comparable active scoring paths
 
-### Requirement: Configurable hybrid ranking score
-The system SHALL combine SNF rule, employee-history, facility-normalized peer, statistical, machine-learning, schedule/timeclock, premium-eligibility, and estimated exposure components into a configurable final approval exception score without using injected evaluation labels or injected anomaly dollar impacts.
+#### Scenario: Active scoring interfaces stay label-safe
+- **WHEN** synthetic or adjudicated labels are present for research evaluation
+- **THEN** active scoring features exclude evaluation-only truth fields and use only approved feature contracts for training, calibration, or scoring
 
-#### Scenario: Hybrid score ranks SNF approval candidates
-- **WHEN** scoring is complete
-- **THEN** each shift-level payroll record has component scores, a final approval exception score, and a rank within its pay period or facility-pay-period suitable for pre-approval queue generation
+### Requirement: Phase-gated production promotion
+The scoring library SHALL treat Phase 1 formulation comparison as a gate for later production promotion rather than declaring any single method as the active production answer in advance.
 
-#### Scenario: Hybrid score is label-free
-- **WHEN** injected labels are present for synthetic evaluation
-- **THEN** the hybrid score calculation ignores `is_anomaly`, `anomaly_category`, and `anomaly_dollars`
+#### Scenario: Production candidacy is evidence-based
+- **WHEN** an active scoring method is proposed for later operational use
+- **THEN** the project documents that promotion depends on evaluation, generalization, uncertainty, and explainability evidence from the active research phase
 
 ### Requirement: Feature engineering notebook walkthrough
 The notebooks SHALL demonstrate SNF-specific leakage-safe historical, peer, deterministic rule, stationarity, normalization, and robust statistical features using concrete synthetic shift-level payroll records.
