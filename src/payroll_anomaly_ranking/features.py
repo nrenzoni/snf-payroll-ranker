@@ -246,6 +246,225 @@ def build_features(payroll: pl.DataFrame) -> pl.DataFrame:
     return _add_trailing_shift_features(featured).fill_nan(None)
 
 
+def build_employee_cycle_features(payroll: pl.DataFrame) -> pl.DataFrame:
+    base = payroll.sort(
+        [PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX],
+    ).with_columns(
+        pl.when(pl.col(PayrollCol.TENURE_MONTHS) < 6)
+        .then(pl.lit("new"))
+        .when(pl.col(PayrollCol.TENURE_MONTHS) < 36)
+        .then(pl.lit("established"))
+        .otherwise(pl.lit("tenured"))
+        .alias(FeatureCol.TENURE_BUCKET),
+        pl.col(PayrollCol.TOTAL_GROSS_PAY)
+        .shift(1)
+        .over(PayrollCol.EMPLOYEE_ID)
+        .alias(FeatureCol.LAG_GROSS_PAY),
+        pl.col(PayrollCol.TOTAL_GROSS_PAY)
+        .shift(1)
+        .rolling_median(window_size=4, min_samples=1)
+        .over(PayrollCol.EMPLOYEE_ID)
+        .alias(FeatureCol.GROSS_PAY_ROLLING_MEDIAN),
+        pl.col(PayrollCol.TOTAL_GROSS_PAY)
+        .shift(1)
+        .rolling_std(window_size=4, min_samples=2)
+        .over(PayrollCol.EMPLOYEE_ID)
+        .alias(FeatureCol.GROSS_PAY_ROLLING_STD),
+        pl.col(PayrollCol.TOTAL_OVERTIME_HOURS)
+        .shift(1)
+        .rolling_median(window_size=4, min_samples=1)
+        .over(PayrollCol.EMPLOYEE_ID)
+        .alias(FeatureCol.OVERTIME_ROLLING_MEDIAN),
+        (
+            pl.col(PayrollCol.PAY_PERIOD_INDEX).cum_count().over(PayrollCol.EMPLOYEE_ID)
+            - 1
+        )
+        .clip(0, None)
+        .alias(FeatureCol.PRIOR_EMPLOYEE_PAY_PERIOD_COUNT),
+    )
+    base = base.with_columns(
+        (
+            (pl.col(PayrollCol.TOTAL_GROSS_PAY) - pl.col(FeatureCol.LAG_GROSS_PAY))
+            / pl.col(FeatureCol.LAG_GROSS_PAY).abs().clip(1, None)
+        ).alias(FeatureCol.GROSS_PAY_PCT_CHANGE),
+        (
+            pl.col(PayrollCol.TOTAL_DEDUCTIONS).fill_null(0)
+            / pl.col(PayrollCol.TOTAL_GROSS_PAY).clip(1, None)
+        ).alias(FeatureCol.DEDUCTION_RATIO),
+        (
+            pl.col(PayrollCol.TOTAL_NET_PAY)
+            / pl.col(PayrollCol.TOTAL_GROSS_PAY).clip(1, None)
+        ).alias(FeatureCol.NET_TO_GROSS_RATIO),
+        (
+            pl.col(PayrollCol.TOTAL_OVERTIME_HOURS)
+            / pl.col(PayrollCol.TOTAL_SCHEDULED_HOURS).clip(1, None)
+        ).alias(FeatureCol.OVERTIME_PER_SCHEDULED_HOUR),
+        (
+            pl.col(PayrollCol.TOTAL_WORKED_HOURS)
+            / pl.col(PayrollCol.TOTAL_SCHEDULED_HOURS).clip(1, None)
+        ).alias(FeatureCol.WORKED_TO_SCHEDULED_RATIO),
+        (
+            pl.col(PayrollCol.TOTAL_PAID_HOURS)
+            / pl.col(PayrollCol.TOTAL_SCHEDULED_HOURS).clip(1, None)
+        ).alias(FeatureCol.PAID_TO_SCHEDULED_RATIO),
+        (
+            pl.col(PayrollCol.TOTAL_PREMIUM_PAY)
+            / pl.col(PayrollCol.TOTAL_GROSS_PAY).clip(1, None)
+        ).alias(FeatureCol.PREMIUM_PAY_SHARE),
+        (
+            pl.col(PayrollCol.TOTAL_GROSS_PAY)
+            / pl.col(PayrollCol.TOTAL_EXPECTED_GROSS_PAY).clip(1, None)
+        ).alias(FeatureCol.GROSS_TO_EXPECTED_SHIFT_PAY),
+        (
+            pl.col(PayrollCol.TOTAL_PAID_HOURS)
+            - pl.col(PayrollCol.TOTAL_SCHEDULED_HOURS)
+        ).alias(
+            FeatureCol.PAID_MINUS_SCHEDULED_HOURS,
+        ),
+        pl.col(PayrollCol.SHIFT_COUNT).alias(FeatureCol.TRAILING_7_DAY_HOURS),
+        (pl.col(PayrollCol.ANOMALOUS_SHIFT_COUNT).fill_null(0) > 0)
+        .cast(pl.Int64)
+        .shift(1)
+        .rolling_sum(window_size=6, min_samples=1)
+        .over(PayrollCol.EMPLOYEE_ID)
+        .fill_null(0)
+        .alias(FeatureCol.PRIOR_DOUBLE_SHIFT_COUNT),
+    )
+    peer_keys = [
+        PayrollCol.FACILITY_ID,
+        PayrollCol.ROLE,
+        FeatureCol.TENURE_BUCKET,
+    ]
+    base = base.with_columns(
+        pl.col(FeatureCol.DEDUCTION_RATIO)
+        .shift(1)
+        .rolling_median(window_size=4, min_samples=1)
+        .over(PayrollCol.EMPLOYEE_ID)
+        .alias(FeatureCol.DEDUCTION_RATIO_ROLLING_MEDIAN),
+        pl.col(PayrollCol.TOTAL_GROSS_PAY)
+        .shift(1)
+        .median()
+        .over(peer_keys)
+        .alias(FeatureCol.PEER_GROSS_MEDIAN),
+        pl.col(PayrollCol.TOTAL_GROSS_PAY)
+        .shift(1)
+        .mean()
+        .over(peer_keys)
+        .alias(FeatureCol.PEER_GROSS_MEAN),
+        pl.col(PayrollCol.TOTAL_GROSS_PAY)
+        .shift(1)
+        .std()
+        .over(peer_keys)
+        .alias(FeatureCol.PEER_GROSS_STD),
+        pl.col(PayrollCol.TOTAL_OVERTIME_HOURS)
+        .shift(1)
+        .median()
+        .over(peer_keys)
+        .alias(FeatureCol.PEER_OVERTIME_MEDIAN),
+        pl.len().over(peer_keys).alias(FeatureCol.STRICT_PEER_GROUP_SIZE),
+        pl.len().over(peer_keys).alias(FeatureCol.EFFECTIVE_PEER_REFERENCE_SIZE),
+        pl.col(PayrollCol.TOTAL_GROSS_PAY)
+        .shift(1)
+        .median()
+        .over([PayrollCol.FACILITY_ID, PayrollCol.ROLE])
+        .alias(FeatureCol.FACILITY_ROLE_SHIFT_GROSS_MEDIAN),
+        pl.col(PayrollCol.TOTAL_PAID_HOURS)
+        .shift(1)
+        .median()
+        .over([PayrollCol.FACILITY_ID, PayrollCol.ROLE])
+        .alias(FeatureCol.FACILITY_ROLE_SHIFT_HOURS_MEDIAN),
+        pl.col(PayrollCol.TOTAL_GROSS_PAY)
+        .shift(1)
+        .median()
+        .over([PayrollCol.ROLE, FeatureCol.TENURE_BUCKET])
+        .alias(FeatureCol.CROSS_FACILITY_ROLE_SHIFT_GROSS_MEDIAN),
+        pl.col(FeatureCol.PREMIUM_PAY_SHARE)
+        .median()
+        .over([PayrollCol.FACILITY_ID, PayrollCol.ROLE])
+        .alias(FeatureCol.FACILITY_PREMIUM_SHARE_MEDIAN),
+    )
+    base = base.with_columns(
+        (
+            (pl.col(PayrollCol.TOTAL_GROSS_PAY) - pl.col(FeatureCol.PEER_GROSS_MEDIAN))
+            / pl.col(FeatureCol.PEER_GROSS_MEDIAN).abs().clip(1, None)
+        ).alias(FeatureCol.PEER_GROSS_DEVIATION_RATIO),
+        (
+            (
+                pl.col(PayrollCol.TOTAL_OVERTIME_HOURS)
+                - pl.col(FeatureCol.PEER_OVERTIME_MEDIAN)
+            )
+            / (pl.col(FeatureCol.PEER_OVERTIME_MEDIAN) + 1)
+        ).alias(FeatureCol.PEER_OVERTIME_DEVIATION_RATIO),
+        (
+            (
+                pl.col(PayrollCol.TOTAL_PREMIUM_PAY)
+                / pl.col(PayrollCol.TOTAL_GROSS_PAY).clip(1, None)
+            )
+            > (pl.col(FeatureCol.FACILITY_PREMIUM_SHARE_MEDIAN).fill_null(0) + 0.15)
+        )
+        .cast(pl.Int64)
+        .alias(FeatureCol.PREMIUM_ELIGIBILITY_MISMATCH),
+        (
+            pl.struct(
+                [
+                    PayrollCol.EMPLOYEE_ID,
+                    PayrollCol.FACILITY_ID,
+                    PayrollCol.PAY_PERIOD_INDEX,
+                    PayrollCol.TOTAL_PREMIUM_PAY,
+                ],
+            ).is_duplicated()
+            & (pl.col(PayrollCol.TOTAL_PREMIUM_PAY) > 0)
+        )
+        .cast(pl.Int64)
+        .alias(FeatureCol.DUPLICATE_PREMIUM_SIGNATURE),
+        (pl.col(PayrollCol.TOTAL_OVERTIME_HOURS) > 24)
+        .cast(pl.Int64)
+        .alias(FeatureCol.REST_GAP_RISK),
+    )
+    rows = base.sort(PayrollCol.PAY_PERIOD_INDEX).to_dicts()
+    robust_rows = []
+    prior_values: list[float] = []
+    for period in sorted({row[PayrollCol.PAY_PERIOD_INDEX] for row in rows}):
+        period_rows = [
+            row for row in rows if row[PayrollCol.PAY_PERIOD_INDEX] == period
+        ]
+        values = prior_values or [
+            float(row[PayrollCol.TOTAL_GROSS_PAY]) for row in period_rows
+        ]
+        med = _median(values) or 1.0
+        q1 = _quantile(values, 0.25)
+        q3 = _quantile(values, 0.75)
+        mad = _median([abs(value - med) for value in values]) or 1.0
+        iqr = (q3 - q1) or 1.0
+        sorted_values = sorted(values)
+        for row in period_rows:
+            gross = float(row[PayrollCol.TOTAL_GROSS_PAY])
+            robust_rows.append(
+                {
+                    PayrollCol.EMPLOYEE_PAY_CYCLE_ID: row[
+                        PayrollCol.EMPLOYEE_PAY_CYCLE_ID
+                    ],
+                    FeatureCol.GROSS_PAY_ROBUST_Z: abs(gross - med) / (1.4826 * mad),
+                    FeatureCol.GROSS_PAY_MAD_SCORE: abs(gross - med) / mad,
+                    FeatureCol.GROSS_PAY_IQR_OUTLIER: int(
+                        gross < q1 - 1.5 * iqr or gross > q3 + 1.5 * iqr,
+                    ),
+                    FeatureCol.GROSS_PAY_PERCENTILE: _percentile(gross, sorted_values),
+                    FeatureCol.GROSS_PAY_DEVIATION_RATIO: (gross - med) / max(med, 1),
+                    FeatureCol.FACILITY_GROSS_ROBUST_Z: abs(gross - med)
+                    / (1.4826 * mad),
+                },
+            )
+        prior_values.extend(
+            float(row[PayrollCol.TOTAL_GROSS_PAY]) for row in period_rows
+        )
+    return base.join(
+        pl.DataFrame(robust_rows, infer_schema_length=None),
+        on=PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+        how="left",
+    ).fill_nan(None)
+
+
 def _premium_mismatch_expr() -> pl.Expr:
     return (
         (pl.col(PayrollCol.PREMIUM_PAY) > 0)

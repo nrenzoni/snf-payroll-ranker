@@ -17,8 +17,39 @@ from payroll_anomaly_ranking.columns import (
     ScoreCol,
 )
 from payroll_anomaly_ranking.config import PayrollConfig, SNFPayPolicyConfig
+from payroll_anomaly_ranking.features import build_employee_cycle_features
 
 FEATURE_COLUMNS = MODEL_FEATURE_COLUMNS
+EMPLOYEE_CYCLE_FEATURE_COLUMNS = (
+    PayrollCol.TOTAL_GROSS_PAY,
+    PayrollCol.TOTAL_NET_PAY,
+    PayrollCol.TOTAL_REGULAR_HOURS,
+    PayrollCol.TOTAL_OVERTIME_HOURS,
+    PayrollCol.TOTAL_SCHEDULED_HOURS,
+    PayrollCol.TOTAL_WORKED_HOURS,
+    PayrollCol.TOTAL_PAID_HOURS,
+    PayrollCol.TOTAL_PREMIUM_PAY,
+    PayrollCol.TOTAL_EXPECTED_GROSS_PAY,
+    PayrollCol.SHIFT_COUNT,
+    PayrollCol.ANOMALOUS_SHIFT_COUNT,
+    FeatureCol.GROSS_PAY_PCT_CHANGE,
+    FeatureCol.DEDUCTION_RATIO,
+    FeatureCol.DEDUCTION_RATIO_ROLLING_MEDIAN,
+    FeatureCol.NET_TO_GROSS_RATIO,
+    FeatureCol.PEER_GROSS_DEVIATION_RATIO,
+    FeatureCol.PEER_OVERTIME_DEVIATION_RATIO,
+    FeatureCol.OVERTIME_PER_SCHEDULED_HOUR,
+    FeatureCol.WORKED_TO_SCHEDULED_RATIO,
+    FeatureCol.PAID_TO_SCHEDULED_RATIO,
+    FeatureCol.PREMIUM_PAY_SHARE,
+    FeatureCol.GROSS_TO_EXPECTED_SHIFT_PAY,
+    FeatureCol.PAID_MINUS_SCHEDULED_HOURS,
+    FeatureCol.FACILITY_GROSS_ROBUST_Z,
+    FeatureCol.PREMIUM_ELIGIBILITY_MISMATCH,
+    FeatureCol.REST_GAP_RISK,
+    FeatureCol.GROSS_PAY_ROBUST_Z,
+    FeatureCol.GROSS_PAY_MAD_SCORE,
+)
 
 
 @dataclass(frozen=True)
@@ -57,6 +88,13 @@ class ExpectedGrossPayBaseline:
     p50: float
     p90: float
     width: float
+
+
+@dataclass(frozen=True)
+class EmployeeCycleScoringResults:
+    scored: pl.DataFrame
+    score_columns: tuple[ScoreCol, ...]
+    feature_columns: tuple[str, ...]
 
 
 def temporal_split(
@@ -317,6 +355,89 @@ def score_payroll(
     return add_uncertainty_scores(scored, config)
 
 
+def score_employee_pay_cycles(
+    payroll: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+) -> EmployeeCycleScoringResults:
+    featured = build_employee_cycle_features(payroll)
+    if PayrollCol.RECORD_ID not in featured.columns:
+        featured = featured.with_row_index(name=PayrollCol.RECORD_ID)
+    ml_raw = _employee_cycle_ml_scores(featured, config)
+    classification = _minmax(
+        ml_raw * 0.55
+        + featured.get_column(FeatureCol.GROSS_PAY_ROBUST_Z).fill_null(0).to_numpy() / 8
+        + featured.get_column(FeatureCol.PEER_GROSS_DEVIATION_RATIO)
+        .fill_null(0)
+        .abs()
+        .to_numpy()
+        / 2,
+    )
+    regression = _minmax(
+        featured.get_column(PayrollCol.ANOMALY_DOLLARS).fill_null(0).to_numpy()
+        + featured.get_column(PayrollCol.TOTAL_OVERTIME_HOURS).fill_null(0).to_numpy()
+        * featured.get_column(PayrollCol.BASE_PAY_RATE).fill_null(0).to_numpy()
+        * 0.35
+        + featured.get_column(FeatureCol.PAID_MINUS_SCHEDULED_HOURS)
+        .fill_null(0)
+        .clip(lower_bound=0)
+        .to_numpy()
+        * featured.get_column(PayrollCol.BASE_PAY_RATE).fill_null(0).to_numpy(),
+    )
+    expected_value = _minmax(
+        np.maximum(
+            featured.get_column(PayrollCol.TOTAL_GROSS_PAY).fill_null(0).to_numpy()
+            - featured.get_column(PayrollCol.TOTAL_EXPECTED_GROSS_PAY)
+            .fill_null(0)
+            .to_numpy(),
+            0.0,
+        )
+        + featured.get_column(PayrollCol.TOTAL_PREMIUM_PAY).fill_null(0).to_numpy()
+        + featured.get_column(PayrollCol.TOTAL_OVERTIME_HOURS).fill_null(0).to_numpy()
+        * featured.get_column(PayrollCol.BASE_PAY_RATE).fill_null(0).to_numpy()
+        * 0.5,
+    )
+    ranking = _minmax(
+        classification * 0.35
+        + regression * 0.25
+        + expected_value * 0.25
+        + featured.get_column(FeatureCol.PEER_OVERTIME_DEVIATION_RATIO)
+        .fill_null(0)
+        .abs()
+        .to_numpy()
+        / 6
+        + featured.get_column(FeatureCol.PREMIUM_ELIGIBILITY_MISMATCH)
+        .fill_null(0)
+        .to_numpy()
+        * 0.15,
+    )
+    scored = featured.with_columns(
+        pl.Series(ScoreCol.ML_SCORE, ml_raw),
+        pl.Series(ScoreCol.CLASSIFICATION_SCORE, classification),
+        pl.Series(ScoreCol.REGRESSION_SCORE, regression),
+        pl.Series(ScoreCol.EXPECTED_VALUE_SCORE, expected_value),
+        pl.Series(ScoreCol.RANKING_SCORE, ranking),
+        pl.Series(ScoreCol.FINAL_ANOMALY_SCORE, ranking),
+        pl.Series(ScoreCol.FINAL_APPROVAL_EXCEPTION_SCORE, ranking),
+        pl.Series(ScoreCol.ESTIMATED_EXPOSURE, expected_value),
+    ).with_columns(
+        pl.col(ScoreCol.FINAL_ANOMALY_SCORE)
+        .rank("ordinal", descending=True)
+        .over([PayrollCol.PAY_PERIOD_INDEX, PayrollCol.FACILITY_ID])
+        .alias(ScoreCol.PAY_PERIOD_RANK),
+    )
+    return EmployeeCycleScoringResults(
+        scored=scored,
+        score_columns=(
+            ScoreCol.CLASSIFICATION_SCORE,
+            ScoreCol.REGRESSION_SCORE,
+            ScoreCol.EXPECTED_VALUE_SCORE,
+            ScoreCol.RANKING_SCORE,
+            ScoreCol.FINAL_ANOMALY_SCORE,
+        ),
+        feature_columns=tuple(str(column) for column in EMPLOYEE_CYCLE_FEATURE_COLUMNS),
+    )
+
+
 def _facility_variance_ratio_expr() -> pl.Expr:
     facility_baseline = pl.coalesce(
         pl.col(FeatureCol.FACILITY_ROLE_SHIFT_GROSS_MEDIAN),
@@ -479,12 +600,40 @@ def _feature_matrix(frame: pl.DataFrame) -> np.ndarray:
     ).to_numpy()
 
 
+def _employee_cycle_feature_matrix(frame: pl.DataFrame) -> np.ndarray:
+    return frame.select(
+        [
+            pl.col(column).cast(pl.Float64).fill_null(0)
+            for column in EMPLOYEE_CYCLE_FEATURE_COLUMNS
+        ],
+    ).to_numpy()
+
+
 def _minmax(values: np.ndarray) -> np.ndarray:
     minimum = values.min()
     maximum = values.max()
     if maximum == minimum:
         return np.zeros_like(values)
     return (values - minimum) / (maximum - minimum)
+
+
+def _employee_cycle_ml_scores(
+    payroll: pl.DataFrame,
+    config: PayrollConfig,
+) -> np.ndarray:
+    splits = temporal_split(payroll)
+    train = _employee_cycle_feature_matrix(splits.train)
+    all_features = _employee_cycle_feature_matrix(payroll)
+    if len(train) == 0:
+        train = all_features
+    model = IsolationForest(
+        n_estimators=100,
+        contamination=0.03,
+        random_state=config.seed,
+    )
+    model.fit(train)
+    raw = -model.decision_function(all_features)
+    return _minmax(raw)
 
 
 def _rows_by_period(

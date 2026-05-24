@@ -45,8 +45,15 @@ from payroll_anomaly_ranking.explainability import (
     build_evaluation_review_queue,
     build_review_queue,
 )
-from payroll_anomaly_ranking.features import build_features
-from payroll_anomaly_ranking.models import _feature_matrix, score_payroll
+from payroll_anomaly_ranking.features import (
+    build_employee_cycle_features,
+    build_features,
+)
+from payroll_anomaly_ranking.models import (
+    _feature_matrix,
+    score_employee_pay_cycles,
+    score_payroll,
+)
 from payroll_anomaly_ranking.pipeline import (
     PipelineArtifactNotGeneratedError,
     PipelineIncludeConfig,
@@ -346,6 +353,83 @@ def test_employee_pay_cycle_labels_capture_only_anomalous_cycles() -> None:
             how="inner",
         ).height
         == generated.labels.height
+    )
+
+
+def test_employee_cycle_features_use_only_prior_period_history() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    payroll = generate_employee_pay_cycles(config).payroll
+    featured = build_employee_cycle_features(payroll)
+
+    sample = (
+        featured.filter(pl.col(FeatureCol.PRIOR_EMPLOYEE_PAY_PERIOD_COUNT) >= 1)
+        .sort([PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX])
+        .row(0, named=True)
+    )
+    prior = payroll.filter(
+        (pl.col(PayrollCol.EMPLOYEE_ID) == sample[PayrollCol.EMPLOYEE_ID])
+        & (pl.col(PayrollCol.PAY_PERIOD_INDEX) < sample[PayrollCol.PAY_PERIOD_INDEX]),
+    )
+
+    assert (
+        sample[FeatureCol.LAG_GROSS_PAY]
+        == prior.sort(PayrollCol.PAY_PERIOD_INDEX).row(
+            -1,
+            named=True,
+        )[PayrollCol.TOTAL_GROSS_PAY]
+    )
+    assert sample[FeatureCol.PRIOR_EMPLOYEE_PAY_PERIOD_COUNT] == prior.height
+
+
+def test_employee_cycle_scoring_returns_formulation_columns() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    payroll = generate_employee_pay_cycles(config).payroll
+
+    results = score_employee_pay_cycles(payroll, config)
+
+    assert {
+        ScoreCol.CLASSIFICATION_SCORE,
+        ScoreCol.REGRESSION_SCORE,
+        ScoreCol.EXPECTED_VALUE_SCORE,
+        ScoreCol.RANKING_SCORE,
+        ScoreCol.FINAL_ANOMALY_SCORE,
+        ScoreCol.PAY_PERIOD_RANK,
+    } <= set(results.scored.columns)
+    assert results.score_columns == (
+        ScoreCol.CLASSIFICATION_SCORE,
+        ScoreCol.REGRESSION_SCORE,
+        ScoreCol.EXPECTED_VALUE_SCORE,
+        ScoreCol.RANKING_SCORE,
+        ScoreCol.FINAL_ANOMALY_SCORE,
+    )
+    assert len(results.feature_columns) > 0
+
+
+def test_employee_cycle_scoring_is_reproducible() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    payroll = generate_employee_pay_cycles(config).payroll
+
+    scored_a = score_employee_pay_cycles(payroll, config).scored
+    scored_b = score_employee_pay_cycles(payroll, config).scored
+
+    assert scored_a.select(
+        PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+        ScoreCol.CLASSIFICATION_SCORE,
+        ScoreCol.REGRESSION_SCORE,
+        ScoreCol.EXPECTED_VALUE_SCORE,
+        ScoreCol.RANKING_SCORE,
+        ScoreCol.FINAL_ANOMALY_SCORE,
+        ScoreCol.PAY_PERIOD_RANK,
+    ).equals(
+        scored_b.select(
+            PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+            ScoreCol.CLASSIFICATION_SCORE,
+            ScoreCol.REGRESSION_SCORE,
+            ScoreCol.EXPECTED_VALUE_SCORE,
+            ScoreCol.RANKING_SCORE,
+            ScoreCol.FINAL_ANOMALY_SCORE,
+            ScoreCol.PAY_PERIOD_RANK,
+        ),
     )
 
 

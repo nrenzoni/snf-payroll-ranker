@@ -13,7 +13,7 @@
 ## 3. Employee-Pay-Cycle Runtime Follow-Up
 
 - [x] 3.1 Define active employee-pay-cycle synthetic data contracts and result objects
-- [ ] 3.2 Rebuild active scoring interfaces around employee-pay-cycle formulation comparison rather than a single hybrid score
+- [x] 3.2 Rebuild active scoring interfaces around employee-pay-cycle formulation comparison rather than a single hybrid score
 - [ ] 3.3 Rebuild active evaluation and queue contracts around employee-pay-cycle grouped ranking and production-candidacy reporting
 
 ## 4. Verification
