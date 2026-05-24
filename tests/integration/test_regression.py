@@ -733,15 +733,25 @@ def test_business_proof_diagnostics_emit_plot_ready_tables() -> None:
 
 
 def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
-    notebook_06 = Path("notebooks/06_internal_statistical_diagnostics.py").read_text()
-    notebook_07 = Path("notebooks/07_simulation_and_stress_testing.py").read_text()
-    notebook_08 = Path("notebooks/08_snf_payroll_approval_case_studies.py").read_text()
+    notebook_06 = Path(
+        "notebooks/legacy/shift_level/06_internal_statistical_diagnostics.py",
+    ).read_text()
+    notebook_07 = Path(
+        "notebooks/legacy/shift_level/07_simulation_and_stress_testing.py",
+    ).read_text()
+    notebook_08 = Path(
+        "notebooks/legacy/shift_level/08_snf_payroll_approval_case_studies.py",
+    ).read_text()
+    display_helper = Path("notebooks/common/display.py").read_text()
     execution_helper = Path("notebooks/common/execution.py").read_text()
     readme = Path("README.md").read_text()
     agent_instructions = Path("AGENTS.md").read_text()
 
-    assert "LetsPlot.setup_html()" in notebook_06
-    assert "LetsPlot.setup_html()" in notebook_07
+    assert "from common.display import setup_notebook_html" in notebook_06
+    assert "from common.display import setup_notebook_html" in notebook_07
+    assert "setup_notebook_html()" in notebook_06
+    assert "setup_notebook_html()" in notebook_07
+    assert "LetsPlot.setup_html()" in display_helper
     assert "from common.execution import notebook_fast_mode" in notebook_06
     assert "from common.execution import notebook_fast_mode" in notebook_07
     assert "from common.execution import notebook_fast_mode" in notebook_08
@@ -771,12 +781,12 @@ def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
     assert "QUEUE_THRESHOLD_GRID" in notebook_07
     assert 'os.getenv("NOTEBOOK_FAST") == "1"' in execution_helper
     assert "reduced diagnostic workload" in execution_helper
-    assert "scored-only pipeline artifacts" in readme
+    assert "Fast-path notebook validation" in readme
     assert "minimal pipeline artifacts" in agent_instructions
     assert (
-        "--run-path notebooks --output /tmp/06_internal_statistical_diagnostics.fast.ipynb"
-        in readme
+        "notebooks/legacy/shift_level/08_snf_payroll_approval_case_studies.py" in readme
     )
+    assert "--run-path notebooks --output /tmp/notebook.fast.ipynb" in readme
     assert (
         "--to ipynb --execute --run-path notebooks --output /tmp/notebook-name.fast.ipynb"
         in agent_instructions

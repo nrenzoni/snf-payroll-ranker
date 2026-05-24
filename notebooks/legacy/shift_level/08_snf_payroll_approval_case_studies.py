@@ -816,4 +816,4 @@ print(
 #
 # For facility administrators, the persuasive result is not simply that ML produces a higher score. The persuasive result is that hybrid ranking repeatedly captures more review-worthy payroll risk per scarce review than manual thresholds, while still staying explainable in payroll language and grounded in schedule, timeclock, premium, peer, and exposure context.
 #
-# The next notebook, `09_model_ablation_and_ml_value.py`, remains the technical support notebook. It goes deeper into ablation, uncertainty, and diagnostic detail once the business case is already established.
+# The next legacy notebook, `09_model_ablation_and_ml_value.py`, remains the technical support notebook. It goes deeper into ablation, uncertainty, and diagnostic detail once the business case is already established.

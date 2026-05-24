@@ -129,10 +129,10 @@ Rendered notebooks and case-study walkthroughs are hosted at:
 
 **https://nrenzoni.github.io/payroll-anomaly-ranking/**
 
-Legacy notebooks retained for reference:
+Legacy notebooks retained for reference under `notebooks/legacy/shift_level/`:
 
-- `notebooks/08_snf_payroll_approval_case_studies.py`: deprecated business-facing shift-level SNF proof notebook.
-- `notebooks/09_model_ablation_and_ml_value.py`: deprecated shift-level hybrid ablation and diagnostic notebook.
+- `notebooks/legacy/shift_level/08_snf_payroll_approval_case_studies.py`: deprecated business-facing shift-level SNF proof notebook.
+- `notebooks/legacy/shift_level/09_model_ablation_and_ml_value.py`: deprecated shift-level hybrid ablation and diagnostic notebook.
 
 Future active notebooks should describe and validate the employee-pay-cycle runtime rather than extend the deprecated shift-level narrative.
 
@@ -141,7 +141,7 @@ Notebook-only plotting code lives in Jupytext notebook sources and shared plotti
 Fast-path notebook validation (reduced workload, `/tmp` output, no paired `.ipynb` churn):
 
 ```bash
-NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/notebook.fast.ipynb notebooks/08_snf_payroll_approval_case_studies.py
+NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/notebook.fast.ipynb notebooks/legacy/shift_level/08_snf_payroll_approval_case_studies.py
 ```
 
 ---
@@ -157,10 +157,10 @@ payroll-anomaly-ranking/
 │   ├── evaluation.py               # Active validation & ranking metrics (in transition)
 │   ├── pipeline.py                 # Active orchestration & artifact management
 │   └── ...
-├── notebooks/                      # Jupytext-paired notebooks; older SNF notebooks are legacy reference
-│   ├── 08_snf_payroll_approval_case_studies.py
-│   ├── 09_model_ablation_and_ml_value.py
-│   └── common/plots.py             # Shared plotting adapters
+├── notebooks/                      # Jupytext notebooks and notebook-owned helpers
+│   ├── common/plots.py             # Shared plotting adapters
+│   ├── README.md                   # Notebook status and layout guide
+│   └── legacy/shift_level/         # Deprecated shift-level notebook reference set
 ├── tests/
 │   ├── smoke/                      # Fast sanity checks
 │   └── integration/                # Regression tests
