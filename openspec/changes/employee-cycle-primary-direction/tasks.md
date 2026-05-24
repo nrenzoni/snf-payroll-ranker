@@ -1,8 +1,8 @@
 ## 1. Direction Reset
 
-- [ ] 1.1 Update active runtime-facing docs to make employee-pay-cycle the canonical modeling grain
-- [ ] 1.2 Add an ADR or decision-log entry that explicitly supersedes the older shift-level primary-grain decision
-- [ ] 1.3 Update research log and architecture notes to describe Phase 1 as production-oriented research and demote the hybrid shift-level path to legacy reference only
+- [x] 1.1 Update active runtime-facing docs to make employee-pay-cycle the canonical modeling grain
+- [x] 1.2 Add an ADR or decision-log entry that explicitly supersedes the older shift-level primary-grain decision
+- [x] 1.3 Update research log and architecture notes to describe Phase 1 as production-oriented research and demote the hybrid shift-level path to legacy reference only
 
 ## 2. Legacy Boundary
 
