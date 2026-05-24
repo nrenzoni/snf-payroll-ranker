@@ -4,6 +4,38 @@ This log records significant technical decisions made during the design and evol
 
 ---
 
+## ADR-006: Employee-Pay-Cycle Supersedes Shift-Level As The Active Grain
+
+**Context**
+The repository was previously framed around shift-level SNF approval scoring. That framing is no longer the intended product direction. The active project needs a single canonical modeling object for runtime-library work, research evaluation, and later production promotion.
+
+**Decision**
+Use employee-pay-cycle as the active modeling grain. Lower-level shift, schedule, and timeclock data may remain as optional supporting context, but they no longer define the active runtime contract.
+
+**Consequences**
+- Positive: Aligns the active runtime with the intended payroll ranking object and avoids a split identity between shift-level and employee-cycle work.
+- Positive: Simplifies future model, metric, and queue contracts by giving the project one canonical scoring grain.
+- Negative: Existing shift-level code, notebooks, and specs become deprecated historical reference and must be isolated or ported carefully.
+- Negative: Some lower-level signal engineering will need to be reintroduced as supporting context rather than as the primary row contract.
+
+---
+
+## ADR-007: Production-Oriented Research Is The Active Phase-1 Contract
+
+**Context**
+The earlier repository story centered a hybrid SNF business-proof workflow. The intended end state is broader: build reusable library code, validate competing formulations, and only promote methods that are strong enough for later production use.
+
+**Decision**
+Describe the active project as a production-oriented payroll ranking library whose Phase 1 is comparative research and validation. Deprecated shift-level hybrid workflow code remains only as historical reference and is not part of the active runtime, research, or production path.
+
+**Consequences**
+- Positive: The project can evaluate formulations rigorously without claiming that a legacy hybrid workflow is already the chosen production architecture.
+- Positive: Documentation, specs, and future runtime changes can clearly separate active and deprecated paths.
+- Negative: Existing business-facing notebook narratives must be relabeled or isolated as legacy material.
+- Negative: Contributors need to avoid reintroducing dependencies on deprecated shift-level code during migration.
+
+---
+
 ## ADR-001: Polars as the Primary DataFrame Engine
 
 **Context**
@@ -21,6 +53,9 @@ Use Polars for all tabular operations. pandas is not used anywhere in the runtim
 ---
 
 ## ADR-002: Shift-Level Modeling Grain
+
+**Status**
+Superseded by ADR-006.
 
 **Context**
 Payroll anomaly detection can be framed at the employee-pay-period aggregate (one row per employee per pay period) or at the shift level (one row per shift). Aggregate views are simpler but hide overtime patterns, double-shift sequences, rest gaps, and shift-specific premium mismatches.
@@ -54,6 +89,9 @@ Generate all data synthetically from code. No real employee identifiers, residen
 ---
 
 ## ADR-004: Hybrid Scoring Over a Single End-to-End Model
+
+**Status**
+Superseded by ADR-007 for the active project direction. Retained as historical context for the deprecated shift-level workflow.
 
 **Context**
 A common approach in anomaly detection is to train a single unsupervised model and use its output score directly. For SNF payroll, this risks missing deterministic compliance issues or misinterpreting legitimate high-dollar shifts as anomalous.

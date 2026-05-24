@@ -5,7 +5,7 @@
 [![Ruff](https://img.shields.io/badge/ruff-formatted-brightgreen.svg)](https://docs.astral.sh/ruff/)
 [![Pyrefly](https://img.shields.io/badge/pyrefly-checked-blueviolet.svg)](https://pyrefly.org/)
 
-A production-oriented, privacy-safe ML pipeline that prioritizes shift-level payroll exceptions for skilled nursing facility (SNF) administrators. Combines deterministic compliance rules, robust statistical outlier detection, unsupervised multivariate anomaly scoring, and estimated-exposure signals into a hybrid approval-exception rank. Built with temporal validation, leakage-safe feature engineering, and full uncertainty quantification.
+A production-oriented, privacy-safe payroll ranking library in transition to an employee-pay-cycle primary data model. Phase 1 is production-oriented research: compare formulations, validate failure modes, and promote only the approaches that are strong enough to become operational library paths. Earlier shift-level SNF hybrid workflow code remains in the repository as deprecated historical reference only.
 
 ![Pipeline Architecture](docs/assets/pipeline_architecture.svg)
 
@@ -33,11 +33,16 @@ A production-oriented, privacy-safe ML pipeline that prioritizes shift-level pay
 
 ## Key Points
 
-- **Leakage-safe temporal validation**: pay-period splits, no random row sampling; historical features exclude current/future periods.
-- **Facility-normalized, transferable features**: stationary ratios bootstrappable across new SNF clients with different pay scales.
-- **Uncertainty quantification**: every record carries ensemble disagreement, bootstrap intervals, expected-pay bands, peer/history sample-size uncertainty, data-quality flags, and OOD detection — risk and uncertainty reported separately.
-- **Explainable hybrid ranking**: weighted combination of rule, statistical, ML, peer, history, schedule/timeclock, premium eligibility, and exposure components.
-- **Administrator-safe outputs**: recommended actions, sources to check, SNF context, review-safe explanations — no confirmed-misconduct labeling.
+- **Active direction**: employee-pay-cycle is the canonical modeling grain for future runtime, evaluation, and production-facing work.
+- **Phase 1 goal**: use comparative research to decide which formulations and library components are promotable into production use.
+- **Leakage-safe temporal validation**: pay-period splits, no random row sampling in active evaluation, and historical features that exclude current/future periods.
+- **Facility-normalized, transferable features**: stationary ratios and reference features intended to generalize across facilities and later production use.
+- **Legacy reference retained**: earlier shift-level SNF hybrid workflow code and notebooks remain available for traceability, but they are deprecated and not part of the active runtime or research path.
+
+## Project Status
+
+- **Active program**: build an employee-pay-cycle payroll ranking library whose first phase compares formulations, labels, and validation regimes before production promotion.
+- **Legacy material**: the older shift-level SNF hybrid workflow remains in the repository only as deprecated historical reference. It is not the active modeling contract, not the active research program, and not the intended production path.
 
 ---
 
@@ -72,16 +77,17 @@ uv sync --extra notebooks
 
 ## What The Workflow Covers
 
-- Shift-level SNF payroll generation with facility, unit, role, shift, schedule, timeclock, pay-code, premium, and lifecycle context.
-- Synthetic exception scenarios: overtime/double-shift staffing pressure, premium pay / shift differential mismatch.
-- Future scenario catalog: agency/float labor, census/acuity, credential/license mismatch, PBJ category, meal premiums, lifecycle, retro/rate corrections, union policy, new-client bootstrap, payroll close adjustments.
-- Leakage-safe features: employee history, role/shift peer, facility-normalized ratios, schedule/timeclock mismatch, premium eligibility, fatigue/rest-gap, exposure estimates.
-- Deterministic rules, robust statistics, unsupervised outlier detection, and hybrid ranking with manual threshold baselines.
-- Administrator-safe pre-approval queues with recommended actions, sources to check, risk categories, and review-safe explanations.
+- Synthetic payroll generation and evaluation infrastructure for privacy-safe payroll ranking research.
+- Transition from the deprecated shift-level SNF workflow to an employee-pay-cycle primary runtime contract.
+- Production-oriented research work on feature engineering, grouped ranking evaluation, uncertainty, and formulation comparison before operational promotion.
+- Lower-level schedule, timeclock, or shift context retained only where it materially supports the employee-pay-cycle library design.
+- Legacy SNF hybrid workflow artifacts preserved for reference, not as active deliverables or active runtime requirements.
 
 ---
 
-## Sample Outputs
+## Legacy Sample Outputs
+
+The examples below come from the deprecated shift-level SNF hybrid workflow. They remain useful for historical reference, but they do not define the active employee-pay-cycle contract.
 
 ### Ranked Approval Queue
 
@@ -108,9 +114,9 @@ uv sync --extra notebooks
 
 ---
 
-## SNF Case Studies
+## Legacy SNF Case Studies
 
-The initial SNF value story focuses on two case studies that are most useful to weekly facility payroll approval teams:
+The original repository story focused on two SNF case studies. Those materials remain available as deprecated historical reference while the active project direction moves to employee-pay-cycle library work:
 
 - **Overtime, double shifts, and staffing pressure:** shows how automated ranking prioritizes unusual overtime, double-shift, short rest-gap, and paid-vs-scheduled exceptions better than static overtime or total-hours thresholds.
 - **Premium pay and shift differential mismatch:** shows how automated ranking detects unsupported shift differentials, weekend premium mismatches, duplicate premiums, or premium-without-support records that gross-pay or premium-dollar thresholds miss or overflag.
@@ -123,10 +129,12 @@ Rendered notebooks and case-study walkthroughs are hosted at:
 
 **https://nrenzoni.github.io/payroll-anomaly-ranking/**
 
-Active notebooks:
+Legacy notebooks retained for reference:
 
-- `notebooks/08_snf_payroll_approval_case_studies.py`: business-facing proof showing how hybrid ranking improves overtime and premium review vs. manual thresholds.
-- `notebooks/09_model_ablation_and_ml_value.py`: ablation, incremental ML value, temporal validation evidence, uncertainty, and robustness diagnostics.
+- `notebooks/08_snf_payroll_approval_case_studies.py`: deprecated business-facing shift-level SNF proof notebook.
+- `notebooks/09_model_ablation_and_ml_value.py`: deprecated shift-level hybrid ablation and diagnostic notebook.
+
+Future active notebooks should describe and validate the employee-pay-cycle runtime rather than extend the deprecated shift-level narrative.
 
 Notebook-only plotting code lives in Jupytext notebook sources and shared plotting adapters under `notebooks/common/`. The runtime package remains free of Jupyter and Lets-Plot imports.
 
@@ -143,15 +151,13 @@ NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --outp
 ```
 payroll-anomaly-ranking/
 ├── src/payroll_anomaly_ranking/    # Runtime package (no Jupyter deps)
-│   ├── data.py                     # Synthetic SNF payroll generation
-│   ├── features.py                 # Leakage-safe feature engineering
-│   ├── models.py                   # Scoring + uncertainty quantification
-│   ├── rules.py                    # Deterministic SNF rule flags
-│   ├── evaluation.py               # Temporal validation & metrics
-│   ├── explainability.py           # Review queues & summaries
-│   ├── pipeline.py                 # Orchestration & artifact management
+│   ├── data.py                     # Active synthetic payroll generation (in transition)
+│   ├── features.py                 # Active leakage-safe feature engineering (in transition)
+│   ├── models.py                   # Active scoring interfaces (in transition)
+│   ├── evaluation.py               # Active validation & ranking metrics (in transition)
+│   ├── pipeline.py                 # Active orchestration & artifact management
 │   └── ...
-├── notebooks/                      # Jupytext-paired narrative notebooks
+├── notebooks/                      # Jupytext-paired notebooks; older SNF notebooks are legacy reference
 │   ├── 08_snf_payroll_approval_case_studies.py
 │   ├── 09_model_ablation_and_ml_value.py
 │   └── common/plots.py             # Shared plotting adapters
@@ -172,8 +178,8 @@ payroll-anomaly-ranking/
 | Layer | Tools |
 |---|---|
 | Data & Features | Polars, NumPy |
-| ML & Stats | scikit-learn (unsupervised outlier detection), robust z-scores, MAD, IQR |
-| Validation | Temporal splits, rolling-origin evaluation, backtesting |
+| ML & Stats | scikit-learn, robust z-scores, MAD, IQR, active formulation research |
+| Validation | Temporal splits, grouped ranking evaluation, rolling-origin evaluation |
 | Uncertainty | Bootstrap intervals, conformal p-values, OOD detection, ensemble disagreement |
 | Notebooks | Jupytext (git-friendly), Lets-Plot |
 | Quality | Ruff, Pyrefly, prek, pytest (smoke + integration) |
@@ -183,7 +189,7 @@ payroll-anomaly-ranking/
 
 ## Intended Production Flow
 
-A production implementation would ingest payroll, schedule, timeclock, HR lifecycle, facility reference, pay policy, and administrator feedback extracts into validation, feature engineering, scoring, pre-approval queue export, monitoring, and retraining workflows. This repository does not implement or claim live integrations.
+A production implementation is expected to promote validated employee-pay-cycle library components into payroll, facility, and feedback-driven workflows after the Phase 1 research gate. This repository does not implement or claim live integrations.
 
 Monitoring should track exception count per payroll cycle, approval queue yield, confirmed exception rate from feedback, estimated exposure flagged and confirmed, feature drift, score drift, alert concentration by facility/unit/role/shift, latency, data freshness, validation failures, and threshold-baseline drift.
 
@@ -229,15 +235,15 @@ The project is designed for agentic iteration. See [`AGENTS.md`](AGENTS.md) for 
 
 Non-trivial behavior changes follow a propose / apply / archive cycle tracked under `openspec/`. Design documents, spec artifacts, and archived changes are versioned alongside code. This ensures that feature additions, scoring changes, and evaluation criteria remain traceable and reviewable.
 
-See `ARCHITECTURE.md` for system context and component design, and `DECISIONS.md` for the rationale behind major technical choices such as Polars over pandas, shift-level grain, synthetic data, hybrid scoring, and Jupytext over raw `.ipynb`.
+See `ARCHITECTURE.md` for the active employee-pay-cycle architecture direction and legacy-status notes, and `DECISIONS.md` for the rationale behind major technical choices such as Polars over pandas, synthetic data, the employee-pay-cycle reset, and Jupytext over raw `.ipynb`.
 
 ---
 
 ## Limitations
 
-- Synthetic labels are useful for demonstration but simpler than real SNF payroll operations.
-- Unsupervised anomaly scores can prioritize legitimate staffing exceptions, high-pressure shifts, or approved premium pay that administrators should confirm rather than reject.
-- Hybrid weights and thresholds are configurable examples and should be calibrated with real review feedback before production use.
+- Synthetic labels and synthetic workflows remain useful for Phase 1 research but are simpler than real payroll operations.
+- The active employee-pay-cycle runtime direction is documented ahead of full runtime migration, so some current code and notebooks still reflect deprecated shift-level history.
+- Production promotion criteria, active formulation choices, and final application-layer queue design are not yet complete.
 - The MVP includes optional notebook reporting and does not include live dashboards, access control, alerting, scheduling, payroll vendor integrations, or case-management workflows.
 
 ---

@@ -1,7 +1,16 @@
 # Research Log
 
+## Employee-Pay-Cycle Active Direction
+
+- This section supersedes the earlier shift-level primary-grain assumption below.
+- Employee-pay-cycle is the active modeling grain for future runtime, evaluation, and production-promotion work.
+- Phase 1 is production-oriented research: compare formulations, validate failure modes, and only promote methods or library components that earn production candidacy.
+- Lower-level shift, schedule, and timeclock information may still be generated or engineered as supporting context, but they are no longer the canonical active row contract.
+- The older shift-level SNF hybrid workflow remains in the repository only as deprecated historical reference and should not define active runtime, active research, or active production claims.
+
 ## SNF Shift-Level Payroll Domain Assumptions
 
+- Deprecated historical assumptions retained for traceability only.
 - The synthetic world represents a multi-facility skilled nursing facility operator where weekly payroll approval is performed by administrator-facing teams rather than a dedicated forensic payroll analyst team.
 - Shift-level records are the modeling grain because overtime, double shifts, rest gaps, weekend/shift differentials, and schedule/timeclock mismatches require shift context that employee-pay-period aggregates hide.
 - Initial implemented scenarios focus on the two highest-value administrator approval workflows: overtime/double-shift staffing pressure and premium pay or shift differential mismatch.

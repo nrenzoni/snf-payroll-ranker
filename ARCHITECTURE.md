@@ -1,103 +1,100 @@
 # Architecture
 
-This document describes the high-level system architecture of the SNF Payroll Anomaly Ranking pipeline.
+This document describes the active high-level architecture direction for the payroll ranking library and records the status of older deprecated shift-level material.
 
 ## 1. System Context
 
-The system targets skilled nursing facility (SNF) weekly payroll approval workflows. The primary users are:
+The active system direction is a production-oriented payroll ranking library whose first phase uses research and validation to determine what is safe and valuable enough to promote into operational use. The primary users are:
 
-- **Facility administrators / business office managers** who review flagged shift-level records before payroll close.
-- **Regional operators** who need pay-period/facility summaries of exception concentration and estimated exposure.
-- **Data-science reviewers** who validate method performance, temporal stability, and uncertainty behavior.
+- **Data-science and ML engineering users** who need reusable employee-pay-cycle data, feature, model, and evaluation contracts.
+- **Operations and product stakeholders** who need evidence that promoted methods are robust enough for later payroll-review workflows.
+- **Future application-layer consumers** who may build review queues or operational experiences on top of the validated library.
 
-The output is not a fraud or misconduct label. It is a ranked pre-approval exception queue with recommended actions, sources to check, and review-safe explanations.
+The active output is not a fraud or misconduct label. It is a reusable employee-pay-cycle ranking and evaluation foundation that can later power review workflows after the research phase promotes production-candidate components.
 
 ## 2. Component Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Data Layer                                                          │
-│  ├── Synthetic payroll, schedule, timeclock, HR lifecycle records   │
-│  └── Validation rules, aggregation checks, schema guards           │
+│  ├── Synthetic employee-pay-cycle payroll generation                │
+│  └── Validation rules, aggregation checks, schema guards            │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Feature Engineering Layer                                           │
-│  ├── History features (lag, rolling median/std, tenure bucket)     │
-│  ├── Peer features (facility-role-shift, cross-facility, tenure)   │
-│  ├── Robust features (MAD z-score, IQR outlier, percentile)        │
-│  └── Premium, fatigue, schedule/timeclock mismatch features          │
+│  ├── Leakage-safe employee and facility history features            │
+│  ├── Facility-normalized and peer-relative features                 │
+│  ├── Robust distributional features                                 │
+│  └── Optional lower-level context features when operationally useful│
 ├─────────────────────────────────────────────────────────────────────┤
 │  Scoring Layer                                                       │
-│  ├── Deterministic rule flags & severity score                     │
-│  ├── Robust statistical scores (z, MAD, peer deviation)          │
-│  ├── Unsupervised outlier detection (Isolation Forest)             │
-│  ├── Estimated exposure & dollar-impact score                      │
-│  └── Configurable hybrid ranking combining all components            │
+│  ├── Classification interfaces                                      │
+│  ├── Regression interfaces                                          │
+│  ├── Expected-value scoring interfaces                              │
+│  └── Learning-to-rank interfaces                                    │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Uncertainty Layer                                                   │
-│  ├── Ensemble disagreement across score components                   │
-│  ├── Bootstrap score intervals                                       │
-│  ├── Expected gross-pay intervals                                    │
-│  ├── Peer-group & employee-history sample-size uncertainty           │
-│  ├── Data-quality & out-of-distribution detection                    │
-│  └── Composite uncertainty bucket (Low / Medium / High)            │
+│  ├── Calibration and reliability diagnostics                        │
+│  ├── Prediction interval and uncertainty diagnostics                │
+│  ├── Data-quality and out-of-distribution diagnostics               │
+│  └── Separate risk and uncertainty outputs                          │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Output Layer                                                        │
-│  ├── Administrator-safe approval queue                               │
-│  ├── Evaluation-labeled review queue (synthetic truth only)          │
-│  ├── Facility approval summary (pay-period / facility)               │
-│  └── Temporal evaluation metrics (backtest, rolling origin)        │
+│  ├── Grouped ranking metrics and validation artifacts               │
+│  ├── Production-candidacy reporting                                 │
+│  ├── Optional application-layer review queues built later           │
+│  └── Documentation of promoted vs deprecated paths                  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## 3. Data Model
 
-The modeling grain is **shift-level** rather than employee-pay-period aggregate. Shift context is required to detect overtime, double-shift, rest-gap, schedule/timeclock mismatch, and premium eligibility issues.
+The active modeling grain is **employee-pay-cycle**. Lower-level shift, schedule, and timeclock data may still be generated or engineered as supporting context, but they no longer define the active runtime contract.
 
 Key entities:
 
 | Entity | Key Fields | Purpose |
 |--------|-----------|---------|
-| **Payroll Record** | `record_id`, `employee_id`, `pay_period_index`, `gross_pay`, `net_pay`, `deductions` | Atomic line for scoring |
-| **Shift** | `shift_id`, `shift_date`, `shift_type`, `facility_id`, `unit`, `role`, `pay_code` | Operational context |
-| **Employee** | `employee_id`, `tenure_months`, `employment_status`, `license_type` | History & peer grouping |
+| **Employee-Pay-Cycle Record** | `record_id`, `employee_id`, `pay_period_index`, aggregated pay and hour fields | Canonical scoring and evaluation row |
+| **Supporting Shift Context** | lower-level shift, schedule, or timeclock fields where retained | Optional explanatory or feature context |
+| **Employee** | `employee_id`, tenure, employment context | History & peer grouping |
 | **Facility** | `facility_id` | Normalization baseline & approval summary grouping |
 | **Pay Period** | `pay_period_index` | Temporal split boundaries & leakage guard |
 
 ## 4. Scoring Component Design
 
-The final approval exception score is a **hybrid** rather than a single model output. This reflects the reality that SNF payroll review involves distinct risk types:
+The active scoring architecture is formulation-oriented rather than tied to one preselected hybrid score. Phase 1 research compares alternative employee-pay-cycle scoring formulations and promotes only methods or method combinations that earn production candidacy.
 
-| Component | Captures | Example Signal |
+| Active Formulation | Question It Answers | Example Output |
 |-----------|----------|--------------|
-| **Rule Score** | Deterministic compliance violations | Paid hours > scheduled hours, unsupported weekend premium, duplicate premium signature |
-| **Statistical Score** | Univariate distributional unusualness | Gross pay MAD z-score, peer gross deviation ratio |
-| **Peer Score** | Context-relative unusualness | Cross-facility role-shift median deviation |
-| **History Score** | Employee trajectory change | Gross pay % change vs. rolling median |
-| **ML Score** | Multivariate unusualness across feature space | Isolation Forest decision function |
-| **Dollar / Exposure Score** | Estimated financial impact | Excess over expected pay, premium mismatch dollars, overtime exposure |
-| **Schedule/Timeclock Score** | Operational mismatch | Missed punch, manual edit, rest-gap risk, paid-vs-scheduled variance |
-| **Premium Eligibility Score** | Policy-context mismatch | Premium pay without eligible shift type, duplicate premiums |
+| **Classification** | Is this employee-pay-cycle likely review-worthy? | risk probability |
+| **Regression** | What is the expected impact or severity? | predicted impact |
+| **Expected Value** | What is the expected loss if ignored? | probability × conditional impact |
+| **Learning to Rank** | Which employee-pay-cycle rows should be reviewed first within a queue? | group-relative priority score |
 
-Each component is computed independently and then combined via configurable weights. This makes the system inspectable and lets operators tune sensitivity by risk type.
+Deprecated shift-level hybrid scoring remains only as historical reference and does not define the active architecture.
 
 ## 5. Temporal Safety
 
 Leakage prevention is enforced at multiple layers:
 
-- **Historical features** exclude the current pay period and all future periods. Rolling medians, lags, and standard deviations use `shift(1)` and `rolling_*` over prior records only.
-- **Peer baselines** are built from prior pay periods only. The scored row is excluded from its own peer aggregate.
-- **Temporal splits** divide data by `pay_period_index` rather than random row sampling. Train / validation / test sets are strictly ordered in time.
-- **Rolling-origin evaluation** trains on expanding prior windows and scores on the next period, mimicking production retraining cadence.
-- **Label isolation**: `is_anomaly`, `anomaly_category`, and `anomaly_dollars` are never used as features or score inputs. They are retained only for evaluation and notebook diagnostics.
+- **Historical features** exclude the current payroll cycle and all future cycles.
+- **Peer baselines** are built from scoring-time-available references only.
+- **Temporal splits** remain the active default and random row sampling remains a debugging-only anti-pattern.
+- **Rolling-origin evaluation** stays aligned with later production retraining cadence.
+- **Label isolation** continues to separate evaluation truth from active features and operational outputs.
 
-## 6. Spec-Driven Development
+## 6. Legacy Reference Status
+
+Earlier shift-level SNF approval architecture, hybrid scoring logic, and business-proof notebooks remain in the repository only as deprecated historical reference. They are useful for recovering ideas or comparing previous assumptions, but they are not the active modeling grain, active runtime path, or active production plan.
+
+## 7. Spec-Driven Development
 
 Non-trivial behavior changes follow a propose / apply / archive cycle using an internal OpenSpec-like workflow. Design documents, spec artifacts, and archived changes live under `openspec/`. This ensures that feature additions, scoring changes, and evaluation criteria are traceable and versioned alongside code.
 
-## 7. Deployment Path
+## 8. Deployment Path
 
 *Deployment path: TBD.*
 
-A production implementation would ingest payroll, schedule, timeclock, HR lifecycle, facility reference, pay policy, and administrator feedback extracts through validation, feature engineering, scoring, pre-approval queue export, monitoring, and retraining workflows. This repository does not implement or claim live integrations.
+A production implementation would promote validated employee-pay-cycle library components into payroll, facility, feedback, monitoring, and retraining workflows after the Phase 1 research gate. This repository does not implement or claim live integrations.
 
 Monitoring should track exception count per payroll cycle, approval queue yield, confirmed exception rate from feedback, estimated exposure flagged and confirmed, feature drift, score drift, alert concentration by facility/unit/role/shift, latency, data freshness, validation failures, and threshold-baseline drift.
