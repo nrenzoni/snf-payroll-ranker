@@ -37,11 +37,13 @@ from payroll_anomaly_ranking.diagnostics import (
     top_subgroup_diagnostics,
 )
 from payroll_anomaly_ranking.evaluation import (
+    evaluate_employee_cycle_scores,
     evaluate_scores,
     leakage_checks,
     rolling_origin_evaluation,
 )
 from payroll_anomaly_ranking.explainability import (
+    build_employee_cycle_review_queue,
     build_evaluation_review_queue,
     build_review_queue,
 )
@@ -57,6 +59,7 @@ from payroll_anomaly_ranking.models import (
 from payroll_anomaly_ranking.pipeline import (
     PipelineArtifactNotGeneratedError,
     PipelineIncludeConfig,
+    run_employee_cycle_pipeline,
     run_pipeline,
 )
 from payroll_anomaly_ranking.queue_simulation import (
@@ -431,6 +434,60 @@ def test_employee_cycle_scoring_is_reproducible() -> None:
             ScoreCol.PAY_PERIOD_RANK,
         ),
     )
+
+
+def test_employee_cycle_evaluation_reports_grouped_metrics() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    payroll = generate_employee_pay_cycles(config).payroll
+    scored = score_employee_pay_cycles(payroll, config).scored
+
+    evaluation = evaluate_employee_cycle_scores(scored, config)
+
+    assert evaluation.metrics.height == len(config.review_budgets)
+    assert {
+        MetricCol.PRECISION_AT_K,
+        MetricCol.RECALL_AT_K,
+        MetricCol.MEAN_RECIPROCAL_RANK,
+        MetricCol.DOLLAR_CAPTURE_RATE,
+    } <= set(evaluation.metrics.columns)
+    assert evaluation.model_comparison.height >= 4
+    assert evaluation.production_candidacy.height >= 1
+
+
+def test_employee_cycle_review_queue_uses_cycle_fields() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    payroll = generate_employee_pay_cycles(config).payroll
+    scored = score_employee_pay_cycles(payroll, config).scored
+
+    queue = build_employee_cycle_review_queue(scored, top_k=10)
+
+    assert queue.height > 0
+    assert {
+        PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+        PayrollCol.EMPLOYEE_ID,
+        PayrollCol.FACILITY_ID,
+        ReviewCol.PRIMARY_REASON,
+        ReviewCol.EXPLANATION,
+    } <= set(queue.columns)
+    assert PayrollCol.SHIFT_DATE not in queue.columns
+    assert PayrollCol.SHIFT_TYPE not in queue.columns
+
+
+def test_employee_cycle_pipeline_runs_end_to_end() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+
+    results = run_employee_cycle_pipeline(config)
+
+    assert results.payroll.height > 0
+    assert results.labels.height > 0
+    assert results.scored.height == results.payroll.height
+    assert results.validation_failures.height == 0
+    assert results.metrics.height == len(config.review_budgets)
+    assert results.model_comparison.height >= 4
+    assert results.analyst_review_queue.height > 0
+    assert results.evaluation_labeled_review_queue.height > 0
+    assert results.facility_approval_summary.height > 0
+    assert PayrollCol.EMPLOYEE_PAY_CYCLE_ID in results.analyst_review_queue.columns
 
 
 def test_diagnostic_scenario_presets_reproducible_and_metadata_rich() -> None:

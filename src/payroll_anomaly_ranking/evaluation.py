@@ -25,6 +25,7 @@ class EvaluationResults:
     risk_coverage_analysis: pl.DataFrame
     expected_gross_pay_interval_metrics: pl.DataFrame
     threshold_baseline_metrics: pl.DataFrame = field(default_factory=pl.DataFrame)
+    production_candidacy: pl.DataFrame = field(default_factory=pl.DataFrame)
 
 
 @dataclass(frozen=True)
@@ -139,6 +140,254 @@ def evaluate_scores(
         expected_gross_pay_interval_metrics=interval,
         threshold_baseline_metrics=threshold,
     )
+
+
+def evaluate_employee_cycle_scores(
+    scored: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+) -> EvaluationResults:
+    rows = []
+    for k in config.review_budgets:
+        rows.append(employee_cycle_grouped_metrics(scored, k))
+    comparison = employee_cycle_model_comparison(scored, config)
+    category = category_error_analysis(scored, review_budget=max(config.review_budgets))
+    rolling = rolling_origin_evaluation(scored, config)
+    production = employee_cycle_production_candidacy(
+        scored,
+        rolling.metrics,
+        queue=None,
+        config=config,
+    )
+    return EvaluationResults(
+        metrics=pl.DataFrame(rows),
+        model_comparison=comparison,
+        category_error_analysis=category,
+        uncertainty_bucket_metrics=pl.DataFrame(),
+        risk_coverage_analysis=pl.DataFrame(),
+        expected_gross_pay_interval_metrics=pl.DataFrame(),
+        threshold_baseline_metrics=pl.DataFrame(),
+        production_candidacy=production,
+    )
+
+
+def employee_cycle_grouped_metrics(
+    scored: pl.DataFrame,
+    k: int,
+) -> dict[str, float | str]:
+    ranked = _employee_cycle_group_ranked(scored)
+    reviewed = ranked.filter(pl.col("_employee_cycle_group_rank") <= k)
+    group_metrics = (
+        ranked.group_by([PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX])
+        .agg(
+            pl.len().alias("group_records"),
+            pl.sum(PayrollCol.IS_ANOMALY).alias("group_anomalies"),
+            (pl.col("_employee_cycle_group_rank") <= k)
+            .cast(pl.Int64)
+            .sum()
+            .alias("group_reviewed"),
+            (
+                (pl.col("_employee_cycle_group_rank") <= k)
+                & (pl.col(PayrollCol.IS_ANOMALY) == 1)
+            )
+            .cast(pl.Int64)
+            .sum()
+            .alias("group_true_positive"),
+            pl.when(pl.col(PayrollCol.IS_ANOMALY) == 1)
+            .then(pl.col("_employee_cycle_group_rank"))
+            .otherwise(None)
+            .mean()
+            .alias("group_average_anomaly_rank"),
+            pl.when(pl.col(PayrollCol.IS_ANOMALY) == 1)
+            .then(pl.col("_employee_cycle_group_rank"))
+            .otherwise(None)
+            .min()
+            .alias("group_first_anomaly_rank"),
+        )
+        .with_columns(
+            (
+                pl.col("group_true_positive") / pl.col("group_reviewed").clip(1, None)
+            ).alias("group_precision"),
+            (
+                pl.col("group_true_positive") / pl.col("group_anomalies").clip(1, None)
+            ).alias("group_recall"),
+            pl.when(pl.col("group_first_anomaly_rank").is_not_null())
+            .then(1 / pl.col("group_first_anomaly_rank"))
+            .otherwise(0.0)
+            .alias("group_mrr"),
+        )
+    )
+    total_dollars = float(
+        ranked.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+        .select(pl.sum(PayrollCol.ANOMALY_DOLLARS))
+        .item()
+        or 0.0,
+    )
+    captured_dollars = float(
+        reviewed.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+        .select(pl.sum(PayrollCol.ANOMALY_DOLLARS))
+        .item()
+        or 0.0,
+    )
+    exposure = float(reviewed.select(pl.sum(ScoreCol.ESTIMATED_EXPOSURE)).item() or 0.0)
+    try:
+        pr_auc = float(
+            average_precision_score(
+                ranked.get_column(PayrollCol.IS_ANOMALY).to_numpy(),
+                ranked.get_column(ScoreCol.FINAL_ANOMALY_SCORE).to_numpy(),
+            ),
+        )
+    except ValueError:
+        pr_auc = 0.0
+    return {
+        MetricCol.K: float(k),
+        MetricCol.PRECISION_AT_K: float(
+            group_metrics.select(pl.mean("group_precision")).item() or 0.0,
+        ),
+        MetricCol.RECALL_AT_K: float(
+            group_metrics.select(pl.mean("group_recall")).item() or 0.0,
+        ),
+        MetricCol.F1_AT_K: _f1(
+            float(group_metrics.select(pl.mean("group_precision")).item() or 0.0),
+            float(group_metrics.select(pl.mean("group_recall")).item() or 0.0),
+        ),
+        MetricCol.DOLLARS_CAPTURED_AT_K: captured_dollars,
+        MetricCol.EXPOSURE_CAPTURED_AT_K: exposure,
+        MetricCol.EXPOSURE_PER_REVIEW: exposure / max(reviewed.height, 1),
+        MetricCol.REVIEW_VOLUME: float(reviewed.height),
+        MetricCol.NATIVE_REVIEW_BURDEN: float(reviewed.height),
+        MetricCol.DOLLAR_CAPTURE_RATE: captured_dollars / total_dollars
+        if total_dollars
+        else 0.0,
+        MetricCol.AVERAGE_ANOMALY_RANK: float(
+            group_metrics.select(pl.mean("group_average_anomaly_rank")).item() or 0.0,
+        ),
+        MetricCol.MEAN_RECIPROCAL_RANK: float(
+            group_metrics.select(pl.mean("group_mrr")).item() or 0.0,
+        ),
+        MetricCol.PR_AUC: pr_auc,
+        "group_count": float(group_metrics.height),
+        "aggregation_scheme": "mean_across_facility_pay_cycle_groups",
+    }
+
+
+def employee_cycle_model_comparison(
+    scored: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+) -> pl.DataFrame:
+    rows = []
+    for score_name in [
+        ScoreCol.CLASSIFICATION_SCORE,
+        ScoreCol.REGRESSION_SCORE,
+        ScoreCol.EXPECTED_VALUE_SCORE,
+        ScoreCol.RANKING_SCORE,
+        ScoreCol.ML_SCORE,
+        ScoreCol.FINAL_ANOMALY_SCORE,
+    ]:
+        if score_name not in scored.columns:
+            continue
+        renamed = scored.with_columns(
+            pl.col(score_name).alias(ScoreCol.FINAL_ANOMALY_SCORE),
+        )
+        rows.append(
+            {
+                "model": score_name.replace(
+                    ScoreCol.FINAL_ANOMALY_SCORE,
+                    "active_ranking",
+                ),
+                **employee_cycle_grouped_metrics(renamed, config.review_budgets[0]),
+            },
+        )
+    return pl.DataFrame(rows)
+
+
+def employee_cycle_backtest_by_period(
+    scored: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+) -> pl.DataFrame:
+    rows = []
+    for period in sorted(
+        scored.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list(),
+    )[4:]:
+        period_scores = scored.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) == period)
+        rows.append(
+            {
+                PayrollCol.PAY_PERIOD_INDEX: period,
+                **employee_cycle_grouped_metrics(
+                    period_scores,
+                    config.review_budgets[0],
+                ),
+            },
+        )
+    return pl.DataFrame(rows)
+
+
+def employee_cycle_production_candidacy(
+    scored: pl.DataFrame,
+    rolling_metrics: pl.DataFrame,
+    queue: pl.DataFrame | None,
+    config: PayrollConfig = PayrollConfig(),
+) -> pl.DataFrame:
+    top_k_metrics = employee_cycle_grouped_metrics(scored, config.review_budgets[0])
+    precision_ready = float(top_k_metrics[MetricCol.PRECISION_AT_K]) > 0.05
+    recall_ready = float(top_k_metrics[MetricCol.RECALL_AT_K]) > 0.05
+    temporal_ready = bool(rolling_metrics.height)
+    facility_ready = (
+        scored.select(pl.n_unique(PayrollCol.FACILITY_ID)).item() or 0
+    ) >= 2
+    uncertainty_ready = (
+        ScoreCol.ML_SCORE in scored.columns and ScoreCol.RANKING_SCORE in scored.columns
+    )
+    explanation_ready = queue is not None and {
+        PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+        ReviewCol.PRIMARY_REASON,
+        ReviewCol.EXPLANATION,
+    } <= set(queue.columns)
+    rows = [
+        {
+            "criterion": "temporal_generalization",
+            "passed": temporal_ready,
+            "evidence": "rolling_origin_available"
+            if temporal_ready
+            else "rolling_origin_missing",
+        },
+        {
+            "criterion": "facility_generalization",
+            "passed": facility_ready,
+            "evidence": "multiple_facilities_present"
+            if facility_ready
+            else "single_facility_scope",
+        },
+        {
+            "criterion": "top_k_ranking_value",
+            "passed": precision_ready and recall_ready,
+            "evidence": f"precision_at_{config.review_budgets[0]}={float(top_k_metrics[MetricCol.PRECISION_AT_K]):.3f}; recall_at_{config.review_budgets[0]}={float(top_k_metrics[MetricCol.RECALL_AT_K]):.3f}",
+        },
+        {
+            "criterion": "uncertainty_behavior",
+            "passed": uncertainty_ready,
+            "evidence": "multiple_formulation_scores_available"
+            if uncertainty_ready
+            else "uncertainty_signals_missing",
+        },
+        {
+            "criterion": "explanation_readiness",
+            "passed": explanation_ready,
+            "evidence": "queue_contains_review_safe_explanations"
+            if explanation_ready
+            else "queue_explanation_fields_missing",
+        },
+    ]
+    overall = all(bool(row["passed"]) for row in rows)
+    rows.append(
+        {
+            "criterion": "overall_promotable",
+            "passed": overall,
+            "evidence": "all_phase_1_gates_met"
+            if overall
+            else "follow_up_needed_before_promotion",
+        },
+    )
+    return pl.DataFrame(rows)
 
 
 def precision_by_uncertainty_bucket(scored: pl.DataFrame) -> pl.DataFrame:
@@ -499,6 +748,16 @@ def _facility_period_review_metrics(
 
 
 def leakage_checks(analyst_queue: pl.DataFrame) -> pl.DataFrame:
+    return leakage_checks_for_features(
+        analyst_queue,
+        [str(column) for column in MODEL_FEATURE_COLUMNS],
+    )
+
+
+def leakage_checks_for_features(
+    analyst_queue: pl.DataFrame,
+    feature_columns: list[str] | tuple[str, ...],
+) -> pl.DataFrame:
     leakage_columns = {
         PayrollCol.IS_ANOMALY,
         PayrollCol.ANOMALY_CATEGORY,
@@ -508,7 +767,7 @@ def leakage_checks(analyst_queue: pl.DataFrame) -> pl.DataFrame:
         [
             {
                 "check": "model_features_exclude_labels",
-                "passed": not bool(leakage_columns & set(MODEL_FEATURE_COLUMNS)),
+                "passed": not bool(leakage_columns & set(feature_columns)),
             },
             {
                 "check": "analyst_queue_excludes_labels",
@@ -516,9 +775,18 @@ def leakage_checks(analyst_queue: pl.DataFrame) -> pl.DataFrame:
             },
             {
                 "check": "scoring_features_exclude_anomaly_dollars",
-                "passed": PayrollCol.ANOMALY_DOLLARS not in MODEL_FEATURE_COLUMNS,
+                "passed": PayrollCol.ANOMALY_DOLLARS not in feature_columns,
             },
         ],
+    )
+
+
+def _employee_cycle_group_ranked(scored: pl.DataFrame) -> pl.DataFrame:
+    return scored.with_columns(
+        pl.col(ScoreCol.FINAL_ANOMALY_SCORE)
+        .rank("ordinal", descending=True)
+        .over([PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX])
+        .alias("_employee_cycle_group_rank"),
     )
 
 

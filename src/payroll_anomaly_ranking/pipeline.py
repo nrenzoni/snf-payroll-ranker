@@ -7,25 +7,32 @@ import polars as pl
 
 from payroll_anomaly_ranking.columns import OutputName, PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
-from payroll_anomaly_ranking.data import generate_payroll
+from payroll_anomaly_ranking.data import generate_employee_pay_cycles, generate_payroll
 from payroll_anomaly_ranking.evaluation import (
     backtest_by_period,
+    employee_cycle_backtest_by_period,
+    evaluate_employee_cycle_scores,
     evaluate_scores,
     leakage_checks,
+    leakage_checks_for_features,
     rolling_origin_evaluation,
 )
 from payroll_anomaly_ranking.explainability import (
+    build_employee_cycle_evaluation_review_queue,
+    build_employee_cycle_facility_summary,
+    build_employee_cycle_review_queue,
     build_evaluation_review_queue,
     build_facility_approval_summary,
     build_review_queue,
 )
 from payroll_anomaly_ranking.features import build_features
-from payroll_anomaly_ranking.models import score_payroll
+from payroll_anomaly_ranking.models import score_employee_pay_cycles, score_payroll
 from payroll_anomaly_ranking.rules import add_rule_flags
 from payroll_anomaly_ranking.scenarios import ScenarioSpec
 from payroll_anomaly_ranking.validation import (
     PayrollAggregations,
     payroll_aggregations,
+    validate_employee_pay_cycles,
     validate_payroll,
 )
 
@@ -269,6 +276,88 @@ def run_pipeline(
     if write_outputs:
         write_pipeline_outputs(results, config)
     return results
+
+
+def run_employee_cycle_pipeline(
+    config: PayrollConfig = PayrollConfig(),
+    *,
+    scenario: ScenarioSpec | None = None,
+    include: PipelineIncludeConfig = PipelineIncludeConfig(),
+) -> PipelineResults:
+    generated = generate_employee_pay_cycles(config, scenario=scenario)
+    scoring = score_employee_pay_cycles(generated.payroll, config)
+    scored = scoring.scored
+    validation = (
+        validate_employee_pay_cycles(generated.payroll) if include.validation else None
+    )
+    evaluation = (
+        evaluate_employee_cycle_scores(scored, config) if include.evaluation else None
+    )
+    backtest = (
+        employee_cycle_backtest_by_period(scored, config) if include.backtest else None
+    )
+    analyst_queue = (
+        build_employee_cycle_review_queue(scored, top_k=max(config.review_budgets))
+        if include.review_queues or include.leakage_checks
+        else None
+    )
+    evaluation_queue = (
+        build_employee_cycle_evaluation_review_queue(
+            scored,
+            top_k=max(config.review_budgets),
+        )
+        if include.review_queues
+        else None
+    )
+    facility_summary = (
+        build_employee_cycle_facility_summary(scored, top_k=max(config.review_budgets))
+        if include.review_queues
+        else None
+    )
+    rolling = (
+        rolling_origin_evaluation(scored, config) if include.rolling_origin else None
+    )
+    leakage = (
+        leakage_checks_for_features(analyst_queue, scoring.feature_columns)
+        if include.leakage_checks and analyst_queue is not None
+        else None
+    )
+    return PipelineResults(
+        payroll=generated.payroll,
+        labels=generated.labels,
+        scored=scored,
+        scenario_metadata=generated.metadata or _scenario_metadata(scenario),
+        include=include,
+        _validation_failures=validation.failures if validation is not None else None,
+        _validation_warnings=validation.warnings if validation is not None else None,
+        _aggregations=None,
+        _metrics=evaluation.metrics if evaluation is not None else None,
+        _model_comparison=evaluation.model_comparison
+        if evaluation is not None
+        else None,
+        _category_error_analysis=evaluation.category_error_analysis
+        if evaluation is not None
+        else None,
+        _uncertainty_bucket_metrics=evaluation.production_candidacy
+        if evaluation is not None
+        else None,
+        _risk_coverage_analysis=evaluation.production_candidacy
+        if evaluation is not None
+        else None,
+        _expected_gross_pay_interval_metrics=evaluation.production_candidacy
+        if evaluation is not None
+        else None,
+        _backtest=backtest,
+        _rolling_origin_metrics=rolling.metrics if rolling is not None else None,
+        _validation_selected_settings=rolling.selected_settings
+        if rolling is not None
+        else None,
+        _stability_summary=rolling.stability_summary if rolling is not None else None,
+        _leakage_checks=leakage,
+        _analyst_review_queue=analyst_queue if include.review_queues else None,
+        _evaluation_labeled_review_queue=evaluation_queue,
+        _facility_approval_summary=facility_summary,
+    )
 
 
 def write_pipeline_outputs(
