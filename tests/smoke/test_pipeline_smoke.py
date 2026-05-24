@@ -36,8 +36,9 @@ def test_pipeline_runs_end_to_end_without_leaking_review_truth() -> None:
     assert results.analyst_review_queue.height > 0
     assert results.facility_approval_summary.height > 0
     assert PayrollCol.FACILITY_ID in results.payroll.columns
-    assert PayrollCol.SHIFT_ID in results.payroll.columns
-    assert PayrollCol.PREMIUM_PAY in results.payroll.columns
+    assert PayrollCol.EMPLOYEE_PAY_CYCLE_ID in results.payroll.columns
+    assert PayrollCol.TOTAL_PREMIUM_PAY in results.payroll.columns
+    assert PayrollCol.SHIFT_ID not in results.payroll.columns
     assert not {
         PayrollCol.IS_ANOMALY,
         PayrollCol.ANOMALY_CATEGORY,
@@ -60,6 +61,7 @@ def test_pipeline_output_writes_are_explicit(tmp_path: Path) -> None:
     run_pipeline(config, write_outputs=True)
 
     assert (config.data_dir / "synthetic_payroll.csv").exists()
+    assert not (config.data_dir / "synthetic_snf_shift_payroll.csv").exists()
     assert (config.output_dir / "evaluation" / "review_budget_metrics.csv").exists()
     assert (config.output_dir / "evaluation" / OutputName.ANALYST_REVIEW_QUEUE).exists()
     assert (config.output_dir / "evaluation" / OutputName.ADMIN_APPROVAL_QUEUE).exists()

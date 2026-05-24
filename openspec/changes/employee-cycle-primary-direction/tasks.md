@@ -6,9 +6,9 @@
 
 ## 2. Legacy Boundary
 
-- [ ] 2.1 Inventory existing shift-level modules, notebooks, and docs for reuse, porting, or deprecation
-- [ ] 2.2 Move or rename non-reused shift-level runtime code into an explicitly deprecated or legacy reference boundary
-- [ ] 2.3 Remove active-runtime imports and acceptance criteria that depend on deprecated shift-level hybrid code
+- [x] 2.1 Inventory existing shift-level modules, notebooks, and docs for reuse, porting, or deprecation
+- [x] 2.2 Move or rename non-reused shift-level runtime code into an explicitly deprecated or legacy reference boundary
+- [x] 2.3 Remove active-runtime imports and acceptance criteria that depend on deprecated shift-level hybrid code
 
 ## 3. Employee-Pay-Cycle Runtime Follow-Up
 

@@ -61,6 +61,7 @@ from payroll_anomaly_ranking.pipeline import (
     PipelineIncludeConfig,
     run_employee_cycle_pipeline,
     run_pipeline,
+    run_shift_level_pipeline,
 )
 from payroll_anomaly_ranking.queue_simulation import (
     simulate_queue_capacity,
@@ -138,6 +139,7 @@ def test_pipeline_writes_outputs_only_when_requested(tmp_path) -> None:
 
     assert (config.data_dir / "synthetic_payroll.csv").exists()
     assert (config.data_dir / "synthetic_payroll_labels.csv").exists()
+    assert not (config.data_dir / "synthetic_snf_shift_payroll.csv").exists()
     assert (config.output_dir / "evaluation" / "category_error_analysis.csv").exists()
     assert (
         config.output_dir / "evaluation" / "uncertainty_bucket_metrics.csv"
@@ -172,9 +174,9 @@ def test_pipeline_default_result_exposes_full_artifacts() -> None:
     assert results.metrics.height == 2
     assert results.model_comparison.height >= 4
     assert results.category_error_analysis.height > 0
-    assert results.uncertainty_bucket_metrics.height > 0
-    assert results.risk_coverage_analysis.height > 0
-    assert results.expected_gross_pay_interval_metrics.height == 1
+    assert results.uncertainty_bucket_metrics.height == 0
+    assert results.risk_coverage_analysis.height == 0
+    assert results.expected_gross_pay_interval_metrics.height > 0
     assert results.backtest.height > 0
     assert results.rolling_origin_metrics.height > 0
     assert results.validation_selected_settings.height > 0
@@ -184,6 +186,8 @@ def test_pipeline_default_result_exposes_full_artifacts() -> None:
     assert results.evaluation_labeled_review_queue.height > 0
     assert results.facility_approval_summary.height > 0
     assert results.scenario_metadata["name"] == "default"
+    assert PayrollCol.EMPLOYEE_PAY_CYCLE_ID in results.payroll.columns
+    assert PayrollCol.SHIFT_ID not in results.payroll.columns
 
 
 def test_pipeline_scored_only_result_exposes_core_artifacts() -> None:
@@ -488,6 +492,15 @@ def test_employee_cycle_pipeline_runs_end_to_end() -> None:
     assert results.evaluation_labeled_review_queue.height > 0
     assert results.facility_approval_summary.height > 0
     assert PayrollCol.EMPLOYEE_PAY_CYCLE_ID in results.analyst_review_queue.columns
+
+
+def test_legacy_shift_pipeline_still_exposes_shift_level_artifacts() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+
+    results = run_shift_level_pipeline(config)
+
+    assert PayrollCol.SHIFT_ID in results.payroll.columns
+    assert PayrollCol.PREMIUM_PAY in results.payroll.columns
 
 
 def test_diagnostic_scenario_presets_reproducible_and_metadata_rich() -> None:

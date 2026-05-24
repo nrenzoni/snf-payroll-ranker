@@ -191,7 +191,7 @@ class PipelineResults:
         )
 
 
-def run_pipeline(
+def run_legacy_shift_pipeline(
     config: PayrollConfig = PayrollConfig(),
     *,
     scenario: ScenarioSpec | None = None,
@@ -282,6 +282,7 @@ def run_employee_cycle_pipeline(
     config: PayrollConfig = PayrollConfig(),
     *,
     scenario: ScenarioSpec | None = None,
+    write_outputs: bool = False,
     include: PipelineIncludeConfig = PipelineIncludeConfig(),
 ) -> PipelineResults:
     generated = generate_employee_pay_cycles(config, scenario=scenario)
@@ -290,8 +291,18 @@ def run_employee_cycle_pipeline(
     validation = (
         validate_employee_pay_cycles(generated.payroll) if include.validation else None
     )
+    aggregations = (
+        payroll_aggregations(generated.supporting_payroll)
+        if include.aggregations
+        else None
+    )
     evaluation = (
         evaluate_employee_cycle_scores(scored, config) if include.evaluation else None
+    )
+    category = (
+        evaluation.category_error_analysis.sort(PayrollCol.ANOMALY_CATEGORY)
+        if evaluation is not None
+        else None
     )
     backtest = (
         employee_cycle_backtest_by_period(scored, config) if include.backtest else None
@@ -322,7 +333,7 @@ def run_employee_cycle_pipeline(
         if include.leakage_checks and analyst_queue is not None
         else None
     )
-    return PipelineResults(
+    results = PipelineResults(
         payroll=generated.payroll,
         labels=generated.labels,
         scored=scored,
@@ -330,20 +341,14 @@ def run_employee_cycle_pipeline(
         include=include,
         _validation_failures=validation.failures if validation is not None else None,
         _validation_warnings=validation.warnings if validation is not None else None,
-        _aggregations=None,
+        _aggregations=aggregations,
         _metrics=evaluation.metrics if evaluation is not None else None,
         _model_comparison=evaluation.model_comparison
         if evaluation is not None
         else None,
-        _category_error_analysis=evaluation.category_error_analysis
-        if evaluation is not None
-        else None,
-        _uncertainty_bucket_metrics=evaluation.production_candidacy
-        if evaluation is not None
-        else None,
-        _risk_coverage_analysis=evaluation.production_candidacy
-        if evaluation is not None
-        else None,
+        _category_error_analysis=category,
+        _uncertainty_bucket_metrics=pl.DataFrame() if evaluation is not None else None,
+        _risk_coverage_analysis=pl.DataFrame() if evaluation is not None else None,
         _expected_gross_pay_interval_metrics=evaluation.production_candidacy
         if evaluation is not None
         else None,
@@ -358,6 +363,27 @@ def run_employee_cycle_pipeline(
         _evaluation_labeled_review_queue=evaluation_queue,
         _facility_approval_summary=facility_summary,
     )
+    if write_outputs:
+        write_pipeline_outputs(results, config)
+    return results
+
+
+def run_pipeline(
+    config: PayrollConfig = PayrollConfig(),
+    *,
+    scenario: ScenarioSpec | None = None,
+    write_outputs: bool = False,
+    include: PipelineIncludeConfig = PipelineIncludeConfig(),
+) -> PipelineResults:
+    return run_employee_cycle_pipeline(
+        config,
+        scenario=scenario,
+        write_outputs=write_outputs,
+        include=include,
+    )
+
+
+run_shift_level_pipeline = run_legacy_shift_pipeline
 
 
 def write_pipeline_outputs(
@@ -371,7 +397,8 @@ def write_pipeline_outputs(
     evaluation_dir.mkdir(parents=True, exist_ok=True)
 
     results.payroll.write_csv(config.data_dir / "synthetic_payroll.csv")
-    results.payroll.write_csv(config.data_dir / "synthetic_snf_shift_payroll.csv")
+    if PayrollCol.SHIFT_ID in results.payroll.columns:
+        results.payroll.write_csv(config.data_dir / "synthetic_snf_shift_payroll.csv")
     results.labels.write_csv(config.data_dir / "synthetic_payroll_labels.csv")
     results.scored.write_csv(evaluation_dir / "scored_payroll.csv")
     results.metrics.write_csv(evaluation_dir / "review_budget_metrics.csv")

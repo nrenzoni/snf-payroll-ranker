@@ -134,7 +134,10 @@ def business_proof_ranking_units(
     seeds: tuple[int, ...] = (42, 43),
     review_budgets: tuple[int, ...] | None = None,
 ) -> pl.DataFrame:
-    from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig, run_pipeline
+    from payroll_anomaly_ranking.pipeline import (
+        PipelineIncludeConfig,
+        run_shift_level_pipeline,
+    )
 
     scenario_map = scenarios or diagnostic_scenario_presets(
         BUSINESS_PROOF_MAIN_SCENARIOS,
@@ -144,7 +147,7 @@ def business_proof_ranking_units(
     for scenario_name, scenario in scenario_map.items():
         for seed in seeds:
             seed_config = replace(config, seed=seed)
-            scored = run_pipeline(
+            scored = run_shift_level_pipeline(
                 seed_config,
                 scenario=scenario,
                 include=PipelineIncludeConfig.scored_only(),
@@ -170,7 +173,10 @@ def business_proof_threshold_units(
     scenarios: Mapping[str, ScenarioSpec | None] | None = None,
     seeds: tuple[int, ...] = (42, 43),
 ) -> pl.DataFrame:
-    from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig, run_pipeline
+    from payroll_anomaly_ranking.pipeline import (
+        PipelineIncludeConfig,
+        run_shift_level_pipeline,
+    )
 
     scenario_map = scenarios or diagnostic_scenario_presets(
         BUSINESS_PROOF_MAIN_SCENARIOS,
@@ -179,7 +185,7 @@ def business_proof_threshold_units(
     for scenario_name, scenario in scenario_map.items():
         for seed in seeds:
             seed_config = replace(config, seed=seed)
-            scored = run_pipeline(
+            scored = run_shift_level_pipeline(
                 seed_config,
                 scenario=scenario,
                 include=PipelineIncludeConfig.scored_only(),
@@ -279,7 +285,10 @@ def run_diagnostic_comparison_units(
     origins: tuple[str, ...] = ("default",),
     k: int | None = None,
 ) -> pl.DataFrame:
-    from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig, run_pipeline
+    from payroll_anomaly_ranking.pipeline import (
+        PipelineIncludeConfig,
+        run_shift_level_pipeline,
+    )
 
     scenario_map = scenarios or diagnostic_scenario_presets(
         (
@@ -298,7 +307,7 @@ def run_diagnostic_comparison_units(
     for scenario_name, scenario in scenario_map.items():
         for seed in seeds:
             seed_config = replace(config, seed=seed)
-            results = run_pipeline(
+            results = run_shift_level_pipeline(
                 seed_config,
                 scenario=scenario,
                 include=PipelineIncludeConfig.scored_only(),

@@ -8,7 +8,10 @@ import polars as pl
 
 from payroll_anomaly_ranking.columns import PayrollCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
-from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig, run_pipeline
+from payroll_anomaly_ranking.pipeline import (
+    PipelineIncludeConfig,
+    run_shift_level_pipeline,
+)
 from payroll_anomaly_ranking.scenarios import QueueSimulationSpec, ScenarioSpec
 
 
@@ -149,7 +152,7 @@ def compare_scenarios(
 ) -> pl.DataFrame:
     rows = []
     for scenario_name, scenario in scenarios.items():
-        results = run_pipeline(
+        results = run_shift_level_pipeline(
             config,
             scenario=scenario,
             include=PipelineIncludeConfig.scored_only(),

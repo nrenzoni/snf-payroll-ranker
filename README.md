@@ -5,7 +5,7 @@
 [![Ruff](https://img.shields.io/badge/ruff-formatted-brightgreen.svg)](https://docs.astral.sh/ruff/)
 [![Pyrefly](https://img.shields.io/badge/pyrefly-checked-blueviolet.svg)](https://pyrefly.org/)
 
-A production-oriented, privacy-safe payroll ranking library in transition to an employee-pay-cycle primary data model. Phase 1 is production-oriented research: compare formulations, validate failure modes, and promote only the approaches that are strong enough to become operational library paths. Earlier shift-level SNF hybrid workflow code remains in the repository as deprecated historical reference only.
+A production-oriented, privacy-safe payroll ranking library with an employee-pay-cycle primary runtime. Phase 1 is production-oriented research: compare formulations, validate failure modes, and promote only the approaches that are strong enough to become operational library paths. Earlier shift-level SNF hybrid workflow code remains in the repository as deprecated historical reference only.
 
 ![Pipeline Architecture](docs/assets/pipeline_architecture.svg)
 
@@ -33,7 +33,7 @@ A production-oriented, privacy-safe payroll ranking library in transition to an 
 
 ## Key Points
 
-- **Active direction**: employee-pay-cycle is the canonical modeling grain for future runtime, evaluation, and production-facing work.
+- **Active direction**: employee-pay-cycle is the canonical modeling grain for runtime, evaluation, and production-facing work.
 - **Phase 1 goal**: use comparative research to decide which formulations and library components are promotable into production use.
 - **Leakage-safe temporal validation**: pay-period splits, no random row sampling in active evaluation, and historical features that exclude current/future periods.
 - **Facility-normalized, transferable features**: stationary ratios and reference features intended to generalize across facilities and later production use.
@@ -59,6 +59,8 @@ uv sync
 ```bash
 uv run python -m payroll_anomaly_ranking.pipeline
 ```
+
+The default `run_pipeline()` entrypoint now executes the active employee-pay-cycle runtime. The deprecated shift-level runtime remains available as `run_shift_level_pipeline()` for historical reference and legacy notebook support.
 
 Expected generated files:
 
@@ -155,7 +157,7 @@ payroll-anomaly-ranking/
 │   ├── features.py                 # Active leakage-safe feature engineering (in transition)
 │   ├── models.py                   # Active scoring interfaces (in transition)
 │   ├── evaluation.py               # Active validation & ranking metrics (in transition)
-│   ├── pipeline.py                 # Active orchestration & artifact management
+│   ├── pipeline.py                 # Active employee-cycle orchestration; legacy shift path retained explicitly
 │   └── ...
 ├── notebooks/                      # Jupytext notebooks and notebook-owned helpers
 │   ├── common/plots.py             # Shared plotting adapters
