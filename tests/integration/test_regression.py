@@ -18,6 +18,7 @@ from payroll_anomaly_ranking.columns import (
 )
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.data import (
+    generate_employee_pay_cycles,
     generate_payroll,
     scenario_sanity_summary,
     scenario_summary,
@@ -65,7 +66,10 @@ from payroll_anomaly_ranking.scenarios import (
     TargetedAnomalyControl,
     diagnostic_scenario_presets,
 )
-from payroll_anomaly_ranking.validation import validate_payroll
+from payroll_anomaly_ranking.validation import (
+    validate_employee_pay_cycles,
+    validate_payroll,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -255,6 +259,94 @@ def test_scenario_generation_is_reproducible_with_same_seed() -> None:
     ).unique().to_list() == [
         "overtime_spike",
     ]
+
+
+def test_employee_pay_cycle_generation_is_reproducible_and_schema_valid() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+
+    generated_a = generate_employee_pay_cycles(config)
+    generated_b = generate_employee_pay_cycles(config)
+    validation = validate_employee_pay_cycles(generated_a.payroll)
+
+    assert generated_a.payroll.equals(generated_b.payroll)
+    assert generated_a.labels.equals(generated_b.labels)
+    assert validation.failures.height == 0
+    assert {
+        PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+        PayrollCol.EMPLOYEE_ID,
+        PayrollCol.FACILITY_ID,
+        PayrollCol.PAY_PERIOD_INDEX,
+        PayrollCol.TOTAL_GROSS_PAY,
+        PayrollCol.TOTAL_PAID_HOURS,
+        PayrollCol.SHIFT_COUNT,
+        PayrollCol.IS_ANOMALY,
+        PayrollCol.ANOMALY_CATEGORY,
+        PayrollCol.ANOMALY_DOLLARS,
+    } <= set(generated_a.payroll.columns)
+
+
+def test_employee_pay_cycle_rows_reconcile_to_supporting_shift_detail() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    generated = generate_employee_pay_cycles(config)
+
+    supporting = generated.supporting_payroll.group_by(
+        [PayrollCol.EMPLOYEE_ID, PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+    ).agg(
+        pl.len().alias("shift_count"),
+        pl.sum(PayrollCol.GROSS_PAY).alias("total_gross_pay"),
+        pl.sum(PayrollCol.PAID_HOURS).alias("total_paid_hours"),
+        pl.sum(PayrollCol.IS_ANOMALY).alias("anomalous_shift_count"),
+        pl.sum(PayrollCol.ANOMALY_DOLLARS).alias("anomaly_dollars"),
+    )
+    reconciled = generated.payroll.join(
+        supporting,
+        on=[
+            PayrollCol.EMPLOYEE_ID,
+            PayrollCol.FACILITY_ID,
+            PayrollCol.PAY_PERIOD_INDEX,
+        ],
+        how="inner",
+    )
+
+    assert reconciled.height == generated.payroll.height
+    assert reconciled.select(
+        (pl.col(PayrollCol.SHIFT_COUNT) == pl.col("shift_count")).all(),
+        (
+            pl.col(PayrollCol.TOTAL_GROSS_PAY).round(2)
+            == pl.col("total_gross_pay").round(2)
+        ).all(),
+        (
+            pl.col(PayrollCol.TOTAL_PAID_HOURS).round(2)
+            == pl.col("total_paid_hours").round(2)
+        ).all(),
+        (
+            pl.col(PayrollCol.ANOMALOUS_SHIFT_COUNT) == pl.col("anomalous_shift_count")
+        ).all(),
+        (
+            pl.col(PayrollCol.ANOMALY_DOLLARS).round(2)
+            == pl.col("anomaly_dollars").round(2)
+        ).all(),
+    ).row(0) == (True, True, True, True, True)
+
+
+def test_employee_pay_cycle_labels_capture_only_anomalous_cycles() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    generated = generate_employee_pay_cycles(config)
+
+    assert generated.labels.height > 0
+    assert generated.labels.select(pl.col(PayrollCol.IS_ANOMALY).min()).item() == 1
+    assert (
+        generated.labels.join(
+            generated.payroll.select(
+                PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+                PayrollCol.IS_ANOMALY,
+                PayrollCol.ANOMALY_DOLLARS,
+            ),
+            on=PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+            how="inner",
+        ).height
+        == generated.labels.height
+    )
 
 
 def test_diagnostic_scenario_presets_reproducible_and_metadata_rich() -> None:

@@ -51,6 +51,19 @@ class GeneratedPayroll:
     metadata: dict[str, object] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class GeneratedEmployeePayCycles:
+    payroll: pl.DataFrame
+    labels: pl.DataFrame
+    supporting_payroll: pl.DataFrame = field(default_factory=pl.DataFrame)
+    facilities: pl.DataFrame = field(default_factory=pl.DataFrame)
+    employees: pl.DataFrame = field(default_factory=pl.DataFrame)
+    schedules: pl.DataFrame = field(default_factory=pl.DataFrame)
+    timeclock: pl.DataFrame = field(default_factory=pl.DataFrame)
+    facility_rollups: pl.DataFrame = field(default_factory=pl.DataFrame)
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
 ROLE_LICENSE = {
     SNFRole.RN: LicenseType.RN,
     SNFRole.LPN: LicenseType.LPN,
@@ -513,6 +526,26 @@ def write_synthetic_data(config: PayrollConfig = PayrollConfig()) -> GeneratedPa
     return generated
 
 
+def generate_employee_pay_cycles(
+    config: PayrollConfig = PayrollConfig(),
+    scenario: ScenarioSpec | None = None,
+) -> GeneratedEmployeePayCycles:
+    generated = generate_payroll(config, scenario=scenario)
+    employee_cycles = employee_pay_cycle_records(generated.payroll)
+    labels = employee_pay_cycle_labels(employee_cycles)
+    return GeneratedEmployeePayCycles(
+        payroll=employee_cycles,
+        labels=labels,
+        supporting_payroll=generated.payroll,
+        facilities=generated.facilities,
+        employees=generated.employees,
+        schedules=generated.schedules,
+        timeclock=generated.timeclock,
+        facility_rollups=generated.facility_rollups,
+        metadata=generated.metadata,
+    )
+
+
 def scenario_metadata(scenario: ScenarioSpec | None) -> dict[str, object]:
     family = _scenario_family(scenario)
     return {
@@ -527,6 +560,126 @@ def scenario_metadata(scenario: ScenarioSpec | None) -> dict[str, object]:
         },
         "policy_assumptions": "Synthetic configurable policy; not legal or payroll advice.",
     }
+
+
+def employee_pay_cycle_records(payroll: pl.DataFrame) -> pl.DataFrame:
+    category_rank = (
+        payroll.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
+        .group_by(
+            [
+                PayrollCol.EMPLOYEE_ID,
+                PayrollCol.FACILITY_ID,
+                PayrollCol.PAY_PERIOD_INDEX,
+                PayrollCol.ANOMALY_CATEGORY,
+            ],
+        )
+        .agg(
+            pl.sum(PayrollCol.ANOMALY_DOLLARS).alias("category_anomaly_dollars"),
+        )
+        .sort(
+            [
+                PayrollCol.EMPLOYEE_ID,
+                PayrollCol.FACILITY_ID,
+                PayrollCol.PAY_PERIOD_INDEX,
+                "category_anomaly_dollars",
+                PayrollCol.ANOMALY_CATEGORY,
+            ],
+            descending=[False, False, False, True, False],
+        )
+    )
+    dominant_category = category_rank.group_by(
+        [PayrollCol.EMPLOYEE_ID, PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+    ).agg(
+        pl.first(PayrollCol.ANOMALY_CATEGORY).alias("dominant_anomaly_category"),
+    )
+    cycles = payroll.group_by(
+        [PayrollCol.EMPLOYEE_ID, PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+    ).agg(
+        pl.first(PayrollCol.MANAGER_ID).alias(PayrollCol.MANAGER_ID),
+        pl.first(PayrollCol.FACILITY_NAME).alias(PayrollCol.FACILITY_NAME),
+        pl.first(PayrollCol.REGION).alias(PayrollCol.REGION),
+        pl.first(PayrollCol.FACILITY_SIZE_TIER).alias(PayrollCol.FACILITY_SIZE_TIER),
+        pl.first(PayrollCol.PAYROLL_MATURITY).alias(PayrollCol.PAYROLL_MATURITY),
+        pl.first(PayrollCol.STAFFING_PRESSURE).alias(PayrollCol.STAFFING_PRESSURE),
+        pl.first(PayrollCol.HOME_FACILITY_ID).alias(PayrollCol.HOME_FACILITY_ID),
+        pl.first(PayrollCol.WORKED_FACILITY_ID).alias(PayrollCol.WORKED_FACILITY_ID),
+        pl.first(PayrollCol.ROLE).alias(PayrollCol.ROLE),
+        pl.first(PayrollCol.LICENSE_TYPE).alias(PayrollCol.LICENSE_TYPE),
+        pl.first(PayrollCol.DEPARTMENT).alias(PayrollCol.DEPARTMENT),
+        pl.first(PayrollCol.JOB_FAMILY).alias(PayrollCol.JOB_FAMILY),
+        pl.first(PayrollCol.LOCATION).alias(PayrollCol.LOCATION),
+        pl.first(PayrollCol.JOB_LEVEL).alias(PayrollCol.JOB_LEVEL),
+        pl.first(PayrollCol.PAY_TYPE).alias(PayrollCol.PAY_TYPE),
+        pl.first(PayrollCol.PAY_PERIOD_START).alias(PayrollCol.PAY_PERIOD_START),
+        pl.first(PayrollCol.PAY_PERIOD_END).alias(PayrollCol.PAY_PERIOD_END),
+        pl.first(PayrollCol.BASE_PAY_RATE).alias(PayrollCol.BASE_PAY_RATE),
+        pl.max(PayrollCol.TENURE_MONTHS).alias(PayrollCol.TENURE_MONTHS),
+        pl.first(PayrollCol.HIRE_DATE).alias(PayrollCol.HIRE_DATE),
+        pl.first(PayrollCol.TERMINATION_DATE).alias(PayrollCol.TERMINATION_DATE),
+        pl.first(PayrollCol.EMPLOYMENT_STATUS).alias(PayrollCol.EMPLOYMENT_STATUS),
+        pl.first(PayrollCol.SCENARIO_FAMILY).alias(PayrollCol.SCENARIO_FAMILY),
+        pl.len().alias(PayrollCol.SHIFT_COUNT),
+        pl.sum(PayrollCol.IS_ANOMALY).alias(PayrollCol.ANOMALOUS_SHIFT_COUNT),
+        pl.sum(PayrollCol.SCHEDULED_HOURS).alias(PayrollCol.TOTAL_SCHEDULED_HOURS),
+        pl.sum(PayrollCol.WORKED_HOURS).alias(PayrollCol.TOTAL_WORKED_HOURS),
+        pl.sum(PayrollCol.PAID_HOURS).alias(PayrollCol.TOTAL_PAID_HOURS),
+        pl.sum(PayrollCol.REGULAR_HOURS).alias(PayrollCol.TOTAL_REGULAR_HOURS),
+        pl.sum(PayrollCol.OVERTIME_HOURS).alias(PayrollCol.TOTAL_OVERTIME_HOURS),
+        pl.sum(PayrollCol.EXPECTED_SHIFT_GROSS_PAY).alias(
+            PayrollCol.TOTAL_EXPECTED_GROSS_PAY,
+        ),
+        pl.sum(PayrollCol.PREMIUM_PAY).alias(PayrollCol.TOTAL_PREMIUM_PAY),
+        pl.sum(PayrollCol.GROSS_PAY).alias(PayrollCol.TOTAL_GROSS_PAY),
+        pl.sum(PayrollCol.DEDUCTIONS).alias(PayrollCol.TOTAL_DEDUCTIONS),
+        pl.sum(PayrollCol.NET_PAY).alias(PayrollCol.TOTAL_NET_PAY),
+        pl.max(PayrollCol.IS_ANOMALY).alias(PayrollCol.IS_ANOMALY),
+        pl.sum(PayrollCol.ANOMALY_DOLLARS).alias(PayrollCol.ANOMALY_DOLLARS),
+    )
+    return (
+        cycles.join(
+            dominant_category,
+            on=[
+                PayrollCol.EMPLOYEE_ID,
+                PayrollCol.FACILITY_ID,
+                PayrollCol.PAY_PERIOD_INDEX,
+            ],
+            how="left",
+        )
+        .with_columns(
+            pl.concat_str(
+                [
+                    pl.col(PayrollCol.FACILITY_ID),
+                    pl.lit("-"),
+                    pl.col(PayrollCol.EMPLOYEE_ID),
+                    pl.lit("-PP-"),
+                    pl.col(PayrollCol.PAY_PERIOD_INDEX).cast(pl.String),
+                ],
+            ).alias(PayrollCol.EMPLOYEE_PAY_CYCLE_ID),
+            pl.when(pl.col(PayrollCol.IS_ANOMALY) == 1)
+            .then(
+                pl.col("dominant_anomaly_category").fill_null(
+                    SNFAnomalyCategory.NORMAL,
+                ),
+            )
+            .otherwise(pl.lit(SNFAnomalyCategory.NORMAL))
+            .alias(PayrollCol.ANOMALY_CATEGORY),
+        )
+        .drop("dominant_anomaly_category")
+        .sort([PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX])
+    )
+
+
+def employee_pay_cycle_labels(employee_cycles: pl.DataFrame) -> pl.DataFrame:
+    return employee_cycles.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).select(
+        PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+        PayrollCol.EMPLOYEE_ID,
+        PayrollCol.FACILITY_ID,
+        PayrollCol.PAY_PERIOD_INDEX,
+        PayrollCol.IS_ANOMALY,
+        PayrollCol.ANOMALY_CATEGORY,
+        PayrollCol.ANOMALY_DOLLARS,
+        PayrollCol.SCENARIO_FAMILY,
+    )
 
 
 def scenario_summary(

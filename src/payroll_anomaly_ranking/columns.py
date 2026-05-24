@@ -7,6 +7,7 @@ class PayrollCol(StrEnum):
     RECORD_ID = "record_id"
     SHIFT_ID = "shift_id"
     PAYROLL_LINE_ID = "payroll_line_id"
+    EMPLOYEE_PAY_CYCLE_ID = "employee_pay_cycle_id"
     EMPLOYEE_ID = "employee_id"
     MANAGER_ID = "manager_id"
     PAY_PERIOD_INDEX = "pay_period_index"
@@ -72,6 +73,18 @@ class PayrollCol(StrEnum):
     ANOMALY_CATEGORY = "anomaly_category"
     ANOMALY_DOLLARS = "anomaly_dollars"
     OOD_PAY_CODE_CONTEXT = "ood_pay_code_context"
+    SHIFT_COUNT = "shift_count"
+    ANOMALOUS_SHIFT_COUNT = "anomalous_shift_count"
+    TOTAL_SCHEDULED_HOURS = "total_scheduled_hours"
+    TOTAL_WORKED_HOURS = "total_worked_hours"
+    TOTAL_PAID_HOURS = "total_paid_hours"
+    TOTAL_REGULAR_HOURS = "total_regular_hours"
+    TOTAL_OVERTIME_HOURS = "total_overtime_hours"
+    TOTAL_EXPECTED_GROSS_PAY = "total_expected_gross_pay"
+    TOTAL_PREMIUM_PAY = "total_premium_pay"
+    TOTAL_GROSS_PAY = "total_gross_pay"
+    TOTAL_DEDUCTIONS = "total_deductions"
+    TOTAL_NET_PAY = "total_net_pay"
 
 
 class FeatureCol(StrEnum):
@@ -467,4 +480,40 @@ REQUIRED_PAYROLL_COLUMNS = {
     PayrollCol.TENURE_MONTHS,
     PayrollCol.HIRE_DATE,
     PayrollCol.TERMINATION_DATE,
+}
+
+REQUIRED_EMPLOYEE_PAY_CYCLE_COLUMNS = {
+    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+    PayrollCol.EMPLOYEE_ID,
+    PayrollCol.FACILITY_ID,
+    PayrollCol.FACILITY_NAME,
+    PayrollCol.PAY_PERIOD_INDEX,
+    PayrollCol.PAY_PERIOD_START,
+    PayrollCol.PAY_PERIOD_END,
+    PayrollCol.ROLE,
+    PayrollCol.LICENSE_TYPE,
+    PayrollCol.DEPARTMENT,
+    PayrollCol.JOB_FAMILY,
+    PayrollCol.JOB_LEVEL,
+    PayrollCol.PAY_TYPE,
+    PayrollCol.BASE_PAY_RATE,
+    PayrollCol.HIRE_DATE,
+    PayrollCol.TERMINATION_DATE,
+    PayrollCol.TENURE_MONTHS,
+    PayrollCol.EMPLOYMENT_STATUS,
+    PayrollCol.SHIFT_COUNT,
+    PayrollCol.TOTAL_SCHEDULED_HOURS,
+    PayrollCol.TOTAL_WORKED_HOURS,
+    PayrollCol.TOTAL_PAID_HOURS,
+    PayrollCol.TOTAL_REGULAR_HOURS,
+    PayrollCol.TOTAL_OVERTIME_HOURS,
+    PayrollCol.TOTAL_EXPECTED_GROSS_PAY,
+    PayrollCol.TOTAL_PREMIUM_PAY,
+    PayrollCol.TOTAL_GROSS_PAY,
+    PayrollCol.TOTAL_DEDUCTIONS,
+    PayrollCol.TOTAL_NET_PAY,
+    PayrollCol.IS_ANOMALY,
+    PayrollCol.ANOMALY_CATEGORY,
+    PayrollCol.ANOMALY_DOLLARS,
+    PayrollCol.SCENARIO_FAMILY,
 }

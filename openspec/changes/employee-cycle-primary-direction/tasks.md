@@ -12,11 +12,11 @@
 
 ## 3. Employee-Pay-Cycle Runtime Follow-Up
 
-- [ ] 3.1 Define active employee-pay-cycle synthetic data contracts and result objects
+- [x] 3.1 Define active employee-pay-cycle synthetic data contracts and result objects
 - [ ] 3.2 Rebuild active scoring interfaces around employee-pay-cycle formulation comparison rather than a single hybrid score
 - [ ] 3.3 Rebuild active evaluation and queue contracts around employee-pay-cycle grouped ranking and production-candidacy reporting
 
 ## 4. Verification
 
-- [ ] 4.1 Run `uv run prek run --all-files` after runtime and notebook changes
-- [ ] 4.2 Run targeted `uv run pytest` coverage for changed runtime behavior once the employee-pay-cycle path is implemented
+- [x] 4.1 Run `uv run prek run --all-files` after runtime and notebook changes
+- [x] 4.2 Run targeted `uv run pytest` coverage for changed runtime behavior once the employee-pay-cycle path is implemented

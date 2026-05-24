@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import polars as pl
 
 from payroll_anomaly_ranking.columns import (
+    REQUIRED_EMPLOYEE_PAY_CYCLE_COLUMNS,
     REQUIRED_PAYROLL_COLUMNS,
     AggregateCol,
     ApprovalStatus,
@@ -118,6 +119,82 @@ def validate_payroll(payroll: pl.DataFrame) -> ValidationResults:
                     "check": check,
                     "column": None,
                     "message": f"{count} SNF shift-level records may require payroll approval review",
+                },
+            )
+    return ValidationResults(pl.DataFrame(failures), pl.DataFrame(warnings))
+
+
+def validate_employee_pay_cycles(payroll: pl.DataFrame) -> ValidationResults:
+    failures: list[dict[str, object]] = []
+    warnings: list[dict[str, object]] = []
+    missing = sorted(REQUIRED_EMPLOYEE_PAY_CYCLE_COLUMNS - set(payroll.columns))
+    for column in missing:
+        failures.append(
+            {
+                "check": "required_column",
+                "column": column,
+                "message": f"Missing required employee-pay-cycle column: {column}",
+            },
+        )
+    if missing:
+        return ValidationResults(pl.DataFrame(failures), pl.DataFrame(warnings))
+    failure_checks = {
+        "null_employee_cycle_identifier": payroll.filter(
+            pl.col(PayrollCol.EMPLOYEE_PAY_CYCLE_ID).is_null(),
+        ).height,
+        "null_employee_identifier": payroll.filter(
+            pl.col(PayrollCol.EMPLOYEE_ID).is_null(),
+        ).height,
+        "null_period": payroll.filter(
+            pl.col(PayrollCol.PAY_PERIOD_INDEX).is_null(),
+        ).height,
+        "invalid_pay_period": payroll.filter(
+            pl.col(PayrollCol.PAY_PERIOD_START) > pl.col(PayrollCol.PAY_PERIOD_END),
+        ).height,
+        "invalid_lifecycle_dates": payroll.filter(
+            pl.col(PayrollCol.HIRE_DATE) > pl.col(PayrollCol.PAY_PERIOD_END),
+        ).height,
+        "negative_normal_payroll": payroll.filter(
+            (pl.col(PayrollCol.IS_ANOMALY) == 0)
+            & (
+                (pl.col(PayrollCol.TOTAL_GROSS_PAY) < 0)
+                | (pl.col(PayrollCol.TOTAL_PAID_HOURS) < 0)
+                | (pl.col(PayrollCol.TOTAL_SCHEDULED_HOURS) < 0)
+            ),
+        ).height,
+        "duplicate_employee_cycle": payroll.filter(
+            pl.col(PayrollCol.EMPLOYEE_PAY_CYCLE_ID).is_duplicated(),
+        ).height,
+    }
+    for check, count in failure_checks.items():
+        if count:
+            failures.append(
+                {
+                    "check": check,
+                    "column": None,
+                    "message": f"{count} rows failed {check}",
+                },
+            )
+    warning_checks = {
+        "high_cycle_overtime": payroll.filter(
+            pl.col(PayrollCol.TOTAL_OVERTIME_HOURS) > 32,
+        ).height,
+        "high_cycle_shift_count": payroll.filter(
+            pl.col(PayrollCol.SHIFT_COUNT) > 14,
+        ).height,
+        "anomalous_shift_count_exceeds_shift_count": payroll.filter(
+            pl.col(PayrollCol.ANOMALOUS_SHIFT_COUNT) > pl.col(PayrollCol.SHIFT_COUNT),
+        ).height,
+    }
+    for check, count in warning_checks.items():
+        if count:
+            warnings.append(
+                {
+                    "check": check,
+                    "column": None,
+                    "message": (
+                        f"{count} employee-pay-cycle rows may require additional review"
+                    ),
                 },
             )
     return ValidationResults(pl.DataFrame(failures), pl.DataFrame(warnings))
