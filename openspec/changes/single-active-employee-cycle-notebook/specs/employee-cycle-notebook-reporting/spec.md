@@ -29,3 +29,11 @@ The primary employee-pay-cycle notebook SHALL base its narrative, tables, and pl
 - **WHEN** a section presents data generation, scoring, evaluation, queue, or production-candidacy evidence
 - **THEN** the evidence is sourced from employee-pay-cycle pipeline outputs or notebook-owned assembly built from those active outputs
 - **AND** deprecated shift-level notebook paths are not treated as the active source of proof
+
+### Requirement: Label-engineering section is implementation-backed
+The notebook's label-engineering section SHALL describe the real employee-pay-cycle label formulas used by the active runtime rather than placeholder concepts.
+
+#### Scenario: Label section explains relevance and utility labels
+- **WHEN** a reviewer reads section `4. Label Engineering`
+- **THEN** it explains how employee-pay-cycle `is_anomaly`, `anomaly_dollars`, dominant `anomaly_category`, `relevance_grade`, `observed_correction`, and `net_utility` are constructed
+- **AND** it states which labels are evaluation-only and excluded from scoring inputs

@@ -10,6 +10,7 @@ This change replaces the old reporting contract with one primary employee-pay-cy
 - Replace sequence-based active notebook requirements with one primary employee-pay-cycle notebook and one fixed section mapping.
 - Keep notebook reproducibility, fast validation, and Jupytext source-of-truth behavior intact while changing the reporting contract.
 - Align the notebook with active runtime outputs, including employee-pay-cycle scoring, grouped ranking metrics, review queues, facility summaries, and production-candidacy evidence.
+- Define and implement explicit employee-pay-cycle label artifacts for binary anomaly truth, dollar impact, dominant category, graded ranking relevance, and business review utility.
 - Close active-runtime gaps that would make the notebook misleading, especially evaluation-truth leakage in employee-cycle formulations and miswired employee-cycle pipeline artifacts.
 - Port or rebuild enough diagnostics and stress-evaluation helpers so the notebook's deep-diagnostic and appendix sections are sourced from active employee-cycle outputs rather than deprecated shift-level paths.
 
@@ -47,6 +48,8 @@ The current employee-cycle implementation has three material issues:
 - employee-cycle pipeline artifact wiring returns empty uncertainty and risk-coverage outputs and misroutes production-candidacy data into expected-interval artifacts,
 - queue simulation and many repeated-world diagnostic helpers still run through deprecated shift-level paths.
 
+It also lacks the explicit label artifacts that the notebook currently implies exist for learning-to-rank and business-value evaluation. The change will therefore define deterministic employee-cycle label engineering for `relevance_grade` and `net_utility` rather than treating those as notebook-only concepts.
+
 These issues will be treated as part of the notebook-contract change because the new notebook would otherwise institutionalize incorrect or legacy-only evidence.
 
 Alternatives considered:
@@ -58,6 +61,22 @@ The spec layer will add `employee-cycle-notebook-reporting` for the fixed notebo
 
 Alternatives considered:
 - Put every requirement into the new notebook-specific capability only: rejected because evaluation, scoring, and data-generation specs already own notebook-facing acceptance criteria that would otherwise become inconsistent.
+
+### Decision: Use deterministic synthetic label formulas for employee-cycle relevance and utility
+The change will define two explicit employee-cycle labels in addition to `is_anomaly`, `anomaly_dollars`, and `anomaly_category`.
+
+- `relevance_grade` is a 0-3 evaluation label for ranking research.
+  - `0`: no latent anomaly in the employee-pay-cycle.
+  - `1`: anomalous employee-pay-cycle with low severity.
+  - `2`: anomalous employee-pay-cycle with moderate severity or stronger historical-review evidence.
+  - `3`: anomalous employee-pay-cycle with high severity, concentrated financial exposure, or multiple anomalous shifts.
+- `net_utility` is a per-reviewed-record business-value label used only for evaluation. It represents recovered synthetic value minus review cost under configurable assumptions rather than a production-visible feature.
+
+The exact cut points and utility assumptions should be deterministic, documented in the notebook, and implemented in runtime code so the ranker and utility evaluation use the same contract.
+
+Alternatives considered:
+- Keep `relevance_grade` and `net_utility` as descriptive notebook concepts only: rejected because it makes the notebook misleading.
+- Learn utility directly from `anomaly_dollars` without a declared contract: rejected because it hides business assumptions and makes validation harder.
 
 ## Risks / Trade-offs
 

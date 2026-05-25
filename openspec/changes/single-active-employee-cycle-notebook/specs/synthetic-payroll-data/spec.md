@@ -27,3 +27,11 @@ The active employee-pay-cycle notebook SHALL demonstrate hard validation failure
 #### Scenario: Validation outputs are separated
 - **WHEN** validation results are shown in the active employee-pay-cycle notebook
 - **THEN** hard failures are presented as pipeline-stopping data issues and warnings are presented as payroll exceptions that may require analyst review
+
+### Requirement: Employee-cycle synthetic label set
+The synthetic employee-pay-cycle workflow SHALL emit a documented evaluation label set that supports classification, severity analysis, ranking research, and business-value evaluation.
+
+#### Scenario: Employee-cycle labels include relevance and utility
+- **WHEN** employee-pay-cycle records are generated from lower-level synthetic payroll activity
+- **THEN** the output includes `is_anomaly`, `anomaly_dollars`, dominant `anomaly_category`, `observed_correction`, `observed_correction_dollars`, `relevance_grade`, and `net_utility`
+- **AND** the notebook documents that `observed_correction` is a biased historical signal while `relevance_grade` and `net_utility` are evaluation-only latent labels
