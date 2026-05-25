@@ -12,6 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 notebooks = [
+    "graphviz>=0.21",
     "ipykernel>=7.2.0",
     "itables>=2.7.3",
     "jupyterlab>=4.5.7",
