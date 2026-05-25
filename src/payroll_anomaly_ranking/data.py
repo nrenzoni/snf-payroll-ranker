@@ -489,6 +489,7 @@ def inject_anomalies(
         pl.col(PayrollCol.SCENARIO_FAMILY).fill_null(ScenarioFamily.BASELINE),
         pl.col(PayrollCol.SCENARIO_STATUS).fill_null("baseline"),
     )
+    updated = _simulate_observed_corrections(updated, rng)
     return updated, pl.DataFrame(labels, infer_schema_length=None)
 
 
@@ -634,6 +635,10 @@ def employee_pay_cycle_records(payroll: pl.DataFrame) -> pl.DataFrame:
         pl.sum(PayrollCol.NET_PAY).alias(PayrollCol.TOTAL_NET_PAY),
         pl.max(PayrollCol.IS_ANOMALY).alias(PayrollCol.IS_ANOMALY),
         pl.sum(PayrollCol.ANOMALY_DOLLARS).alias(PayrollCol.ANOMALY_DOLLARS),
+        pl.max(PayrollCol.OBSERVED_CORRECTION).alias(PayrollCol.OBSERVED_CORRECTION),
+        pl.sum(PayrollCol.OBSERVED_CORRECTION_DOLLARS).alias(
+            PayrollCol.OBSERVED_CORRECTION_DOLLARS,
+        ),
     )
     return (
         cycles.join(
@@ -1088,3 +1093,52 @@ def _row_float(row: dict[str, object], column: str) -> float:
 def _row_int(row: dict[str, object], column: str) -> int:
     value = row[column]
     return int(cast(int | str, value))
+
+
+def _simulate_observed_corrections(
+    payroll: pl.DataFrame,
+    rng: np.random.Generator,
+) -> pl.DataFrame:
+    review_probability = (
+        pl.when(pl.col(PayrollCol.IS_ANOMALY) == 0)
+        .then(0.01)
+        .when(pl.col(PayrollCol.ANOMALY_DOLLARS) >= 140.0)
+        .then(0.72)
+        .when(pl.col(PayrollCol.ANOMALY_DOLLARS) >= 80.0)
+        .then(0.55)
+        .when(pl.col(PayrollCol.MANUAL_EDIT) == 1)
+        .then(0.48)
+        .when(pl.col(PayrollCol.PAYROLL_MATURITY) == "low")
+        .then(0.38)
+        .otherwise(0.24)
+    )
+    sampled_review = pl.Series(
+        "_observed_review_draw",
+        rng.random(payroll.height),
+    )
+    # Historical corrections are a biased subset: large-dollar, manual-edit, and
+    # low-maturity anomalies are more likely to be reviewed and corrected.
+    return (
+        payroll.with_columns(sampled_review)
+        .with_columns(
+            review_probability.alias("_observed_review_probability"),
+        )
+        .with_columns(
+            (
+                (pl.col(PayrollCol.IS_ANOMALY) == 1)
+                & (
+                    pl.col("_observed_review_draw")
+                    <= pl.col("_observed_review_probability")
+                )
+            )
+            .cast(pl.Int8)
+            .alias(PayrollCol.OBSERVED_CORRECTION),
+        )
+        .with_columns(
+            (
+                pl.col(PayrollCol.OBSERVED_CORRECTION)
+                * pl.col(PayrollCol.ANOMALY_DOLLARS)
+            ).alias(PayrollCol.OBSERVED_CORRECTION_DOLLARS),
+        )
+        .drop("_observed_review_draw", "_observed_review_probability")
+    )

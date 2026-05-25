@@ -72,6 +72,8 @@ class PayrollCol(StrEnum):
     IS_ANOMALY = "is_anomaly"
     ANOMALY_CATEGORY = "anomaly_category"
     ANOMALY_DOLLARS = "anomaly_dollars"
+    OBSERVED_CORRECTION = "observed_correction"
+    OBSERVED_CORRECTION_DOLLARS = "observed_correction_dollars"
     OOD_PAY_CODE_CONTEXT = "ood_pay_code_context"
     SHIFT_COUNT = "shift_count"
     ANOMALOUS_SHIFT_COUNT = "anomalous_shift_count"
@@ -517,7 +519,9 @@ REQUIRED_EMPLOYEE_PAY_CYCLE_COLUMNS = {
     PayrollCol.TOTAL_DEDUCTIONS,
     PayrollCol.TOTAL_NET_PAY,
     PayrollCol.IS_ANOMALY,
+    PayrollCol.OBSERVED_CORRECTION,
     PayrollCol.ANOMALY_CATEGORY,
     PayrollCol.ANOMALY_DOLLARS,
+    PayrollCol.OBSERVED_CORRECTION_DOLLARS,
     PayrollCol.SCENARIO_FAMILY,
 }

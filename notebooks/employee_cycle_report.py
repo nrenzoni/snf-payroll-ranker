@@ -57,6 +57,20 @@
 # - review bias.
 
 # %%
+import polars as pl
+from common.plots import (
+    LetsPlot,
+    aes,
+    geom_bar,
+    geom_density,
+    geom_histogram,
+    geom_point,
+    geom_tile,
+    ggplot,
+    labs,
+    rotated_x_labels,
+    theme_minimal,
+)
 from graphviz import Digraph
 
 from payroll_anomaly_ranking.columns import PayrollCol
@@ -64,6 +78,10 @@ from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.data import generate_employee_pay_cycles
 from payroll_anomaly_ranking.features import build_employee_cycle_features
 
+# %%
+LetsPlot.setup_html()
+
+# %%
 sim_config = PayrollConfig(
     facility_count=75,
     pay_periods=36,
@@ -139,21 +157,202 @@ data.payroll.select(
 ).head()
 
 # %% [markdown]
-# show sample rows and schema
-
-# %% [markdown]
 # ## 3. Simulation Sanity Checks
 #
-# It will cover dataset scale, anomaly prevalence, facility distribution, scenario contrast, and other sanity checks that establish whether the simulation is behaving as intended.
-#
-# Show only the most important plots:
-#
-# - issue rate by facility,
-# - overtime distribution by role,
-# - pay-rate distribution by role,
-# - true issue rate vs observed correction rate,
-# - positives per facility-cycle,
-# - dollar impact distribution.
+# These checks confirm that the synthetic employee-pay-cycle world is large
+# enough for evaluation, that anomaly prevalence is non-degenerate, and that the
+# historical observed-correction signal is a biased subset of the latent truth
+# rather than a duplicate of the evaluation labels.
+
+# %%
+sanity_overview = pl.DataFrame(
+    {
+        "metric": [
+            "employee-pay-cycle rows",
+            "supporting shift rows",
+            "facilities",
+            "employees",
+            "pay periods",
+            "true issue rate",
+            "observed correction rate",
+            "total anomaly dollars",
+            "observed correction dollars",
+        ],
+        "value": [
+            f"{data.payroll.height:,}",
+            f"{data.supporting_payroll.height:,}",
+            f"{data.payroll.select(pl.col(PayrollCol.FACILITY_ID).n_unique()).item():,}",
+            f"{data.payroll.select(pl.col(PayrollCol.EMPLOYEE_ID).n_unique()).item():,}",
+            f"{data.payroll.select(pl.col(PayrollCol.PAY_PERIOD_INDEX).n_unique()).item():,}",
+            f"{100 * data.payroll.select(pl.col(PayrollCol.IS_ANOMALY).mean()).item():.2f}%",
+            f"{100 * data.payroll.select(pl.col(PayrollCol.OBSERVED_CORRECTION).mean()).item():.2f}%",
+            f"${data.payroll.select(pl.sum(PayrollCol.ANOMALY_DOLLARS)).item():,.0f}",
+            f"${data.payroll.select(pl.sum(PayrollCol.OBSERVED_CORRECTION_DOLLARS)).item():,.0f}",
+        ],
+    },
+)
+
+sanity_overview
+
+
+# %%
+facility_issue_rates = (
+    data.payroll.group_by([PayrollCol.FACILITY_ID, PayrollCol.FACILITY_NAME])
+    .agg(
+        pl.len().alias("employee_cycles"),
+        pl.mean(PayrollCol.IS_ANOMALY).alias("true_issue_rate"),
+        pl.mean(PayrollCol.OBSERVED_CORRECTION).alias("observed_correction_rate"),
+        pl.sum(PayrollCol.ANOMALY_DOLLARS).alias("anomaly_dollars"),
+    )
+    .sort("employee_cycles", descending=True)
+)
+
+facility_issue_rates.head(10)
+
+# %%
+top_facility_issue_rates = facility_issue_rates.head(20).with_columns(
+    (100 * pl.col("true_issue_rate")).round(2).alias("true_issue_rate_pct"),
+)
+
+(
+    ggplot(
+        top_facility_issue_rates,
+        aes(x=PayrollCol.FACILITY_ID, y="true_issue_rate_pct"),
+    )
+    + geom_bar(stat="identity", fill="#4C78A8")
+    + labs(
+        title="True issue rate by facility",
+        x="Facility",
+        y="True issue rate (%)",
+    )
+    + theme_minimal()
+    + rotated_x_labels()
+)
+
+
+# %%
+overtime_by_role = data.payroll.select(
+    PayrollCol.ROLE,
+    PayrollCol.TOTAL_OVERTIME_HOURS,
+).filter(
+    pl.col(PayrollCol.TOTAL_OVERTIME_HOURS) > 0,
+)
+
+(
+    ggplot(
+        overtime_by_role,
+        aes(x=PayrollCol.TOTAL_OVERTIME_HOURS, color=PayrollCol.ROLE),
+    )
+    + geom_density(size=1.0)
+    + labs(
+        title="Overtime distribution by role",
+        x="Total overtime hours in employee-pay-cycle",
+        y="Density",
+        color="Role",
+    )
+    + theme_minimal()
+)
+
+
+# %%
+pay_rate_by_role = data.payroll.select(
+    PayrollCol.ROLE,
+    PayrollCol.BASE_PAY_RATE,
+)
+
+(
+    ggplot(
+        pay_rate_by_role,
+        aes(x=PayrollCol.BASE_PAY_RATE, color=PayrollCol.ROLE),
+    )
+    + geom_density(size=1.0)
+    + labs(
+        title="Base pay-rate distribution by role",
+        x="Base hourly rate",
+        y="Density",
+        color="Role",
+    )
+    + theme_minimal()
+)
+
+
+# %%
+true_vs_observed_rates = facility_issue_rates.select(
+    PayrollCol.FACILITY_ID,
+    (100 * pl.col("true_issue_rate")).round(2).alias("true_issue_rate_pct"),
+    (100 * pl.col("observed_correction_rate"))
+    .round(2)
+    .alias("observed_correction_rate_pct"),
+)
+
+(
+    ggplot(
+        true_vs_observed_rates,
+        aes(x="true_issue_rate_pct", y="observed_correction_rate_pct"),
+    )
+    + geom_point(color="#E45756", alpha=0.8)
+    # + geom_abline(slope=1, intercept=0, linetype="dashed", color="darkgray")
+    + labs(
+        title="True issue rate vs observed correction rate by facility",
+        x="True issue rate (%)",
+        y="Observed correction rate (%)",
+    )
+    + theme_minimal()
+)
+
+
+# %%
+facility_cycle_positives = (
+    data.payroll.group_by([PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX])
+    .agg(pl.sum(PayrollCol.IS_ANOMALY).alias("positive_cycles"))
+    .with_columns(pl.col("positive_cycles").clip(0, 8).alias("positive_cycles_capped"))
+)
+
+(
+    ggplot(
+        facility_cycle_positives,
+        aes(
+            x=PayrollCol.PAY_PERIOD_INDEX,
+            y=PayrollCol.FACILITY_ID,
+            fill="positive_cycles_capped",
+        ),
+    )
+    + geom_tile()
+    + labs(
+        title="Positive employee-pay-cycles per facility-period",
+        x="Pay period",
+        y="Facility",
+        fill="Positives\n(capped at 8)",
+    )
+    + theme_minimal()
+)
+
+
+# %%
+anomaly_dollars = data.payroll.select(PayrollCol.ANOMALY_DOLLARS).filter(
+    pl.col(PayrollCol.ANOMALY_DOLLARS) > 0,
+)
+
+(
+    ggplot(anomaly_dollars, aes(x=PayrollCol.ANOMALY_DOLLARS))
+    + geom_histogram(bins=30, fill="#72B7B2", color="#3B5C76")
+    + labs(
+        title="Dollar impact distribution for anomalous employee-pay-cycles",
+        x="Injected anomaly dollars",
+        y="Count",
+    )
+    + theme_minimal()
+)
+
+
+# %% [markdown]
+# The simulation produces a broad facility-period panel with enough employee-pay-
+# cycle volume to support grouped queue evaluation. True issue rates vary across
+# facilities, while observed corrections remain lower because review is modeled
+# as a selective historical process that favors larger-dollar and more obvious
+# exceptions. Overtime and pay-rate distributions also differ meaningfully by
+# role, which is useful because the ranking task should separate normal clinical
+# workload patterns from unusually risky payroll cycles.
 
 # %% [markdown]
 # ## 4. Label Engineering
