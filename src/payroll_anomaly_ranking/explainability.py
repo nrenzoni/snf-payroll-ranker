@@ -444,6 +444,8 @@ def build_employee_cycle_evaluation_review_queue(
             PayrollCol.IS_ANOMALY,
             PayrollCol.ANOMALY_CATEGORY,
             PayrollCol.ANOMALY_DOLLARS,
+            PayrollCol.RELEVANCE_GRADE,
+            PayrollCol.NET_UTILITY,
         ),
         on=PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
         how="left",

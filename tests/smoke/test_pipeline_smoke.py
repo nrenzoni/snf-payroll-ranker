@@ -35,6 +35,7 @@ def test_pipeline_runs_end_to_end_without_leaking_review_truth() -> None:
     assert results.metrics.height == 1
     assert results.analyst_review_queue.height > 0
     assert results.facility_approval_summary.height > 0
+    assert results.production_candidacy.height > 0
     assert PayrollCol.FACILITY_ID in results.payroll.columns
     assert PayrollCol.EMPLOYEE_PAY_CYCLE_ID in results.payroll.columns
     assert PayrollCol.TOTAL_PREMIUM_PAY in results.payroll.columns
@@ -43,6 +44,8 @@ def test_pipeline_runs_end_to_end_without_leaking_review_truth() -> None:
         PayrollCol.IS_ANOMALY,
         PayrollCol.ANOMALY_CATEGORY,
         PayrollCol.ANOMALY_DOLLARS,
+        PayrollCol.RELEVANCE_GRADE,
+        PayrollCol.NET_UTILITY,
         "name",
         "email",
         "bank_account",

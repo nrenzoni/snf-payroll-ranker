@@ -322,7 +322,9 @@ def build_employee_cycle_features(payroll: pl.DataFrame) -> pl.DataFrame:
             FeatureCol.PAID_MINUS_SCHEDULED_HOURS,
         ),
         pl.col(PayrollCol.SHIFT_COUNT).alias(FeatureCol.TRAILING_7_DAY_HOURS),
-        (pl.col(PayrollCol.ANOMALOUS_SHIFT_COUNT).fill_null(0) > 0)
+        # Count prior high-overtime cycles as a fatigue proxy without using
+        # evaluation-only anomaly truth.
+        (pl.col(PayrollCol.TOTAL_OVERTIME_HOURS).fill_null(0) >= 16)
         .cast(pl.Int64)
         .shift(1)
         .rolling_sum(window_size=6, min_samples=1)

@@ -93,6 +93,7 @@ class PipelineResults:
     _uncertainty_bucket_metrics: pl.DataFrame | None = None
     _risk_coverage_analysis: pl.DataFrame | None = None
     _expected_gross_pay_interval_metrics: pl.DataFrame | None = None
+    _production_candidacy: pl.DataFrame | None = None
     _backtest: pl.DataFrame | None = None
     _rolling_origin_metrics: pl.DataFrame | None = None
     _validation_selected_settings: pl.DataFrame | None = None
@@ -148,6 +149,10 @@ class PipelineResults:
             self._expected_gross_pay_interval_metrics,
             "expected_gross_pay_interval_metrics",
         )
+
+    @property
+    def production_candidacy(self) -> pl.DataFrame:
+        return self._required(self._production_candidacy, "production_candidacy")
 
     @property
     def backtest(self) -> pl.DataFrame:
@@ -262,6 +267,9 @@ def run_legacy_shift_pipeline(
         _expected_gross_pay_interval_metrics=evaluation.expected_gross_pay_interval_metrics
         if evaluation is not None
         else None,
+        _production_candidacy=evaluation.production_candidacy
+        if evaluation is not None
+        else None,
         _backtest=backtest,
         _rolling_origin_metrics=rolling.metrics if rolling is not None else None,
         _validation_selected_settings=rolling.selected_settings
@@ -347,9 +355,16 @@ def run_employee_cycle_pipeline(
         if evaluation is not None
         else None,
         _category_error_analysis=category,
-        _uncertainty_bucket_metrics=pl.DataFrame() if evaluation is not None else None,
-        _risk_coverage_analysis=pl.DataFrame() if evaluation is not None else None,
-        _expected_gross_pay_interval_metrics=evaluation.production_candidacy
+        _uncertainty_bucket_metrics=evaluation.uncertainty_bucket_metrics
+        if evaluation is not None
+        else None,
+        _risk_coverage_analysis=evaluation.risk_coverage_analysis
+        if evaluation is not None
+        else None,
+        _expected_gross_pay_interval_metrics=evaluation.expected_gross_pay_interval_metrics
+        if evaluation is not None
+        else None,
+        _production_candidacy=evaluation.production_candidacy
         if evaluation is not None
         else None,
         _backtest=backtest,
