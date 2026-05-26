@@ -75,6 +75,8 @@ Install optional notebook/reporting dependencies before executing Jupytext noteb
 uv sync --extra notebooks
 ```
 
+The active reporting contract is one primary Jupytext notebook under `notebooks/`. Older multi-notebook and shift-level narratives remain in the repository only as deprecated historical reference.
+
 ---
 
 ## What The Workflow Covers
@@ -133,14 +135,14 @@ Rendered notebooks and case-study walkthroughs are hosted at:
 
 Active notebook under `notebooks/`:
 
-- `notebooks/employee_cycle_report.py`: active single-notebook residual payroll ranking report. It asks which ML formulation best prioritizes ambiguous employee-pay-cycle records after critical hard rules remove obvious payroll problems.
+- `notebooks/employee_cycle_report.py`: the only active public reporting deliverable. It covers the full residual employee-pay-cycle story in one notebook: executive summary, hard-rule gate, residual-universe sanity checks, label engineering, feature engineering, formulation comparison, queue results, ablations, diagnostics, final recommendation, and technical appendix.
 
 Legacy notebooks retained for reference under `notebooks/legacy/shift_level/`:
 
 - `notebooks/legacy/shift_level/08_snf_payroll_approval_case_studies.py`: deprecated business-facing shift-level SNF proof notebook.
 - `notebooks/legacy/shift_level/09_model_ablation_and_ml_value.py`: deprecated shift-level hybrid ablation and diagnostic notebook.
 
-The active notebook describes and validates the residual employee-pay-cycle ranking workflow rather than extending the deprecated shift-level narrative.
+The active notebook describes and validates the residual employee-pay-cycle ranking workflow rather than extending the deprecated shift-level narrative. Compliance, PBJ, and HPRD staffing metrics are out of scope for this active notebook contract.
 
 Notebook-only plotting code lives in Jupytext notebook sources and shared plotting adapters under `notebooks/common/`. The runtime package remains free of Jupyter and Lets-Plot imports.
 
@@ -149,6 +151,14 @@ Fast-path notebook validation (reduced workload, `/tmp` output, no paired `.ipyn
 ```bash
 NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/employee-cycle-report.fast.ipynb notebooks/employee_cycle_report.py
 ```
+
+Full paired-output refresh for the active notebook:
+
+```bash
+uv run jupytext --set-formats ipynb,py:percent --execute notebooks/employee_cycle_report.py
+```
+
+Expected notebook and pipeline artifacts include generated synthetic data, evaluation outputs, and any notebook-produced paired `.ipynb` output when full refresh is requested.
 
 ---
 

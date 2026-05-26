@@ -20,8 +20,8 @@
 ## 3. Spec And Documentation Updates
 
 - [x] 3.1 Update active docs to identify the single employee-pay-cycle notebook as the only active reporting contract and mark legacy notebook sequences as historical reference only.
-- [ ] 3.2 Update `README.md` and `notebooks/README.md` so they describe the new active residual-ranking notebook, its appendix role, and the correct execution or validation commands.
-- [ ] 3.3 Remove or revise remaining notebook-sequence references in active contributor-facing documentation where they conflict with the new contract.
+- [x] 3.2 Update `README.md` and `notebooks/README.md` so they describe the new active residual-ranking notebook, its appendix role, and the correct execution or validation commands.
+- [x] 3.3 Remove or revise remaining notebook-sequence references in active contributor-facing documentation where they conflict with the new contract.
 
 ## 4. Verification
 
