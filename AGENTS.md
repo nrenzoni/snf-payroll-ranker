@@ -27,6 +27,15 @@ Python 3.13 payroll anomaly ranking pipeline using Polars, NumPy, scikit-learn, 
 - Prefer Polars expressions and vectorized NumPy over row-wise Python callbacks in hot paths.
 - Keep `src/payroll_anomaly_ranking/` free of notebook-only plotting dependencies; visualization code belongs in Jupytext notebooks, with shared plotting adapters in `notebooks/common/plots.py`.
 - Use Lets-Plot for notebook visualizations; never use matplotlib.
+- Wrap Lets-Plot ggplot operator chains in parentheses with one `+` operator per line for readability:
+  ```python
+  (
+      ggplot(df, aes(...))
+      + geom_line()
+      + geom_point()
+      + theme_minimal()
+  )
+  ```
 - Add comments wherever they help a new developer understand the code quickly: non-obvious business logic, leakage prevention, performance tradeoffs, long functions, classes, and anywhere there is even a slight chance of misunderstanding.
 
 ## Verify
