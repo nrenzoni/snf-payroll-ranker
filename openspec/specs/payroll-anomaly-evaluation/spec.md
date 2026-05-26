@@ -19,6 +19,11 @@ The system SHALL report employee-pay-cycle grouped ranking metrics that measure 
 - **WHEN** active predictions are evaluated
 - **THEN** the results include top-k queue metrics computed within facility-cycle groups and aggregated across groups using explicit project-defined aggregation schemes
 
+#### Scenario: Grouped percent-budget metrics are reported
+- **WHEN** active employee-pay-cycle predictions are evaluated using percentage review budgets
+- **THEN** the results include grouped queue metrics computed from a configured share of each facility-cycle group reviewed
+- **AND** the budget-to-count conversion specifies the rounding rule and any minimum reviewed-record behavior used for reproducible evaluation
+
 #### Scenario: Ranking quality is reported
 - **WHEN** active predictions are evaluated against available labels
 - **THEN** the results include rank-oriented metrics such as precision@K, recall@K, mean reciprocal rank, and other grouped ranking metrics selected for the active employee-pay-cycle program
@@ -28,7 +33,7 @@ The active evaluation program SHALL determine whether an employee-pay-cycle scor
 
 #### Scenario: Candidate methods are judged on deployment-relevant evidence
 - **WHEN** an active method is summarized after Phase 1 evaluation
-- **THEN** the evaluation reports whether the method meets the project's current criteria for temporal generalization, facility generalization, top-k ranking value, uncertainty behavior, and explanation readiness
+- **THEN** the evaluation reports whether the method meets the project's current criteria for temporal generalization, facility generalization, review-budget ranking value, uncertainty behavior, and explanation readiness
 
 ### Requirement: Cost-sensitive evaluation
 The system SHALL estimate and report approval exposure captured by ranked payroll anomaly outputs.
@@ -36,6 +41,10 @@ The system SHALL estimate and report approval exposure captured by ranked payrol
 #### Scenario: Exposure captured at K is calculated
 - **WHEN** top-ranked employee-pay-cycle records are evaluated
 - **THEN** the system reports estimated exposure captured@K, injected dollars-at-risk captured@K for evaluation-only analysis, and the share of total injected anomaly dollar impact captured by the approval budget
+
+#### Scenario: Exposure captured at percent budget is calculated
+- **WHEN** top-ranked employee-pay-cycle records are evaluated using percentage review budgets
+- **THEN** the system reports estimated exposure captured, injected dollars-at-risk captured, and the share of total injected anomaly dollar impact captured at each configured review-budget percentage
 
 ### Requirement: Model and category comparison
 The system SHALL compare manual threshold, deterministic rule-based, statistical, ML, and hybrid scoring approaches across overall, facility-level, and case-study category results.
@@ -49,11 +58,12 @@ The system SHALL compare manual threshold, deterministic rule-based, statistical
 - **THEN** the notebook discusses false positives, false negatives, legitimate staffing or premium exceptions, subtle missed SNF anomalies, and practical improvements
 
 ### Requirement: Business review-budget evaluation notebook
-The active employee-pay-cycle notebook SHALL present review-budget metrics including precision@K, recall@K, F1@K, PR-AUC, average anomaly rank, mean reciprocal rank, exposure captured@K, and dollars-at-risk captured@K where those metrics apply to the active formulation.
+The active employee-pay-cycle notebook SHALL present percent-based review-budget metrics including precision, recall, F1, PR-AUC, average anomaly rank, mean reciprocal rank, exposure captured, and dollars-at-risk captured where those metrics apply to the active formulation.
 
 #### Scenario: Approval-budget metrics are displayed
 - **WHEN** the active employee-pay-cycle notebook runs
-- **THEN** it displays review-budget metrics for configured top-K budgets, including applicable precision, recall, F1, PR-AUC, average anomaly rank, mean reciprocal rank, estimated exposure captured, synthetic dollars captured, and dollar capture rate
+- **THEN** it displays review-budget metrics for configured percentages of each facility-pay-period residual queue reviewed, including applicable precision, recall, F1, PR-AUC, average anomaly rank, mean reciprocal rank, estimated exposure captured, synthetic dollars captured, and dollar capture rate
+- **AND** the notebook labels those budgets as shares of each facility-pay-period residual queue rather than as absolute top-K cutoffs
 
 ### Requirement: Temporal validation explanation
 The active employee-pay-cycle notebook SHALL explain temporal validation and SHALL avoid endorsing random split framing. The notebook MAY show random row splits only as an explicitly labeled anti-pattern when it is immediately compared against temporal validation.
@@ -78,7 +88,7 @@ The active employee-pay-cycle notebook SHALL explain which review budgets captur
 
 #### Scenario: Review budget trade-off is interpreted
 - **WHEN** evaluation metrics are displayed in the active notebook
-- **THEN** the notebook includes narrative interpreting dollar capture, precision changes, and the practical cost-aware trade-off of reviewing more records
+- **THEN** the notebook includes narrative interpreting dollar capture, precision changes, and the practical cost-aware trade-off of reviewing a larger share of each residual queue
 
 ### Requirement: Rolling-origin validation
 The system SHALL evaluate payroll anomaly ranking across multiple temporal origins when enough pay periods are available.
@@ -122,7 +132,7 @@ The system SHALL evaluate whether uncertainty scores provide useful context for 
 
 #### Scenario: Existing review-budget metrics remain available
 - **WHEN** uncertainty evaluation is generated
-- **THEN** existing precision@K, recall@K, dollars captured@K, model comparison, and category error analysis outputs remain available across historical evaluation periods
+- **THEN** existing review-budget metrics, model comparison, and category error analysis outputs remain available across historical evaluation periods for the active budget definition in use
 
 ### Requirement: Expected-pay interval evaluation
 The system SHALL evaluate expected gross-pay interval behavior in evaluation-labeled synthetic outputs.
@@ -241,6 +251,11 @@ The system SHALL validate whether internal diagnostic plots provide useful signa
 - **WHEN** internal diagnostic plot outputs are generated
 - **THEN** validation outputs identify whether plots contain adequate variation, contrasts, sample sizes, and non-empty series for interpretation
 
+#### Scenario: Flat budget curves are flagged as uninformative
+- **WHEN** grouped review-budget plots are generated for the active employee-pay-cycle notebook
+- **THEN** validation outputs identify when configured review budgets saturate most facility-cycle groups, leaving little or no contrast between budget levels or scoring methods
+- **AND** they report enough supporting context such as grouped residual queue sizes, effective reviewed counts, or dominant saturation thresholds to explain why the plots are not decision-useful
+
 ### Requirement: Technical ML value and ablation notebook
 The active employee-pay-cycle notebook SHALL include sections that demonstrate incremental residual-formulation value using evaluation-safe synthetic labels and temporal validation framing.
 
@@ -257,7 +272,7 @@ The active employee-pay-cycle notebook SHALL include plot-ready evidence that ma
 
 #### Scenario: Method-complexity visuals render
 - **WHEN** the active employee-pay-cycle notebook runs
-- **THEN** it renders visuals or tables such as residual dollars caught by review budget, rule-missed severe recall by review budget, residual NDCG by review budget, reviewer yield by review budget, net utility by review budget, and compact formulation-comparison summaries
+- **THEN** it renders visuals or tables such as residual dollars caught by review-budget percentage, rule-missed severe recall by review-budget percentage, residual NDCG by review-budget percentage, reviewer yield by review-budget percentage, net utility by review-budget percentage, and compact formulation-comparison summaries
 
 #### Scenario: Temporal and uncertainty context remain visible
 - **WHEN** the active employee-pay-cycle notebook reports ablation or model comparison results

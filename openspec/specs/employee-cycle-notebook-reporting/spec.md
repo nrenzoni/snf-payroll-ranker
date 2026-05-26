@@ -41,6 +41,15 @@ The primary employee-pay-cycle notebook SHALL define hard rules as an upstream g
 - **AND** it states that the notebook does not ask whether ML beats hard rules on obvious problems, but whether ML adds value after those obvious cases have already been removed
 - **AND** it states that compliance, PBJ, and HPRD are out of scope for targets, features, and evaluation metrics
 
+### Requirement: Notebook review-budget framing is percent-based
+The primary employee-pay-cycle notebook SHALL frame active review-budget analysis as the percentage of each facility-pay-period residual queue reviewed rather than as an absolute count of records reviewed.
+
+#### Scenario: Percent-budget framing is explicit in notebook results
+- **WHEN** a reviewer reads the active notebook's evaluation, workflow, or visualization sections
+- **THEN** the notebook defines review budget as the configured share of each facility-pay-period residual queue reviewed
+- **AND** it explains any rounding or minimum-reviewed-record rule used to convert percentages into grouped reviewed counts
+- **AND** axes, tables, and narrative refer to review-budget percentages rather than absolute K values for the active residual-ranking study
+
 ### Requirement: Label-engineering section is implementation-backed
 The notebook's label-engineering section SHALL describe the real employee-pay-cycle label formulas used by the active runtime rather than placeholder concepts.
 

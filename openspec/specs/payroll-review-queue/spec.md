@@ -72,7 +72,7 @@ The active notebook SHALL show a reviewer-readable queue and compact case cards 
 - **THEN** it shows compact case cards with rank, employee identifier, facility, pay period, role or employment context where relevant, risk category, recommended action, source to check, primary reason, secondary reason, expected gross pay, actual gross pay, scheduled, worked, and paid hours where available, difference from expected, estimated exposure, and an explanation that avoids fraud labeling
 
 ### Requirement: Practical payroll analyst workflow
-The active notebook SHALL demonstrate payroll review workflow for ambiguous residual records including top-K selection, expected queue size per pay period or facility, review risk categories, next actions, conceptual feedback capture, and an operating model for confirm, approve, escalate, and feedback.
+The active notebook SHALL demonstrate payroll review workflow for ambiguous residual records including review-budget selection, expected queue size per pay period or facility, review risk categories, next actions, conceptual feedback capture, and an operating model for confirm, approve, escalate, and feedback.
 
 #### Scenario: Approval workflow is documented
 - **WHEN** a reviewer reads the workflow sections of the active notebook
@@ -100,6 +100,11 @@ The active notebook SHALL include clean visuals or tables for employee-pay-cycle
 - **THEN** the required visuals or tables render using synthetic employee-pay-cycle data and generated evaluation outputs
 - **AND** notebooks that render LetsPlot visuals call `LetsPlot.setup_html()` before displaying those charts
 - **AND** continuous distribution visuals use binned histograms or equivalent aggregation rather than one bar per raw numeric value
+
+#### Scenario: Review-budget visuals use percentage framing
+- **WHEN** the active employee-pay-cycle notebook renders residual queue metric visuals
+- **THEN** the x-axis and nearby narrative describe review budget as the percentage of each facility-pay-period residual queue reviewed
+- **AND** the notebook avoids presenting those active residual queue visuals as if they were absolute top-K cutoffs unless an appendix explicitly labels a separate absolute-budget view
 
 ### Requirement: README notebook sequence documentation
 The README SHALL identify the single active employee-pay-cycle notebook and briefly explain that it covers the full reporting story and appendix.
