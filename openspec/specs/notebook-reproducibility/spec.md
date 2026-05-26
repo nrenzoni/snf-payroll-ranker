@@ -1,24 +1,25 @@
 # notebook-reproducibility Specification
 
 ## Purpose
-TBD - created by archiving change harden-payroll-anomaly-ds-readiness. Update Purpose after archive.
+Define reproducible execution, validation, and output-refresh behavior for the active employee-pay-cycle notebook and related notebook-owned diagnostics.
+
 ## Requirements
 ### Requirement: Clean notebook execution
-The notebook sequence SHALL execute from a clean checkout without errors using the project environment.
+The active employee-pay-cycle notebook SHALL execute from a clean checkout without errors using the project environment.
 
-#### Scenario: Notebook sequence executes successfully
-- **WHEN** the documented notebook execution command is run for each business-facing notebook
-- **THEN** each notebook completes without traceback outputs or failed cells
+#### Scenario: Active notebook executes successfully
+- **WHEN** the documented notebook execution command is run for the primary employee-pay-cycle notebook
+- **THEN** the notebook completes without traceback outputs or failed cells
 
 ### Requirement: Notebook output hygiene
-The notebook sequence SHALL maintain clean, reproducible saved outputs suitable for a polished data-science deliverable.
+The active employee-pay-cycle notebook SHALL maintain clean, reproducible saved outputs suitable for a polished data-science deliverable.
 
-#### Scenario: Executed notebooks have coherent execution state
-- **WHEN** notebooks are committed with saved outputs
+#### Scenario: Executed notebook has coherent execution state
+- **WHEN** the active notebook is committed with saved outputs
 - **THEN** code-cell execution counts are coherent for a clean run and do not show stale out-of-order exploratory execution
 
 #### Scenario: Generated outputs are documented and refreshable
-- **WHEN** the pipeline or notebooks regenerate synthetic data and evaluation outputs
+- **WHEN** the pipeline or active notebook regenerates synthetic data and evaluation outputs
 - **THEN** the README or notebook index identifies the expected generated files and the outputs are reproducible from the configured seed
 
 ### Requirement: Reproducibility tests
@@ -29,14 +30,14 @@ The project SHALL include verification for key notebook and generated-output rep
 - **THEN** it verifies that required generated output files can be produced and that analyst-facing outputs exclude synthetic evaluation labels
 
 ### Requirement: Rich internal diagnostic notebooks with bounded defaults
-The internal diagnostic notebooks SHALL provide rich diagnostic coverage while using bounded defaults suitable for local execution.
+Notebook-owned diagnostic workflows SHALL provide rich diagnostic coverage while using bounded defaults suitable for local execution.
 
 #### Scenario: Rich diagnostics run with bounded defaults
-- **WHEN** internal diagnostic notebooks are executed with default settings
+- **WHEN** notebook-owned internal diagnostics are executed with default settings
 - **THEN** they generate rich scenario, evaluation, queue simulation, and plot-input diagnostics without requiring excessive runtime or memory
 
 ### Requirement: Dense internal notebook defaults with fast mode
-The internal diagnostic notebooks SHALL support dense diagnostic defaults and an explicit fast mode for quicker refreshes.
+The active employee-pay-cycle notebook and notebook-owned diagnostics SHALL support dense defaults and an explicit fast mode for quicker refreshes.
 
 #### Scenario: Fast mode limits diagnostic workload
 - **WHEN** notebook fast mode is enabled
@@ -47,14 +48,14 @@ The internal diagnostic notebooks SHALL support dense diagnostic defaults and an
 - **THEN** Jupytext writes the executed notebook to a temporary `/tmp` output rather than creating or overwriting the paired `.ipynb` artifact
 
 #### Scenario: Full mode uses complete artifact generation
-- **WHEN** an internal diagnostic notebook is executed without fast mode for full evaluation or paired output refresh
+- **WHEN** the active notebook is executed without fast mode for full evaluation or paired output refresh
 - **THEN** the notebook uses dense defaults and full pipeline artifact generation unless the notebook explicitly documents a narrower requirement
 
 ### Requirement: Paired notebook outputs are refreshable
-The internal diagnostic notebooks SHALL produce paired outputs that can be regenerated reproducibly.
+The active employee-pay-cycle notebook SHALL produce paired outputs that can be regenerated reproducibly.
 
 #### Scenario: Paired outputs refresh reproducibly
-- **WHEN** paired internal diagnostic notebooks or notebook-output refresh commands are run with a fixed seed
+- **WHEN** paired notebook-output refresh commands are run with a fixed seed
 - **THEN** paired tables, plot inputs, scenario summaries, and generated artifacts are refreshed consistently and documented as reproducible outputs
 
 ### Requirement: Changed notebooks use fast validation
@@ -90,16 +91,17 @@ Notebook sources that perform material pipeline workloads SHALL provide a fast e
 - **WHEN** a notebook uses fast mode
 - **THEN** the reduced workload still produces the result objects and tables required by the executed notebook cells
 
-### Requirement: Expanded notebook sequence documentation
-The documented notebook sequence SHALL include any new technical ML value notebook added by this change.
+### Requirement: Expanded notebook reporting documentation
+The documented notebook reporting contract SHALL identify the single active employee-pay-cycle notebook and explain that it includes both the main narrative and the technical appendix.
 
-#### Scenario: New notebook is listed
-- **WHEN** the README or notebook sequence documentation is reviewed
-- **THEN** it lists the technical ML value notebook and briefly explains that it covers ablation, incremental ML value, temporal validation evidence, uncertainty, and robustness diagnostics
+#### Scenario: Active notebook is listed in docs
+- **WHEN** the README or notebook reporting documentation is reviewed
+- **THEN** it identifies the single active employee-pay-cycle notebook
+- **AND** it briefly explains that the notebook covers business framing, formulation comparison, queue results, diagnostics, stress testing, and the technical appendix in one deliverable
 
-### Requirement: New validation notebook supports fast execution
-Any new technical ML value notebook SHALL support fast validation when it performs repeated pipeline runs, scenario comparisons, or other material workloads.
+### Requirement: Active notebook supports fast execution
+The primary employee-pay-cycle notebook SHALL support fast validation when it performs repeated pipeline runs, scenario comparisons, or other material workloads.
 
-#### Scenario: Fast validation executes new notebook
-- **WHEN** `NOTEBOOK_FAST=1` fast validation is run for the new technical ML value notebook
-- **THEN** the notebook reduces expensive workloads while still producing representative ablation, comparison, and plot outputs needed to catch execution errors
+#### Scenario: Fast validation executes active notebook
+- **WHEN** `NOTEBOOK_FAST=1` fast validation is run for the primary employee-pay-cycle notebook
+- **THEN** the notebook reduces expensive workloads while still producing representative section outputs needed to catch execution errors

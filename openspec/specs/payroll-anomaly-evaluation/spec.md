@@ -31,10 +31,10 @@ The active evaluation program SHALL determine whether an employee-pay-cycle scor
 - **THEN** the evaluation reports whether the method meets the project's current criteria for temporal generalization, facility generalization, top-k ranking value, uncertainty behavior, and explanation readiness
 
 ### Requirement: Cost-sensitive evaluation
-The system SHALL estimate and report approval exposure captured by ranked SNF anomaly outputs.
+The system SHALL estimate and report approval exposure captured by ranked payroll anomaly outputs.
 
 #### Scenario: Exposure captured at K is calculated
-- **WHEN** top-ranked shift-level records are evaluated
+- **WHEN** top-ranked employee-pay-cycle records are evaluated
 - **THEN** the system reports estimated exposure captured@K, injected dollars-at-risk captured@K for evaluation-only analysis, and the share of total injected anomaly dollar impact captured by the approval budget
 
 ### Requirement: Model and category comparison
@@ -49,35 +49,35 @@ The system SHALL compare manual threshold, deterministic rule-based, statistical
 - **THEN** the notebook discusses false positives, false negatives, legitimate staffing or premium exceptions, subtle missed SNF anomalies, and practical improvements
 
 ### Requirement: Business review-budget evaluation notebook
-The notebooks SHALL present approval-budget metrics including precision@K, recall@K, F1@K, PR-AUC, average anomaly rank, mean reciprocal rank, exposure captured@K, and dollars-at-risk captured@K.
+The active employee-pay-cycle notebook SHALL present review-budget metrics including precision@K, recall@K, F1@K, PR-AUC, average anomaly rank, mean reciprocal rank, exposure captured@K, and dollars-at-risk captured@K where those metrics apply to the active formulation.
 
 #### Scenario: Approval-budget metrics are displayed
-- **WHEN** the modeling, evaluation, or SNF case-study notebook runs
-- **THEN** it displays approval-budget metrics for configured top-K budgets, including precision, recall, F1, PR-AUC, average anomaly rank, mean reciprocal rank, estimated exposure captured, synthetic dollars captured, and dollar capture rate
+- **WHEN** the active employee-pay-cycle notebook runs
+- **THEN** it displays review-budget metrics for configured top-K budgets, including applicable precision, recall, F1, PR-AUC, average anomaly rank, mean reciprocal rank, estimated exposure captured, synthetic dollars captured, and dollar capture rate
 
 ### Requirement: Temporal validation explanation
-The notebooks SHALL explain temporal validation and SHALL avoid endorsing random split framing. A notebook MAY show random row splits only as an explicitly labeled anti-pattern when it is immediately compared against temporal validation.
+The active employee-pay-cycle notebook SHALL explain temporal validation and SHALL avoid endorsing random split framing. The notebook MAY show random row splits only as an explicitly labeled anti-pattern when it is immediately compared against temporal validation.
 
 #### Scenario: Temporal validation is documented
-- **WHEN** a reviewer reads the modeling and evaluation notebook
+- **WHEN** a reviewer reads the active employee-pay-cycle notebook
 - **THEN** the notebook explains that payroll scoring is evaluated over time using prior periods and later periods rather than random row splits
 
 #### Scenario: Random split anti-pattern is demonstrated
-- **WHEN** the modeling and evaluation notebook demonstrates random train/test splitting
+- **WHEN** the active employee-pay-cycle notebook demonstrates random train/test splitting
 - **THEN** the random split is labeled as an anti-pattern and compared against temporal validation rather than presented as an accepted evaluation method
 
 ### Requirement: Backtesting and category error analysis notebook coverage
-The notebooks SHALL show backtest-by-period results and category-level error analysis.
+The active employee-pay-cycle notebook SHALL show backtest-by-period results and category-level error analysis.
 
 #### Scenario: Backtest and category tables are displayed
-- **WHEN** the modeling, evaluation, and error analysis notebook runs
+- **WHEN** the active employee-pay-cycle notebook runs
 - **THEN** it displays period-level backtest metrics and anomaly-category error analysis, including missed anomalies and false positives where available
 
 ### Requirement: Cost-aware interpretation
-The notebooks SHALL explain which review budgets capture the most dollars at risk and where precision declines as review queue size increases.
+The active employee-pay-cycle notebook SHALL explain which review budgets capture the most dollars at risk and where precision declines as review queue size increases.
 
 #### Scenario: Review budget trade-off is interpreted
-- **WHEN** evaluation metrics are displayed
+- **WHEN** evaluation metrics are displayed in the active notebook
 - **THEN** the notebook includes narrative interpreting dollar capture, precision changes, and the practical cost-aware trade-off of reviewing more records
 
 ### Requirement: Rolling-origin validation
@@ -147,15 +147,15 @@ The system SHALL keep operational latest-period queue behavior separate from his
 - **THEN** the analyst-safe queue contains latest-period records only and evaluation metrics continue to summarize historical scored periods where appropriate
 
 ### Requirement: Uncertainty evaluation notebook coverage
-The notebooks SHALL explain how uncertainty diagnostics fit into the payroll anomaly review workflow.
+The active employee-pay-cycle notebook SHALL explain how uncertainty diagnostics fit into the payroll anomaly review workflow.
 
-#### Scenario: Modeling and evaluation notebook shows uncertainty diagnostics
-- **WHEN** the modeling, evaluation, and error analysis notebook runs
+#### Scenario: Active notebook shows uncertainty diagnostics
+- **WHEN** the active employee-pay-cycle notebook runs
 - **THEN** it displays uncertainty component summaries, expected gross-pay interval diagnostics, precision by uncertainty bucket, and a risk-coverage table or chart
 
-#### Scenario: Production monitoring notebook documents uncertainty limits
-- **WHEN** the production monitoring and deployment path notebook is reviewed
-- **THEN** it documents uncertainty monitoring, calibration uncertainty as dependent on future analyst feedback labels, OOD monitoring for pay-code drift, and limitations of synthetic-label uncertainty evaluation
+#### Scenario: Active notebook documents uncertainty limits
+- **WHEN** the production-readiness sections of the active employee-pay-cycle notebook are reviewed
+- **THEN** they document uncertainty monitoring, calibration uncertainty as dependent on future analyst feedback labels, OOD monitoring for pay-code drift, and limitations of synthetic-label uncertainty evaluation
 
 ### Requirement: Internal Bayesian-style review-budget diagnostics
 The system SHALL provide internal Bayesian-style diagnostics for review-budget performance using synthetic evaluation labels.
@@ -193,10 +193,10 @@ The system SHALL simulate review-queue capacity outcomes across repeated synthet
 - **THEN** outputs report distributions for workload, anomaly yield, dollar capture, missed dollar impact, and capacity shortfall at configured review budgets
 
 ### Requirement: Internal statistical notebook coverage
-The notebooks SHALL cover internal statistical diagnostics for synthetic payroll anomaly evaluation.
+Notebook-owned internal diagnostics SHALL cover internal statistical diagnostics for synthetic payroll anomaly evaluation.
 
 #### Scenario: Internal statistical diagnostics are shown
-- **WHEN** internal diagnostic notebooks run
+- **WHEN** internal diagnostic workflows run
 - **THEN** they display review-budget uncertainty, subgroup diagnostics, expected-pay calibration, perturbation robustness, and Monte Carlo queue capacity results
 
 ### Requirement: Multi-regime component superiority diagnostics
@@ -241,68 +241,58 @@ The system SHALL validate whether internal diagnostic plots provide useful signa
 - **WHEN** internal diagnostic plot outputs are generated
 - **THEN** validation outputs identify whether plots contain adequate variation, contrasts, sample sizes, and non-empty series for interpretation
 
-### Requirement: Manual threshold baseline evaluation
-The system SHALL evaluate automated SNF approval ranking against administrator-style threshold baselines that include individual threshold flags and a calibrated combined manual threshold baseline.
-
-#### Scenario: Threshold baseline metrics are reported
-- **WHEN** evaluation runs on scored SNF shift-level records
-- **THEN** results report approval-budget, review-burden, and exposure metrics for the calibrated manual threshold pack, gross pay, total hours, overtime hours, premium dollars, paid-vs-scheduled variance, and facility payroll variance thresholds
-
-#### Scenario: Threshold overflagging is summarized
-- **WHEN** manual threshold baselines and automated ranking are compared
-- **THEN** evaluation summarizes false positives, reviewed records required, missed high-exposure anomalies, estimated exposure captured per reviewed record, and native review burden for each threshold approach
-
-### Requirement: SNF case-study evaluation
-The system SHALL provide case-study-specific and repeated-world evaluation outputs for the implemented SNF scenarios.
-
-#### Scenario: Overtime case-study metrics are produced
-- **WHEN** overtime or double-shift staffing pressure scenarios are evaluated
-- **THEN** outputs compare automated ranking against the calibrated manual threshold pack and manual overtime, total-hours, and facility-variance thresholds for review volume, precision, recall, exposure capture, and missed high-risk shifts
-
-#### Scenario: Premium mismatch case-study metrics are produced
-- **WHEN** premium pay or shift differential mismatch scenarios are evaluated
-- **THEN** outputs compare automated ranking against the calibrated manual threshold pack and manual gross-pay, premium-dollar, and facility-variance thresholds for review volume, precision, recall, exposure capture, and missed unsupported premiums
-
-#### Scenario: Repeated-world main-scenario summaries are produced
-- **WHEN** the business-proof notebook prepares aggregate evidence
-- **THEN** outputs include scenario-by-seed comparison summaries for `baseline`, `overtime-staffing-pressure`, and `premium-mismatch` worlds across configured facility review budgets and burden-versus-value metrics
-
-### Requirement: Business-proof repeated-world comparison artifacts
-The system SHALL produce plot-ready repeated-world comparison artifacts for facility-admin notebook evidence.
-
-#### Scenario: Repeated-world superiority summaries are available
-- **WHEN** scenario-by-seed business-proof diagnostics run
-- **THEN** outputs include per-method win rates, mean deltas or empirical intervals, and scenario-budget comparison series suitable for notebook plots
-
-### Requirement: Facility-period rolling-origin stability metrics
-The system SHALL produce rolling-origin stability metrics that reflect facility-admin review capacity rather than only whole-period ranking.
-
-#### Scenario: Rolling-origin metrics use facility-period review framing
-- **WHEN** rolling-origin evaluation runs on scored SNF shift-level records
-- **THEN** each origin reports facility-period review volume, precision, recall, estimated exposure captured per review, synthetic dollars captured, and dollar capture rate using ranking within each facility and pay period
-
-#### Scenario: Rolling-origin proof avoids precision-only claims
-- **WHEN** business-facing notebook evidence uses rolling-origin evaluation
-- **THEN** the primary stability view emphasizes review yield or value capture over time, with precision treated as supporting evaluation context rather than a claim of perfect operational detection
-
 ### Requirement: Technical ML value and ablation notebook
-The notebook sequence SHALL include a technical validation notebook that demonstrates incremental ML and hybrid ranking value using evaluation-safe synthetic labels and temporal validation framing.
+The active employee-pay-cycle notebook SHALL include sections that demonstrate incremental residual-formulation value using evaluation-safe synthetic labels and temporal validation framing.
 
-#### Scenario: Ablation notebook compares method ladder
-- **WHEN** the technical ML value notebook runs
-- **THEN** it compares manual threshold baselines, deterministic rule score, robust statistical score, ML score, and hybrid score using approval-budget metrics, PR-AUC, rank metrics, exposure capture, and dollar capture where available
+#### Scenario: Ablation section compares method ladder
+- **WHEN** the active employee-pay-cycle notebook runs
+- **THEN** its ablation studies section compares classifier, cost-sensitive classifier, regressor, expected-value, and learning-to-rank methods on the residual universe using residual review-budget metrics, PR-AUC where applicable, rank metrics, dollar capture, reviewer yield, and utility metrics where available
 
-#### Scenario: Ablation notebook explains complexity value
-- **WHEN** a reviewer reads the technical ML value notebook
-- **THEN** narrative text explains what each method level adds, where complexity improves review prioritization, and where simpler components remain useful
+#### Scenario: Ablation section explains complexity value
+- **WHEN** a reviewer reads the ablation studies section of the active employee-pay-cycle notebook
+- **THEN** narrative text explains what each residual formulation adds, where complexity improves residual review prioritization, and where simpler methods remain useful
 
 ### Requirement: Incremental value plots
-The evaluation notebook sequence SHALL include plot-ready evidence that makes incremental method value observable.
+The active employee-pay-cycle notebook SHALL include plot-ready evidence that makes incremental method value observable inside the main narrative or technical appendix.
 
 #### Scenario: Method-complexity visuals render
-- **WHEN** the technical ML value notebook runs
-- **THEN** it renders visuals or tables such as an incremental complexity waterfall, component comparison heatmap, precision or exposure by review budget, and threshold-miss or false-positive summaries
+- **WHEN** the active employee-pay-cycle notebook runs
+- **THEN** it renders visuals or tables such as residual dollars caught by review budget, rule-missed severe recall by review budget, residual NDCG by review budget, reviewer yield by review budget, net utility by review budget, and compact formulation-comparison summaries
 
 #### Scenario: Temporal and uncertainty context remain visible
-- **WHEN** the technical ML value notebook reports ablation or model comparison results
-- **THEN** it includes temporal validation context and uncertainty, stability, or risk-coverage diagnostics where existing pipeline outputs support them
+- **WHEN** the active employee-pay-cycle notebook reports ablation or model comparison results
+- **THEN** it includes temporal validation context and uncertainty, stability, or risk-coverage diagnostics where active pipeline outputs support them
+
+### Requirement: Utility-aware employee-cycle evaluation
+The employee-pay-cycle evaluation workflow SHALL report business-value metrics based on an explicit `net_utility` label in addition to anomaly-capture and dollar-capture metrics.
+
+#### Scenario: Net utility is reported at review budgets
+- **WHEN** employee-pay-cycle review-budget metrics are computed
+- **THEN** the outputs include utility-aware summaries such as net utility captured at K, average utility per reviewed employee-pay-cycle, or equivalent project-defined business-value metrics sourced from `net_utility`
+
+#### Scenario: Utility remains evaluation-only
+- **WHEN** `net_utility` is available in the scored evaluation frame
+- **THEN** it is treated as evaluation-only business truth rather than as an analyst-facing queue field or model input
+
+### Requirement: Residual-universe queue metrics
+The employee-pay-cycle evaluation workflow SHALL compute primary notebook metrics only on residual records within facility-by-payroll-cycle groups.
+
+#### Scenario: Residual metrics use gated scoring universe
+- **WHEN** the notebook reports main queue results
+- **THEN** ranking and review-budget metrics are computed only on employee-pay-cycle records not flagged by critical hard rules
+- **AND** the ranking groups are facility by payroll cycle
+
+#### Scenario: Primary residual metrics are reported
+- **WHEN** residual review-budget metrics are computed
+- **THEN** the outputs include residual NDCG@K, rule-missed severe recall@K, residual dollars caught@K, reviewer yield@K, and incremental utility@K or equivalent project-defined formulations of those metrics
+
+### Requirement: Training-universe and label ablations
+The active employee-pay-cycle notebook SHALL test whether residual-ranking conclusions depend on label choice or training universe definition.
+
+#### Scenario: Training-universe ablation is shown
+- **WHEN** the ablation studies section is reviewed
+- **THEN** it compares training on all records, training on residual records only, and training on all records with hard-rule flag features while always scoring on the residual universe
+
+#### Scenario: Label ablation is shown
+- **WHEN** the ablation studies section is reviewed
+- **THEN** it compares formulations trained or evaluated against binary issue, dollar impact, graded relevance, utility-aware, observed historical, or latent truth labels where those comparisons are supported by active outputs

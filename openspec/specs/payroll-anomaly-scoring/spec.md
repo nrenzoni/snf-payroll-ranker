@@ -45,32 +45,57 @@ The scoring library SHALL treat Phase 1 formulation comparison as a gate for lat
 - **THEN** the project documents that promotion depends on evaluation, generalization, uncertainty, and explainability evidence from the active research phase
 
 ### Requirement: Feature engineering notebook walkthrough
-The notebooks SHALL demonstrate SNF-specific leakage-safe historical, peer, deterministic rule, stationarity, normalization, and robust statistical features using concrete synthetic shift-level payroll records.
+The active employee-pay-cycle notebook SHALL demonstrate leakage-safe historical, peer, normalization, and robust statistical features using concrete synthetic employee-pay-cycle payroll records from the residual universe after critical hard rules are applied.
 
-#### Scenario: Concrete SNF feature examples are displayed
-- **WHEN** the feature engineering and case-study notebooks run
-- **THEN** they display selected shift-level records with actual gross pay, expected role-shift pay, scheduled hours, worked hours, overtime context, premium eligibility context, prior rolling baselines, facility-normalized peer baselines, rule reason codes, source-to-check context, and component scores
+#### Scenario: Concrete employee-pay-cycle feature examples are displayed
+- **WHEN** the active employee-pay-cycle notebook runs
+- **THEN** it displays selected residual employee-pay-cycle records with total gross pay, expected cycle pay, scheduled, worked, and paid hour context, overtime and premium context, prior rolling baselines, peer baselines, and formulation-relevant feature columns
 
 ### Requirement: Leakage-safe feature explanation
-The notebooks SHALL explain which features are leakage-safe and why injected labels are retained for evaluation but not used as training or scoring features.
+The active employee-pay-cycle notebook SHALL explain which features are leakage-safe and why injected labels are retained for evaluation but not used as training or scoring features.
 
 #### Scenario: Leakage-safe narrative is present
-- **WHEN** a reviewer reads the feature engineering and baselines notebook
+- **WHEN** a reviewer reads the feature engineering section of the active employee-pay-cycle notebook
 - **THEN** the notebook states that historical features exclude current and future periods and that labels are not used as model features
+- **AND** it distinguishes critical hard-rule flags, which define the residual universe, from soft warning signals that may remain as ML features
+- **AND** it explicitly excludes compliance, PBJ, and HPRD fields from the residual-model feature set
 
-### Requirement: Baseline scoring comparison inputs
-The notebooks SHALL demonstrate rule score, statistical score, ML score, and hybrid score as separate baseline ranking signals using the existing model comparison output.
+### Requirement: Residual ML formulation comparison inputs
+The active employee-pay-cycle notebook SHALL compare only ML formulations on the residual universe using the employee-pay-cycle model comparison outputs.
 
-#### Scenario: Baseline score columns are compared
-- **WHEN** the feature engineering and modeling notebooks run
-- **THEN** they display rule, statistical, ML, and hybrid score columns and explain what each contributes to payroll review prioritization
+#### Scenario: Residual ML score columns are compared
+- **WHEN** the model formulations or ablation sections of the active employee-pay-cycle notebook run
+- **THEN** they display classifier, cost-sensitive classifier, regressor, expected-value, and learning-to-rank score columns or summaries and explain what each contributes to residual payroll review prioritization
+- **AND** they describe hard rules as the upstream gate rather than as a competing model in the formulation comparison
 
-### Requirement: Payroll hybrid ranking rationale
-The notebooks SHALL explain why a hybrid ranking is appropriate for payroll because deterministic compliance issues, statistical outliers, peer context, employee history, and dollar impact capture different review risks.
+### Requirement: Explicit residual ranking labels
+The active employee-pay-cycle scoring workflow SHALL define residual labels for formulation training and evaluation without exposing evaluation-only labels as training features or analyst-facing fields where they do not belong.
 
-#### Scenario: Hybrid rationale is included
-- **WHEN** a reviewer reads the feature engineering or modeling notebook
-- **THEN** the notebook describes why payroll ranking combines rule-based, statistical, ML, peer/history, and dollar-impact signals rather than relying on a single model score
+#### Scenario: Latent residual issue truth is defined
+- **WHEN** employee-pay-cycle labels are constructed after the critical hard-rule gate
+- **THEN** each residual employee-pay-cycle receives a binary `y_issue` label derived from latent residual issue truth rather than observed historical review outcomes
+
+#### Scenario: Residual dollar target is defined
+- **WHEN** employee-pay-cycle labels are constructed after the critical hard-rule gate
+- **THEN** each residual employee-pay-cycle receives a `y_dollar` label representing residual financial impact for regression-style formulations
+
+#### Scenario: Relevance grade is deterministic and documented
+- **WHEN** employee-pay-cycle labels are constructed from synthetic latent anomalies
+- **THEN** each residual employee-pay-cycle receives a deterministic `relevance_grade` in `{0, 1, 2, 3}` derived from latent residual anomaly presence, severity, and employee-cycle context
+- **AND** the grade construction is documented in code and in the notebook's label-engineering section
+
+#### Scenario: Ranking formulation can use relevance labels without feature leakage
+- **WHEN** employee-pay-cycle ranking formulations are compared
+- **THEN** the workflow may use `relevance_grade` as an evaluation or ranking target
+- **AND** `y_issue`, `y_dollar`, `relevance_grade`, `rule_missed_severe_issue`, `is_anomaly`, `anomaly_category`, `anomaly_dollars`, and `net_utility` are excluded from active scoring features
+
+### Requirement: Residual payroll ranking rationale
+The active employee-pay-cycle notebook SHALL explain why payroll review prioritization benefits from comparing multiple ML formulations on ambiguous residual records rather than assuming one preselected method is correct.
+
+#### Scenario: Formulation rationale is included
+- **WHEN** a reviewer reads the feature engineering or model formulations sections of the active employee-pay-cycle notebook
+- **THEN** the notebook describes why residual payroll ranking compares classifier, cost-sensitive classifier, regressor, expected-value, and learning-to-rank formulations rather than relying on one unexplained score
+- **AND** it explains that the strongest contest is between expected-value reasoning and direct ranking optimization after obvious cases have already been removed by hard rules
 
 ### Requirement: Label-free estimated exposure scoring
 The system SHALL calculate estimated exposure score components only from production-observable SNF payroll, schedule, timeclock, policy, and leakage-safe baseline fields.
@@ -198,23 +223,6 @@ The system SHALL compute overtime, double-shift, rest-gap, and consecutive-work 
 - **WHEN** an employee works multiple shifts, long hours, or consecutive days
 - **THEN** feature engineering produces trailing hours, same-day shift count, double-shift indicator, rest-gap hours, consecutive-day count, and prior-period double-shift count using leakage-safe references where history is required
 
-### Requirement: Score component contribution narrative
-The notebooks SHALL explain the contribution of each major scoring component to SNF payroll approval prioritization.
-
-#### Scenario: Component contributions are displayed
-- **WHEN** the SNF case-study or technical ML value notebook runs
-- **THEN** it displays rule, statistical, schedule/timeclock, premium eligibility, ML, exposure, and hybrid score context where available for selected ranked records or aggregate method comparisons
-
-#### Scenario: Hybrid rationale is tied to evidence
-- **WHEN** the notebooks compare component scores with hybrid ranking
-- **THEN** they explain why payroll approval benefits from combining deterministic rules, robust statistics, ML multivariate unusualness, schedule/timeclock context, premium eligibility, and estimated exposure rather than relying on one signal alone
-
-### Requirement: ML-only value is separated from hybrid value
-The technical ML value notebook SHALL distinguish the value of the ML score alone from the value of the full hybrid ranking.
-
-#### Scenario: ML and hybrid are compared separately
-- **WHEN** method-comparison outputs are displayed
-- **THEN** ML-only metrics and hybrid-ranking metrics appear as separate methods so reviewers can see whether the hybrid score improves beyond unsupervised ML alone
 
 ### Requirement: Administrator threshold baseline flags
 The system SHALL emit administrator-style threshold baseline flags from observable SNF payroll fields alongside the scored payroll output.

@@ -1,5 +1,5 @@
 ## Purpose
-Define the analyst-facing review queue and notebook deliverables for payroll anomaly review.
+Define the reviewer-facing review queue and notebook deliverables for residual employee-pay-cycle payroll review.
 ## Requirements
 ### Requirement: Analyst-ready review queue
 The system SHALL produce an employee-pay-cycle ranked review queue from the active payroll ranking library instead of defining the active queue around deprecated shift-level SNF approval outputs.
@@ -24,18 +24,18 @@ The active review queue SHALL be derived from the active employee-pay-cycle runt
 - **THEN** it does not require deprecated shift-level queue modules, legacy notebook outputs, or historical hybrid score fields to operate
 
 ### Requirement: Human-readable anomaly explanations
-The system SHALL generate concise administrator-readable explanations for flagged SNF shift-level records using rule flags, score drivers, schedule/timeclock context, premium eligibility, historical baselines, peer comparisons, and estimated exposure.
+The system SHALL generate concise reviewer-readable explanations for flagged employee-pay-cycle records using rule outcomes, score drivers, payroll and timekeeping context, historical baselines, peer comparisons, and estimated exposure.
 
-#### Scenario: Explanation includes SNF approval context
-- **WHEN** a record is flagged for overtime, double-shift, rest-gap, paid-vs-scheduled, shift differential, weekend premium, duplicate premium, lifecycle, deduction, or payroll amount anomaly
-- **THEN** the explanation describes what the administrator should verify in SNF operational terms rather than only reporting a model score
+#### Scenario: Explanation includes payroll review context
+- **WHEN** an employee-pay-cycle record is flagged for payroll amount, overtime, premium, lifecycle, duplicate-payment, paid-vs-worked, or related payroll anomalies
+- **THEN** the explanation describes what the reviewer should verify in payroll operations terms rather than only reporting a model score
 
 ### Requirement: Business deliverable notebook sections
-The notebook SHALL include business, technical, evaluation, case-study, approval workflow, and production-readiness sections needed for a presentable SNF payroll approval deliverable.
+The active notebook SHALL include business, technical, evaluation, reviewer-workflow, and production-readiness sections needed for a presentable employee-pay-cycle payroll ranking deliverable focused on residual finance or payroll review after hard rules.
 
 #### Scenario: Notebook narrative is complete
-- **WHEN** a reviewer reads the notebook
-- **THEN** it includes an executive summary, privacy disclaimer, SNF payroll approval problem framing, anomaly taxonomy, synthetic data generation, schedule/timeclock/payroll schema, EDA, feature engineering, manual threshold baselines, model comparison, hybrid scoring, evaluation, approval queue, case studies, error analysis, production architecture, monitoring and retraining, limitations, and future scenario roadmap
+- **WHEN** a reviewer reads the active notebook
+- **THEN** it includes an executive summary, privacy disclaimer, residual payroll review problem framing, synthetic data generation, hard-rule gate definition, residual data sanity checks, label engineering, feature engineering, model formulations, residual queue evaluation, ablation studies, diagnostics and explanations, final recommendation, and technical appendix material
 
 ### Requirement: Production readiness discussion
 The notebook SHALL describe how the workflow would operate in production without claiming integrations that were not built.
@@ -49,32 +49,34 @@ The notebook SHALL describe how the workflow would operate in production without
 - **THEN** it includes metrics such as exception count per payroll cycle, approval queue yield, false positive rate from feedback, estimated exposure flagged and confirmed, feature drift, score drift, alert concentration by facility/unit/role/shift, latency, data freshness, failed validation count, and threshold-baseline drift
 
 ### Requirement: Multi-notebook business case study sequence
-The repository SHALL include a Jupytext percent-format notebook sequence covering problem framing, data maturity, feature engineering, baselines, modeling, evaluation, error analysis, review queue explainability, thresholds, and production monitoring.
+The repository SHALL treat one primary employee-pay-cycle notebook as the active reporting deliverable instead of a required multi-notebook sequence.
 
-#### Scenario: Required notebooks exist
-- **WHEN** the change is implemented
-- **THEN** the repository includes `notebooks/01_problem_framing_and_data_maturity.py`, `notebooks/02_feature_engineering_and_baselines.py`, `notebooks/03_modeling_evaluation_and_error_analysis.py`, `notebooks/04_review_queue_explainability_and_thresholds.py`, and `notebooks/05_production_monitoring_and_deployment_path.py`
+#### Scenario: Active notebook replaces required sequence
+- **WHEN** the active reporting contract is implemented
+- **THEN** the repository includes one primary Jupytext percent-format employee-pay-cycle notebook under `notebooks/`
+- **AND** legacy notebook sequences are not treated as required active deliverables
 
 ### Requirement: Executive takeaway and proof summary sections
-Each notebook SHALL begin with a short executive takeaway and end with a concise what-this-proves summary.
+The active notebook SHALL begin with a short executive takeaway and end its main narrative with a concise production recommendation before the technical appendix.
 
-#### Scenario: Notebook narrative has business framing
-- **WHEN** a reviewer opens any notebook in the sequence
-- **THEN** the first section contains an executive takeaway and the final section summarizes what the notebook proves
+#### Scenario: Active notebook has business framing
+- **WHEN** a reviewer opens the active notebook
+- **THEN** the first section contains an executive takeaway
+- **AND** the final main-narrative section provides the production recommendation before the appendix begins
 
 ### Requirement: Analyst-readable review queue and case cards
-The notebooks SHALL show an administrator-readable approval queue and compact case cards for selected records using review-safe language.
+The active notebook SHALL show a reviewer-readable queue and compact case cards for selected records using review-safe language.
 
-#### Scenario: Case cards include approval context
-- **WHEN** the review queue, explainability, thresholds, or SNF case-study notebook runs
-- **THEN** it displays selected case cards with rank, employee identifier, facility, unit, role, shift date, shift type, risk category, recommended action, source to check, primary reason, secondary reason, expected gross pay, actual gross pay, scheduled hours, worked hours, difference from expected, premium context, estimated exposure, and an explanation that avoids fraud labeling
+#### Scenario: Case cards include payroll review context
+- **WHEN** the active notebook displays selected queued records
+- **THEN** it shows compact case cards with rank, employee identifier, facility, pay period, role or employment context where relevant, risk category, recommended action, source to check, primary reason, secondary reason, expected gross pay, actual gross pay, scheduled, worked, and paid hours where available, difference from expected, estimated exposure, and an explanation that avoids fraud labeling
 
 ### Requirement: Practical payroll analyst workflow
-The notebooks SHALL demonstrate administrator weekly payroll approval workflow including top-K or threshold selection, expected queue size per pay period or facility, approval risk categories, next actions, conceptual feedback capture, and an operating model for confirm, approve, escalate, and feedback.
+The active notebook SHALL demonstrate payroll review workflow for ambiguous residual records including top-K selection, expected queue size per pay period or facility, review risk categories, next actions, conceptual feedback capture, and an operating model for confirm, approve, escalate, and feedback.
 
 #### Scenario: Approval workflow is documented
-- **WHEN** a reviewer reads the review queue or SNF case-study notebook
-- **THEN** the notebook explains how administrators choose a review budget or threshold, triage records by approval risk category, check schedule/timeclock/pay-code evidence, approve known staffing exceptions, escalate questionable records, and capture feedback for future calibration
+- **WHEN** a reviewer reads the workflow sections of the active notebook
+- **THEN** the notebook explains how reviewers choose a review budget, triage records by risk category, check payroll, timekeeping, rate authorization, lifecycle, or facility-allocation evidence, resolve legitimate exceptions, escalate questionable records, and capture feedback for future calibration
 
 ### Requirement: Production monitoring and deployment path narrative
 The notebooks SHALL document a realistic deployment path without claiming implemented live integrations.
@@ -91,20 +93,21 @@ The notebooks SHALL include monitoring metrics, retraining triggers, and limitat
 - **THEN** it includes alert count per cycle, alert acceptance rate, false positive rate from reviews, dollars at risk flagged and confirmed, feature drift, score drift, alert concentration by department/location/job family, latency, data freshness, failed validation count, retraining triggers, and limitations of synthetic labels and unsupervised scoring
 
 ### Requirement: Required business visuals
-The notebooks SHALL include clean visuals or tables for SNF payroll trend, shift-level gross pay distribution, overtime distribution, premium pay distribution, facility payroll heatmap or table, score distribution, threshold baseline comparison, precision@K by approval budget, exposure captured@K by approval budget, model comparison, backtest metrics over time, and selected employee or shift history for a flagged record.
+The active notebook SHALL include clean visuals or tables for employee-pay-cycle payroll summaries, hard-rule funnel summaries, residual queue metrics by review budget, model comparison, backtest or rolling-origin metrics over time, and selected reviewer-facing queue examples.
 
-#### Scenario: Required visuals render from synthetic SNF outputs
-- **WHEN** the notebook sequence is run on a clean checkout
-- **THEN** the required visuals or tables render using synthetic SNF data and generated evaluation outputs
+#### Scenario: Required visuals render from synthetic employee-pay-cycle outputs
+- **WHEN** the active notebook is run on a clean checkout
+- **THEN** the required visuals or tables render using synthetic employee-pay-cycle data and generated evaluation outputs
 - **AND** notebooks that render LetsPlot visuals call `LetsPlot.setup_html()` before displaying those charts
 - **AND** continuous distribution visuals use binned histograms or equivalent aggregation rather than one bar per raw numeric value
 
 ### Requirement: README notebook sequence documentation
-The README SHALL list the notebook sequence and briefly explain the purpose of each notebook.
+The README SHALL identify the single active employee-pay-cycle notebook and briefly explain that it covers the full reporting story and appendix.
 
-#### Scenario: README links notebook story
+#### Scenario: README links active notebook story
 - **WHEN** a reviewer reads `README.md`
-- **THEN** it describes the notebook sequence and identifies which notebook covers each major part of the payroll anomaly ranking case study
+- **THEN** it identifies the single active employee-pay-cycle notebook as the active reporting contract
+- **AND** it explains that the notebook covers the full residual payroll ranking case study and technical appendix in one deliverable
 
 ### Requirement: Separate analyst and evaluation review queues
 The system SHALL produce an administrator-safe approval queue for operational triage and a separate evaluation-labeled approval queue for synthetic performance analysis.
@@ -118,11 +121,11 @@ The system SHALL produce an administrator-safe approval queue for operational tr
 - **THEN** the queue includes injected labels and injected anomaly dollar impacts only for error analysis and metric interpretation
 
 ### Requirement: Component contribution context
-The system SHALL include enough component-score and reason-code context for analysts to understand why a record was prioritized without exposing evaluation truth.
+The system SHALL include enough score-driver and reason-code context for analysts to understand why a record was prioritized without exposing evaluation truth.
 
 #### Scenario: Review context is explainable
 - **WHEN** a record appears in the analyst-safe queue
-- **THEN** the row includes reason codes, risk category, estimated exposure or dollars-at-risk estimate, expected-vs-actual context, peer context, and relevant component scores or score-driver fields
+- **THEN** the row includes reason codes, risk category, estimated exposure or dollars-at-risk estimate, expected-vs-actual context, peer context, and relevant score-driver fields
 
 ### Requirement: Latest-period uncertainty-aware analyst review queue
 The system SHALL surface risk and uncertainty together in an administrator-safe SNF approval queue for the latest pay period only unless a case-study explicitly requests historical evaluation output.
@@ -167,37 +170,45 @@ The notebooks SHALL show compact case cards that explain both why a payroll reco
 - **THEN** they avoid claiming confirmed misconduct, confirmed fraud, confirmed payroll error, or known synthetic anomaly status
 
 ### Requirement: Facility approval summary output
-The system SHALL produce administrator-safe facility/pay-period approval summary outputs.
+The system SHALL produce reviewer-safe facility or pay-period approval summary outputs.
 
 #### Scenario: Facility summary fields are populated
-- **WHEN** approval summaries are generated from scored SNF shift-level records
-- **THEN** each facility/pay-period row includes facility identifier, pay period, total shifts, total gross pay, total paid hours, overtime hours, premium dollars, queue count, high-priority count, estimated exposure, top reason categories, and approval readiness context
+- **WHEN** approval summaries are generated from scored employee-pay-cycle records
+- **THEN** each facility or facility-pay-period row includes facility identifier, pay period, total employee cycles, total gross pay, total paid hours, overtime hours, premium dollars, queue count, high-priority count, estimated exposure, top reason categories, and approval readiness context
 
 #### Scenario: Facility summary excludes evaluation truth
 - **WHEN** administrator-safe facility/pay-period summaries are exported
 - **THEN** they exclude injected anomaly labels, injected anomaly categories, and injected anomaly dollar impacts
 
 ### Requirement: Threshold comparison explanation
-The notebooks SHALL explain why automated SNF approval ranking improves on manually configured thresholds.
+The active notebook SHALL explain where residual ranking adds value beyond a hard-rule gate and simple thresholding for ambiguous payroll records.
 
 #### Scenario: Threshold limitations are shown
-- **WHEN** SNF case-study outputs compare manual thresholds and automated ranking
-- **THEN** the notebook explains where threshold rules overflag legitimate staffing exceptions, miss context-supported premium mismatches, or miss high-exposure records that are not extreme on a single raw field
+- **WHEN** the active notebook compares thresholding or gating with residual ranking
+- **THEN** it explains where simple rules overflag legitimate exceptions, miss context-supported payroll issues, or miss high-exposure records that are not extreme on a single raw field
 
-### Requirement: Narrative case-study approval evidence
-The review queue notebooks SHALL include narrative interpretation around business-facing case-study plots and tables so administrator reviewers can understand what each output proves.
+### Requirement: Narrative residual-review evidence
+The active notebook SHALL include narrative interpretation around reviewer-facing plots and tables so payroll reviewers can understand what each output proves.
 
-#### Scenario: Narrative accompanies case-study outputs
-- **WHEN** the SNF case-study notebook displays lift scorecards, threshold comparisons, case cards, facility summaries, or scenario plots
+#### Scenario: Narrative accompanies residual-review outputs
+- **WHEN** the active notebook displays queue metrics, threshold comparisons, case cards, facility summaries, or diagnostic plots
 - **THEN** nearby markdown explains how to read the output, what operational decision it supports, and why the wording remains review-safe
 
-### Requirement: Business-facing case-study visuals
-The SNF case-study notebook SHALL include administrator-oriented visuals or tables that make the approval value of the ranked queue clear.
+### Requirement: Business-facing residual-review visuals
+The active notebook SHALL include reviewer-oriented visuals or tables that make the value of the ranked residual queue clear.
 
 #### Scenario: Approval value visuals render
-- **WHEN** the SNF case-study notebook runs
-- **THEN** it renders visuals or tables for exposure captured per reviewed record, false-positive avoidance, missed high-risk records, facility approval concentration, and selected administrator-safe case cards where source data is available
+- **WHEN** the active notebook runs
+- **THEN** it renders visuals or tables for exposure captured per reviewed record, false-positive avoidance, missed high-risk records, facility review concentration, and selected reviewer-safe case cards where source data is available
 
-#### Scenario: Case-study visuals exclude evaluation truth
-- **WHEN** business-facing case-study visuals or case cards are displayed
+#### Scenario: Residual-review visuals exclude evaluation truth
+- **WHEN** business-facing visuals or case cards are displayed
 - **THEN** they exclude injected anomaly labels, injected anomaly categories, and injected anomaly dollar impacts unless the section is explicitly labeled as evaluation-only
+
+### Requirement: Residual reviewer workflow framing
+The active notebook SHALL describe reviewer-facing outputs as finance or payroll review of ambiguous residual records rather than as compliance or staffing review.
+
+#### Scenario: Queue language stays in scope
+- **WHEN** reviewer workflow examples or explanation text are displayed
+- **THEN** they describe checking payroll, timekeeping, rate authorization, facility allocation, lifecycle, or duplicate-payment context for ambiguous residual records
+- **AND** they do not frame the queue as PBJ, HPRD, staffing-compliance, or regulatory review

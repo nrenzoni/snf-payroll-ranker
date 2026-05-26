@@ -1,42 +1,24 @@
 ## Purpose
-Define the facility-administrator business proof for SNF payroll approval value, including repeated-world comparisons, method ladder narrative, proof-first presentation, rolling stability framing, and analyst-ready deliverable expectations.
+Define how deprecated SNF administrator business-proof materials are retained as legacy reference without defining the active employee-pay-cycle reporting contract.
+
 ## Requirements
-### Requirement: Deprecated business-proof notebooks are non-normative
-Older SNF business-proof notebooks MAY remain in the repository for historical context, but they SHALL NOT define the active deliverable contract for the project.
+### Requirement: Deprecated business-proof notebooks are historical reference only
+Older SNF administrator business-proof notebooks MAY remain in the repository for historical context, but they SHALL NOT define the active deliverable contract for the project.
 
 #### Scenario: Legacy notebook status is explicit
 - **WHEN** a user discovers an older SNF business-proof notebook or related documentation
 - **THEN** the material identifies itself as deprecated historical reference rather than active proof requirement for the employee-pay-cycle project direction
 
-### Requirement: Proof-first notebook presentation
-The business-facing SNF notebook SHALL keep the main narrative focused on business-proof visuals and concise summaries while still showing one concrete final ranked output.
+### Requirement: Legacy business-proof expectations stay out of active notebook acceptance criteria
+Historical proof-first presentation rules, rolling stability framing, scenario-specific proof visuals, and facility-admin storytelling MAY remain documented for traceability, but they SHALL NOT be required of the active employee-pay-cycle notebook.
 
-#### Scenario: Main flow limits dense tables
-- **WHEN** the notebook presents the main proof narrative
-- **THEN** it emphasizes plots and concise summaries and includes at most one concrete final ranked-output table rather than multiple dashboard-style intermediate tables
+#### Scenario: Active notebook contract excludes legacy business-proof rules
+- **WHEN** the active notebook reporting contract is reviewed
+- **THEN** it is defined by the employee-pay-cycle notebook specs rather than by the older SNF business-proof expectations
 
-#### Scenario: Stress diagnostics are appendix-only
-- **WHEN** subgroup drift, calendar drift, or queue-stress evidence is presented
-- **THEN** it appears in a clearly labeled appendix section after the main business-proof narrative
+### Requirement: Legacy business-proof wording remains clearly demoted
+Any retained SNF administrator proof narrative SHALL preserve explicit legacy wording so readers do not confuse it with the active residual payroll review deliverable.
 
-### Requirement: Realistic rolling stability narrative
-The business-facing SNF notebook SHALL present rolling-origin stability as operational review yield over time, not as a promise of perfect precision.
-
-#### Scenario: Rolling-origin stability remains credible
-- **WHEN** the notebook shows rolling-origin evidence
-- **THEN** the headline plot uses facility-period yield or value-capture metrics and the surrounding narrative states that synthetic labels are evaluation-only and that real SNF payroll review will include legitimate high-risk-looking records
-
-### Requirement: Analyst-ready proof presentation
-The business-facing SNF notebook SHALL present proof visuals and takeaways in a form suitable for a facility-admin deliverable rather than as exploratory analysis output.
-
-#### Scenario: Main proof avoids dashboard artifacts
-- **WHEN** the notebook renders the main proof flow
-- **THEN** it avoids raw intermediate DataFrame outputs and keeps only one concrete administrator-facing ranked-output table
-
-#### Scenario: Main proof visuals are scenario-clear
-- **WHEN** repeated-world or manual-threshold evidence spans multiple scenario families
-- **THEN** each plot or adjacent takeaway makes the scenario scope explicit so readers can distinguish pooled proof from scenario-specific proof
-
-#### Scenario: Proof visuals include operational takeaways
-- **WHEN** a major proof visual is shown
-- **THEN** the notebook includes a concise quantified takeaway or interpretation that explains the operational implication for facility payroll approval
+#### Scenario: Legacy proof materials remain clearly labeled
+- **WHEN** a reader opens retained SNF business-proof visuals, summaries, or notebook sections
+- **THEN** the surrounding text states that the material is historical reference only and not the active public deliverable
