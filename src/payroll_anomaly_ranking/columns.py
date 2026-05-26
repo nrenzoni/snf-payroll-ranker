@@ -74,6 +74,13 @@ class PayrollCol(StrEnum):
     ANOMALY_DOLLARS = "anomaly_dollars"
     OBSERVED_CORRECTION = "observed_correction"
     OBSERVED_CORRECTION_DOLLARS = "observed_correction_dollars"
+    RELEVANCE_GRADE = "relevance_grade"
+    NET_UTILITY = "net_utility"
+    CRITICAL_HARD_RULE_FLAG = "critical_hard_rule_flag"
+    RESIDUAL_RECORD = "residual_record"
+    Y_ISSUE = "y_issue"
+    Y_DOLLAR = "y_dollar"
+    RULE_MISSED_SEVERE_ISSUE = "rule_missed_severe_issue"
     OOD_PAY_CODE_CONTEXT = "ood_pay_code_context"
     SHIFT_COUNT = "shift_count"
     ANOMALOUS_SHIFT_COUNT = "anomalous_shift_count"
@@ -240,6 +247,8 @@ class MetricCol(StrEnum):
     REVIEW_VOLUME = "review_volume"
     NATIVE_REVIEW_BURDEN = "native_review_burden"
     DOLLAR_CAPTURE_RATE = "dollar_capture_rate"
+    NET_UTILITY_CAPTURED_AT_K = "net_utility_captured_at_k"
+    UTILITY_PER_REVIEW = "utility_per_review"
     MISSED_ESTIMATED_EXPOSURE = "missed_estimated_exposure"
     AVERAGE_ANOMALY_RANK = "average_anomaly_rank"
     MEAN_RECIPROCAL_RANK = "mean_reciprocal_rank"
@@ -523,5 +532,12 @@ REQUIRED_EMPLOYEE_PAY_CYCLE_COLUMNS = {
     PayrollCol.ANOMALY_CATEGORY,
     PayrollCol.ANOMALY_DOLLARS,
     PayrollCol.OBSERVED_CORRECTION_DOLLARS,
+    PayrollCol.CRITICAL_HARD_RULE_FLAG,
+    PayrollCol.RESIDUAL_RECORD,
+    PayrollCol.Y_ISSUE,
+    PayrollCol.Y_DOLLAR,
+    PayrollCol.RULE_MISSED_SEVERE_ISSUE,
+    PayrollCol.RELEVANCE_GRADE,
+    PayrollCol.NET_UTILITY,
     PayrollCol.SCENARIO_FAMILY,
 }

@@ -564,6 +564,7 @@ def scenario_metadata(scenario: ScenarioSpec | None) -> dict[str, object]:
 
 
 def employee_pay_cycle_records(payroll: pl.DataFrame) -> pl.DataFrame:
+    critical_cycle_flags = _employee_cycle_hard_rule_flags(payroll)
     category_rank = (
         payroll.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
         .group_by(
@@ -650,6 +651,15 @@ def employee_pay_cycle_records(payroll: pl.DataFrame) -> pl.DataFrame:
             ],
             how="left",
         )
+        .join(
+            critical_cycle_flags,
+            on=[
+                PayrollCol.EMPLOYEE_ID,
+                PayrollCol.FACILITY_ID,
+                PayrollCol.PAY_PERIOD_INDEX,
+            ],
+            how="left",
+        )
         .with_columns(
             pl.concat_str(
                 [
@@ -668,6 +678,35 @@ def employee_pay_cycle_records(payroll: pl.DataFrame) -> pl.DataFrame:
             )
             .otherwise(pl.lit(SNFAnomalyCategory.NORMAL))
             .alias(PayrollCol.ANOMALY_CATEGORY),
+            pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG)
+            .fill_null(0)
+            .cast(pl.Int8)
+            .alias(PayrollCol.CRITICAL_HARD_RULE_FLAG),
+        )
+        .with_columns(
+            (pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG).fill_null(0) == 0)
+            .cast(pl.Int8)
+            .alias(PayrollCol.RESIDUAL_RECORD),
+            (
+                (pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG).fill_null(0) == 0)
+                & (pl.col(PayrollCol.IS_ANOMALY) == 1)
+            )
+            .cast(pl.Int8)
+            .alias(PayrollCol.Y_ISSUE),
+            pl.when(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG).fill_null(0) == 0)
+            .then(pl.col(PayrollCol.ANOMALY_DOLLARS))
+            .otherwise(0.0)
+            .round(2)
+            .alias(PayrollCol.Y_DOLLAR),
+        )
+        .with_columns(
+            _employee_cycle_rule_missed_severe_issue_expr().alias(
+                PayrollCol.RULE_MISSED_SEVERE_ISSUE,
+            ),
+        )
+        .with_columns(
+            _employee_cycle_relevance_grade_expr().alias(PayrollCol.RELEVANCE_GRADE),
+            _employee_cycle_net_utility_expr().alias(PayrollCol.NET_UTILITY),
         )
         .drop("dominant_anomaly_category")
         .sort([PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX])
@@ -683,8 +722,238 @@ def employee_pay_cycle_labels(employee_cycles: pl.DataFrame) -> pl.DataFrame:
         PayrollCol.IS_ANOMALY,
         PayrollCol.ANOMALY_CATEGORY,
         PayrollCol.ANOMALY_DOLLARS,
+        PayrollCol.CRITICAL_HARD_RULE_FLAG,
+        PayrollCol.RESIDUAL_RECORD,
+        PayrollCol.Y_ISSUE,
+        PayrollCol.Y_DOLLAR,
+        PayrollCol.RULE_MISSED_SEVERE_ISSUE,
+        PayrollCol.RELEVANCE_GRADE,
+        PayrollCol.NET_UTILITY,
         PayrollCol.SCENARIO_FAMILY,
     )
+
+
+def _employee_cycle_relevance_grade_expr() -> pl.Expr:
+    severity_signal = pl.max_horizontal(
+        pl.when(pl.col(PayrollCol.ANOMALY_DOLLARS) >= 220.0)
+        .then(3)
+        .when(pl.col(PayrollCol.ANOMALY_DOLLARS) >= 120.0)
+        .then(2)
+        .otherwise(1),
+        pl.when(pl.col(PayrollCol.ANOMALOUS_SHIFT_COUNT) >= 3)
+        .then(3)
+        .when(pl.col(PayrollCol.ANOMALOUS_SHIFT_COUNT) >= 2)
+        .then(2)
+        .otherwise(1),
+        pl.when(pl.col(PayrollCol.OBSERVED_CORRECTION) == 1).then(2).otherwise(1),
+        pl.when(pl.col(PayrollCol.TOTAL_OVERTIME_HOURS) >= 24.0).then(2).otherwise(1),
+    )
+    return (
+        pl.when(pl.col(PayrollCol.Y_ISSUE) == 0)
+        .then(0)
+        .when(pl.col(PayrollCol.RULE_MISSED_SEVERE_ISSUE) == 1)
+        .then(3)
+        .otherwise(severity_signal)
+        .cast(pl.Int8)
+    )
+
+
+def _employee_cycle_rule_missed_severe_issue_expr() -> pl.Expr:
+    severe_residual_signal = (pl.col(PayrollCol.Y_ISSUE) == 1) & (
+        (pl.col(PayrollCol.ANOMALY_DOLLARS) >= 180.0)
+        | (pl.col(PayrollCol.ANOMALOUS_SHIFT_COUNT) >= 2)
+        | (pl.col(PayrollCol.TOTAL_OVERTIME_HOURS) >= 20.0)
+    )
+    return severe_residual_signal.cast(pl.Int8)
+
+
+def _employee_cycle_net_utility_expr() -> pl.Expr:
+    review_cost = 18.0
+    recovery_rate = 0.65
+    recovered_value = pl.col(PayrollCol.Y_DOLLAR) * recovery_rate
+    return (
+        pl.when(pl.col(PayrollCol.Y_ISSUE) == 1)
+        .then((recovered_value - review_cost).round(2))
+        .otherwise(pl.lit(-review_cost).round(2))
+        .cast(pl.Float64)
+    )
+
+
+def employee_cycle_hard_rule_funnel(employee_cycles: pl.DataFrame) -> pl.DataFrame:
+    stages = [
+        {
+            "stage": "All payroll records",
+            "records": employee_cycles.height,
+            "pct_of_total": 1.0,
+            "true_issues": int(
+                employee_cycles.select(pl.sum(PayrollCol.IS_ANOMALY)).item() or 0,
+            ),
+            "severe_issues": int(
+                employee_cycles.select(
+                    pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE),
+                ).item()
+                or 0,
+            ),
+            "dollar_impact": float(
+                employee_cycles.select(pl.sum(PayrollCol.ANOMALY_DOLLARS)).item()
+                or 0.0,
+            ),
+        },
+    ]
+    hard_rule = employee_cycles.filter(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG) == 1)
+    residual = employee_cycles.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
+    for stage_name, frame, dollar_col, issue_col in [
+        (
+            "Critical hard-rule flagged",
+            hard_rule,
+            PayrollCol.ANOMALY_DOLLARS,
+            PayrollCol.IS_ANOMALY,
+        ),
+        (
+            "Residual ML universe",
+            residual,
+            PayrollCol.Y_DOLLAR,
+            PayrollCol.Y_ISSUE,
+        ),
+    ]:
+        stages.append(
+            {
+                "stage": stage_name,
+                "records": frame.height,
+                "pct_of_total": frame.height / max(employee_cycles.height, 1),
+                "true_issues": int(frame.select(pl.sum(issue_col)).item() or 0),
+                "severe_issues": int(
+                    frame.select(pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE)).item()
+                    or 0,
+                ),
+                "dollar_impact": float(frame.select(pl.sum(dollar_col)).item() or 0.0),
+            },
+        )
+    return pl.DataFrame(stages)
+
+
+def employee_cycle_residual_diagnostics(
+    employee_cycles: pl.DataFrame,
+) -> dict[str, pl.DataFrame]:
+    residual = employee_cycles.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
+    hard_rule = employee_cycles.filter(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG) == 1)
+    return {
+        "facility_residual_issue_rate": residual.group_by(PayrollCol.FACILITY_ID)
+        .agg(
+            pl.len().alias("residual_records"),
+            pl.sum(PayrollCol.Y_ISSUE).alias("residual_issues"),
+            pl.sum(PayrollCol.Y_DOLLAR).alias("residual_dollars"),
+        )
+        .with_columns(
+            (
+                pl.col("residual_issues") / pl.col("residual_records").clip(1, None)
+            ).alias("residual_issue_rate"),
+        )
+        .sort("residual_issue_rate", descending=True),
+        "facility_cycle_residual_severe_counts": residual.group_by(
+            [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+        )
+        .agg(
+            pl.len().alias("residual_records"),
+            pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE).alias("severe_residual_issues"),
+        )
+        .sort(["severe_residual_issues", "residual_records"], descending=True),
+        "residual_dollar_distribution": residual.select(
+            PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+            PayrollCol.FACILITY_ID,
+            PayrollCol.PAY_PERIOD_INDEX,
+            PayrollCol.Y_DOLLAR,
+            PayrollCol.RELEVANCE_GRADE,
+            PayrollCol.ANOMALY_CATEGORY,
+        ).sort(PayrollCol.Y_DOLLAR, descending=True),
+        "issue_type_mix": pl.DataFrame(
+            [
+                {
+                    "population": "critical_hard_rule_flagged",
+                    PayrollCol.ANOMALY_CATEGORY: category,
+                    "records": count,
+                }
+                for category, count in _category_counts(hard_rule).items()
+            ]
+            + [
+                {
+                    "population": "residual_universe",
+                    PayrollCol.ANOMALY_CATEGORY: category,
+                    "records": count,
+                }
+                for category, count in _category_counts(residual).items()
+            ],
+        ).sort(["population", "records"], descending=[False, True]),
+        "residual_records_per_facility_cycle": residual.group_by(
+            [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+        )
+        .agg(pl.len().alias("residual_records"))
+        .sort("residual_records", descending=True),
+    }
+
+
+def _employee_cycle_hard_rule_flags(payroll: pl.DataFrame) -> pl.DataFrame:
+    policy = SNFPayPolicyConfig()
+    return payroll.group_by(
+        [PayrollCol.EMPLOYEE_ID, PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+    ).agg(
+        pl.max_horizontal(
+            (
+                (pl.col(PayrollCol.EMPLOYMENT_STATUS) == "terminated")
+                & (pl.col(PayrollCol.GROSS_PAY) > 0)
+            )
+            .cast(pl.Int8)
+            .max(),
+            pl.struct(
+                [
+                    PayrollCol.EMPLOYEE_ID,
+                    PayrollCol.SHIFT_DATE,
+                    PayrollCol.SHIFT_TYPE,
+                    PayrollCol.FACILITY_ID,
+                    PayrollCol.PAY_CODE,
+                    PayrollCol.GROSS_PAY,
+                ],
+            )
+            .is_duplicated()
+            .cast(pl.Int8)
+            .max(),
+            (
+                (pl.col(PayrollCol.EMPLOYMENT_STATUS) == "active")
+                & (pl.col(PayrollCol.GROSS_PAY) <= 0)
+            )
+            .cast(pl.Int8)
+            .max(),
+            (pl.col(PayrollCol.NET_PAY) < 0).cast(pl.Int8).max(),
+            (pl.col(PayrollCol.NET_PAY) > pl.col(PayrollCol.GROSS_PAY) * 1.05)
+            .cast(pl.Int8)
+            .max(),
+            (pl.col(PayrollCol.PAID_HOURS) > 24.0).cast(pl.Int8).max(),
+            (
+                (pl.col(PayrollCol.PAID_HOURS) > 0)
+                & (pl.col(PayrollCol.PAY_RATE).fill_null(0.0) <= 0)
+            )
+            .cast(pl.Int8)
+            .max(),
+            (
+                (pl.col(PayrollCol.WORKED_HOURS) - pl.col(PayrollCol.SCHEDULED_HOURS))
+                > policy.paid_vs_scheduled_threshold
+            )
+            .cast(pl.Int8)
+            .max(),
+        )
+        .cast(pl.Int8)
+        .alias(PayrollCol.CRITICAL_HARD_RULE_FLAG),
+    )
+
+
+def _category_counts(frame: pl.DataFrame) -> dict[str, int]:
+    if frame.is_empty():
+        return {}
+    grouped = frame.group_by(PayrollCol.ANOMALY_CATEGORY).len()
+    return {
+        str(row[PayrollCol.ANOMALY_CATEGORY]): int(row["len"])
+        for row in grouped.to_dicts()
+    }
 
 
 def scenario_summary(

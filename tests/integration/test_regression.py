@@ -18,6 +18,8 @@ from payroll_anomaly_ranking.columns import (
 )
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.data import (
+    employee_cycle_hard_rule_funnel,
+    employee_cycle_residual_diagnostics,
     generate_employee_pay_cycles,
     generate_payroll,
     scenario_sanity_summary,
@@ -296,6 +298,8 @@ def test_employee_pay_cycle_generation_is_reproducible_and_schema_valid() -> Non
         PayrollCol.IS_ANOMALY,
         PayrollCol.ANOMALY_CATEGORY,
         PayrollCol.ANOMALY_DOLLARS,
+        PayrollCol.RELEVANCE_GRADE,
+        PayrollCol.NET_UTILITY,
     } <= set(generated_a.payroll.columns)
 
 
@@ -355,12 +359,97 @@ def test_employee_pay_cycle_labels_capture_only_anomalous_cycles() -> None:
                 PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
                 PayrollCol.IS_ANOMALY,
                 PayrollCol.ANOMALY_DOLLARS,
+                PayrollCol.RELEVANCE_GRADE,
+                PayrollCol.NET_UTILITY,
             ),
             on=PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
             how="inner",
         ).height
         == generated.labels.height
     )
+
+
+def test_employee_cycle_label_engineering_produces_bounded_relevance_and_utility() -> (
+    None
+):
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    payroll = generate_employee_pay_cycles(config).payroll
+
+    assert payroll.select(pl.col(PayrollCol.RELEVANCE_GRADE).min()).item() >= 0
+    assert payroll.select(pl.col(PayrollCol.RELEVANCE_GRADE).max()).item() <= 3
+    assert (
+        payroll.filter(pl.col(PayrollCol.IS_ANOMALY) == 0)
+        .select(pl.col(PayrollCol.RELEVANCE_GRADE).max())
+        .item()
+        == 0
+    )
+    assert (
+        payroll.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
+        .select(pl.col(PayrollCol.NET_UTILITY).min())
+        .item()
+        > -18.0
+    )
+    assert (
+        payroll.filter(pl.col(PayrollCol.IS_ANOMALY) == 0)
+        .select(pl.col(PayrollCol.NET_UTILITY).min())
+        .item()
+        == -18.0
+    )
+    assert {PayrollCol.CRITICAL_HARD_RULE_FLAG, PayrollCol.RESIDUAL_RECORD} <= set(
+        payroll.columns,
+    )
+    assert {
+        PayrollCol.Y_ISSUE,
+        PayrollCol.Y_DOLLAR,
+        PayrollCol.RULE_MISSED_SEVERE_ISSUE,
+    } <= set(payroll.columns)
+    assert (
+        payroll.filter(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG) == 1)
+        .select(pl.col(PayrollCol.RESIDUAL_RECORD).max())
+        .item()
+        == 0
+    )
+    assert (
+        payroll.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 0)
+        .select(pl.col(PayrollCol.Y_ISSUE).max())
+        .item()
+        == 0
+    )
+    assert (
+        payroll.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 0)
+        .select(pl.col(PayrollCol.Y_DOLLAR).max())
+        .item()
+        == 0.0
+    )
+
+
+def test_employee_cycle_residual_gate_artifacts_exist() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    payroll = generate_employee_pay_cycles(config).payroll
+
+    funnel = employee_cycle_hard_rule_funnel(payroll)
+    diagnostics = employee_cycle_residual_diagnostics(payroll)
+
+    assert funnel.get_column("stage").to_list() == [
+        "All payroll records",
+        "Critical hard-rule flagged",
+        "Residual ML universe",
+    ]
+    assert (
+        funnel.filter(pl.col("stage") == "All payroll records").row(0, named=True)[
+            "records"
+        ]
+        == payroll.height
+    )
+    assert {
+        "facility_residual_issue_rate",
+        "facility_cycle_residual_severe_counts",
+        "residual_dollar_distribution",
+        "issue_type_mix",
+        "residual_records_per_facility_cycle",
+    } <= set(diagnostics)
+    assert diagnostics["facility_residual_issue_rate"].height > 0
+    assert PayrollCol.Y_DOLLAR in diagnostics["residual_dollar_distribution"].columns
 
 
 def test_employee_cycle_features_use_only_prior_period_history() -> None:
@@ -453,6 +542,8 @@ def test_employee_cycle_evaluation_reports_grouped_metrics() -> None:
         MetricCol.RECALL_AT_K,
         MetricCol.MEAN_RECIPROCAL_RANK,
         MetricCol.DOLLAR_CAPTURE_RATE,
+        MetricCol.NET_UTILITY_CAPTURED_AT_K,
+        MetricCol.UTILITY_PER_REVIEW,
     } <= set(evaluation.metrics.columns)
     assert evaluation.model_comparison.height >= 4
     assert evaluation.production_candidacy.height >= 1
@@ -1107,6 +1198,21 @@ def test_scoring_excludes_injected_evaluation_truth() -> None:
             ScoreCol.COMPOSITE_UNCERTAINTY_SCORE,
         ),
     )
+
+
+def test_employee_cycle_scoring_excludes_evaluation_labels_from_features() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    payroll = generate_employee_pay_cycles(config).payroll
+    results = score_employee_pay_cycles(payroll, config)
+
+    assert PayrollCol.IS_ANOMALY not in results.feature_columns
+    assert PayrollCol.ANOMALY_CATEGORY not in results.feature_columns
+    assert PayrollCol.ANOMALY_DOLLARS not in results.feature_columns
+    assert PayrollCol.Y_ISSUE not in results.feature_columns
+    assert PayrollCol.Y_DOLLAR not in results.feature_columns
+    assert PayrollCol.RULE_MISSED_SEVERE_ISSUE not in results.feature_columns
+    assert PayrollCol.RELEVANCE_GRADE not in results.feature_columns
+    assert PayrollCol.NET_UTILITY not in results.feature_columns
 
 
 def test_period_safe_feature_references_and_early_fallbacks() -> None:

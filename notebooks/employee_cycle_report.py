@@ -121,20 +121,95 @@
 #     observed -->|historical signal| cycles
 # ```
 # %%
+import polars as pl
+import polars.selectors as pl_selectors
+from common.display import setup_notebook_html
+from common.execution import notebook_fast_mode
+
 from payroll_anomaly_ranking.columns import PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
-from payroll_anomaly_ranking.data import generate_employee_pay_cycles
+from payroll_anomaly_ranking.data import (
+    employee_cycle_hard_rule_funnel,
+    employee_cycle_residual_diagnostics,
+    generate_employee_pay_cycles,
+)
 from payroll_anomaly_ranking.features import build_employee_cycle_features
 
 # %%
+setup_notebook_html()
+fast_mode = notebook_fast_mode()
+
+# %%
 sim_config = PayrollConfig(
-    facility_count=75,
-    pay_periods=36,
+    facility_count=24 if fast_mode else 75,
+    employee_count=180 if fast_mode else 650,
+    pay_periods=16 if fast_mode else 36,
+    review_budgets=(10, 25, 50),
 )
 
 data = generate_employee_pay_cycles(sim_config)
+funnel = employee_cycle_hard_rule_funnel(data.payroll)
+residual_diagnostics = employee_cycle_residual_diagnostics(data.payroll)
+residual_payroll = data.payroll.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
+hard_rule_flagged = data.payroll.filter(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG) == 1)
+
+
+def section_title(title: str) -> None:
+    print(f"\n{title}\n")
+
 
 # %%
+section_title("Section 0 snapshot")
+pl.DataFrame(
+    {
+        "metric": [
+            "employee-pay-cycle records",
+            "critical hard-rule flagged",
+            "residual records",
+            "residual issue rate",
+            "residual severe issues",
+            "residual dollars",
+        ],
+        "value": [
+            float(data.payroll.height),
+            float(hard_rule_flagged.height),
+            float(residual_payroll.height),
+            round(
+                float(
+                    residual_payroll.select(pl.mean(PayrollCol.Y_ISSUE)).item() or 0.0,
+                ),
+                4,
+            ),
+            float(
+                residual_payroll.select(
+                    pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE),
+                ).item()
+                or 0,
+            ),
+            round(
+                float(
+                    residual_payroll.select(pl.sum(PayrollCol.Y_DOLLAR)).item() or 0.0,
+                ),
+                2,
+            ),
+        ],
+    },
+)
+
+# %% [markdown]
+# Section 1 framing
+#
+# | Workflow Assumption | Active Contract |
+# | --- | --- |
+# | **Modeling Grain** | employee-pay-cycle |
+# | **Hard-Rule Role** | remove obvious payroll problems before ML |
+# | **Scoring Universe** | only residual records not flagged by critical hard rules |
+# | **Queue Group** | facility x payroll cycle |
+# | **Review Objective** | prioritize ambiguous payroll records under limited review capacity |
+# | **Out Of Scope** | PBJ, HPRD, and compliance staffing metrics |
+
+# %%
+section_title("Section 2 schema example")
 data.payroll.select(
     PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
     PayrollCol.EMPLOYEE_ID,
@@ -142,6 +217,10 @@ data.payroll.select(
     PayrollCol.PAY_PERIOD_INDEX,
     PayrollCol.TOTAL_GROSS_PAY,
     PayrollCol.TOTAL_OVERTIME_HOURS,
+    PayrollCol.CRITICAL_HARD_RULE_FLAG,
+    PayrollCol.RESIDUAL_RECORD,
+    PayrollCol.Y_ISSUE,
+    PayrollCol.Y_DOLLAR,
 ).head()
 
 # %% [markdown]
@@ -189,6 +268,15 @@ data.payroll.select(
 # | Critical hard-rule flagged |  |  |  |  |  |
 # | Residual ML universe |  |  |  |  |  |
 
+# %%
+section_title("Section 3 hard-rule funnel")
+(
+    funnel.with_columns(
+        pl.col("pct_of_total").round(4),
+        pl.col("dollar_impact").round(2),
+    )
+)
+
 # %% [markdown]
 # ## 4. Simulation Sanity Checks for the Residual Dataset
 #
@@ -205,6 +293,22 @@ data.payroll.select(
 #
 # Existing full-dataset plots were removed because they do not answer the
 # residual-universe question cleanly.
+
+# %%
+section_title("Section 4 residual issue rate by facility")
+residual_diagnostics["facility_residual_issue_rate"].head(10)
+
+# %%
+section_title("Section 4 severe residual issues by facility-cycle")
+residual_diagnostics["facility_cycle_residual_severe_counts"].head(10)
+
+# %%
+section_title("Section 4 issue-type mix")
+residual_diagnostics["issue_type_mix"]
+
+# %%
+section_title("Section 4 top residual dollar records")
+residual_diagnostics["residual_dollar_distribution"].head(10)
 
 # %% [markdown]
 # ## 5. Label Engineering for Residual Ranking
@@ -245,14 +349,36 @@ data.payroll.select(
 # | **observed correction** | `observed_correction` | bias analysis | biased reviewed-and-corrected historical subset |
 # | **net utility** | `net_utility` | evaluation | residual business value minus review cost |
 
+# %%
+section_title("Section 5 label examples")
+residual_payroll.select(
+    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+    PayrollCol.ANOMALY_CATEGORY,
+    PayrollCol.CRITICAL_HARD_RULE_FLAG,
+    PayrollCol.RESIDUAL_RECORD,
+    PayrollCol.Y_ISSUE,
+    PayrollCol.Y_DOLLAR,
+    PayrollCol.RULE_MISSED_SEVERE_ISSUE,
+    PayrollCol.RELEVANCE_GRADE,
+    PayrollCol.OBSERVED_CORRECTION,
+    PayrollCol.NET_UTILITY,
+).unique(
+    pl_selectors.all()
+    - pl_selectors.matches("employee_pay_cycle_id|y_dollar|net_utility"),
+).head(10)
+
+# %%
+section_title("Section 5 label summary")
+residual_payroll.select(
+    pl.len().alias("residual_records"),
+    pl.sum(PayrollCol.Y_ISSUE).alias("residual_issues"),
+    pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE).alias("rule_missed_severe_issues"),
+    pl.mean(PayrollCol.Y_DOLLAR).round(2).alias("avg_residual_dollars"),
+    pl.mean(PayrollCol.NET_UTILITY).round(2).alias("avg_net_utility"),
+)
+
 # %% [markdown]
 # ## 6. Feature Engineering for Ambiguous Payroll Records
-#
-# Because the obvious records are removed first, the residual task depends more
-# on contextual deviation features than on raw threshold signals alone.
-#
-# Soft warning signals may remain as features. Compliance, PBJ, and HPRD metrics
-# are intentionally excluded.
 
 # %% [markdown]
 # | Feature family | Examples | Why it matters in the residual queue |

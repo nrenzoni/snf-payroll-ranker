@@ -229,6 +229,7 @@ def employee_cycle_grouped_metrics(
         or 0.0,
     )
     exposure = float(reviewed.select(pl.sum(ScoreCol.ESTIMATED_EXPOSURE)).item() or 0.0)
+    utility = float(reviewed.select(pl.sum(PayrollCol.NET_UTILITY)).item() or 0.0)
     try:
         pr_auc = float(
             average_precision_score(
@@ -253,6 +254,8 @@ def employee_cycle_grouped_metrics(
         MetricCol.DOLLARS_CAPTURED_AT_K: captured_dollars,
         MetricCol.EXPOSURE_CAPTURED_AT_K: exposure,
         MetricCol.EXPOSURE_PER_REVIEW: exposure / max(reviewed.height, 1),
+        MetricCol.NET_UTILITY_CAPTURED_AT_K: utility,
+        MetricCol.UTILITY_PER_REVIEW: utility / max(reviewed.height, 1),
         MetricCol.REVIEW_VOLUME: float(reviewed.height),
         MetricCol.NATIVE_REVIEW_BURDEN: float(reviewed.height),
         MetricCol.DOLLAR_CAPTURE_RATE: captured_dollars / total_dollars
@@ -762,6 +765,11 @@ def leakage_checks_for_features(
         PayrollCol.IS_ANOMALY,
         PayrollCol.ANOMALY_CATEGORY,
         PayrollCol.ANOMALY_DOLLARS,
+        PayrollCol.Y_ISSUE,
+        PayrollCol.Y_DOLLAR,
+        PayrollCol.RULE_MISSED_SEVERE_ISSUE,
+        PayrollCol.RELEVANCE_GRADE,
+        PayrollCol.NET_UTILITY,
     }
     return pl.DataFrame(
         [
