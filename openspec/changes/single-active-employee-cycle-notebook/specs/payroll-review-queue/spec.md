@@ -1,11 +1,11 @@
 ## MODIFIED Requirements
 
 ### Requirement: Business deliverable notebook sections
-The active notebook SHALL include business, technical, evaluation, reviewer-workflow, and production-readiness sections needed for a presentable employee-pay-cycle payroll ranking deliverable.
+The active notebook SHALL include business, technical, evaluation, reviewer-workflow, and production-readiness sections needed for a presentable employee-pay-cycle payroll ranking deliverable focused on residual finance/payroll review after hard rules.
 
 #### Scenario: Notebook narrative is complete
 - **WHEN** a reviewer reads the active notebook
-- **THEN** it includes an executive summary, privacy disclaimer, employee-pay-cycle problem framing, anomaly taxonomy, synthetic data generation, schema and data quality summaries, label engineering, feature engineering, model formulations, main queue-based evaluation, generalization evidence, ablation studies, deep diagnostics, reviewer UX, robustness or stress testing, production recommendation, and technical appendix material
+- **THEN** it includes an executive summary, privacy disclaimer, residual payroll review problem framing, synthetic data generation, hard-rule gate definition, residual data sanity checks, label engineering, feature engineering, model formulations, residual queue evaluation, ablation studies, diagnostics and explanations, final recommendation, and technical appendix material
 
 ### Requirement: Multi-notebook business case study sequence
 The repository SHALL treat one primary employee-pay-cycle notebook as the active reporting deliverable instead of a required multi-notebook sequence.
@@ -24,7 +24,7 @@ The active notebook SHALL begin with a short executive takeaway and end its main
 - **AND** the final main-narrative section provides the production recommendation before the appendix begins
 
 ### Requirement: Required business visuals
-The active notebook SHALL include clean visuals or tables for employee-pay-cycle payroll summaries, score distributions, threshold or formulation comparisons, precision@K by review budget, exposure captured@K by review budget, model comparison, backtest or rolling-origin metrics over time, and selected reviewer-facing queue examples.
+The active notebook SHALL include clean visuals or tables for employee-pay-cycle payroll summaries, hard-rule funnel summaries, residual queue metrics by review budget, model comparison, backtest or rolling-origin metrics over time, and selected reviewer-facing queue examples.
 
 #### Scenario: Required visuals render from synthetic employee-pay-cycle outputs
 - **WHEN** the active notebook is run on a clean checkout
@@ -32,10 +32,18 @@ The active notebook SHALL include clean visuals or tables for employee-pay-cycle
 - **AND** notebook cells that render Lets-Plot visuals call `LetsPlot.setup_html()` before displaying those charts
 - **AND** continuous distribution visuals use binned histograms or equivalent aggregation rather than one bar per raw numeric value
 
+### Requirement: Residual reviewer workflow framing
+The active notebook SHALL describe reviewer-facing outputs as finance/payroll review of ambiguous residual records rather than as compliance or staffing review.
+
+#### Scenario: Queue language stays in scope
+- **WHEN** reviewer workflow examples or explanation text are displayed
+- **THEN** they describe checking payroll, timekeeping, rate authorization, facility allocation, lifecycle, or duplicate-payment context for ambiguous residual records
+- **AND** they do not frame the queue as PBJ, HPRD, staffing-compliance, or regulatory review
+
 ### Requirement: README notebook sequence documentation
 The README SHALL identify the single active employee-pay-cycle notebook and briefly explain that it covers the full reporting story and appendix.
 
 #### Scenario: README links active notebook story
 - **WHEN** a reviewer reads `README.md`
 - **THEN** it identifies the single active employee-pay-cycle notebook as the active reporting contract
-- **AND** it explains that the notebook covers the main payroll anomaly ranking case study and technical appendix in one deliverable
+- **AND** it explains that the notebook covers the full residual payroll ranking case study and technical appendix in one deliverable
