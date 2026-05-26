@@ -131,19 +131,23 @@ Rendered notebooks and case-study walkthroughs are hosted at:
 
 **https://nrenzoni.github.io/payroll-anomaly-ranking/**
 
+Active notebook under `notebooks/`:
+
+- `notebooks/employee_cycle_report.py`: active single-notebook residual payroll ranking report. It asks which ML formulation best prioritizes ambiguous employee-pay-cycle records after critical hard rules remove obvious payroll problems.
+
 Legacy notebooks retained for reference under `notebooks/legacy/shift_level/`:
 
 - `notebooks/legacy/shift_level/08_snf_payroll_approval_case_studies.py`: deprecated business-facing shift-level SNF proof notebook.
 - `notebooks/legacy/shift_level/09_model_ablation_and_ml_value.py`: deprecated shift-level hybrid ablation and diagnostic notebook.
 
-Future active notebooks should describe and validate the employee-pay-cycle runtime rather than extend the deprecated shift-level narrative.
+The active notebook describes and validates the residual employee-pay-cycle ranking workflow rather than extending the deprecated shift-level narrative.
 
 Notebook-only plotting code lives in Jupytext notebook sources and shared plotting adapters under `notebooks/common/`. The runtime package remains free of Jupyter and Lets-Plot imports.
 
 Fast-path notebook validation (reduced workload, `/tmp` output, no paired `.ipynb` churn):
 
 ```bash
-NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/notebook.fast.ipynb notebooks/legacy/shift_level/08_snf_payroll_approval_case_studies.py
+NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/employee-cycle-report.fast.ipynb notebooks/employee_cycle_report.py
 ```
 
 ---

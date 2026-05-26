@@ -5,7 +5,7 @@ This directory is split into active notebook infrastructure and deprecated noteb
 ## Active
 
 - `common/`: shared notebook helpers that remain usable for future active notebooks.
-- Future active employee-pay-cycle notebooks should live directly under `notebooks/` unless a later change defines a different active layout.
+- `employee_cycle_report.py`: active residual payroll review notebook. It focuses on employee-pay-cycle records that remain after critical hard rules remove obvious payroll problems.
 
 ## Legacy
 

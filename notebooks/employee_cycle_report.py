@@ -14,72 +14,117 @@
 # ---
 
 # %% [markdown]
-# # Employee-Pay-Cycle Payroll Anomaly Ranking
+# # Residual Payroll Review After Hard Rules
 
 # %% [markdown]
 # ## 0. Executive Summary
 #
-# This project compares rule-based, classification, regression, expected-value,
-# and learning-to-rank approaches for prioritizing SNF payroll records for review.
+# **Goal**
 #
+# Rank ambiguous SNF payroll records that were not caught by critical hard rules.
 #
-# **validate TODO**:
-# Main finding:
-# Learning-to-rank produced the best top-of-queue severity ordering at tight
-# review budgets, while the expected-value model was strongest for calibrated
-# dollar recovery. The recommended production design is a hybrid: LTR for queue
-# ordering, calibrated probability/impact estimates for reviewer context, and
-# rules as hard guardrails.
+# **Workflow setup**
+#
+# Critical hard rules remove obvious payroll violations first. ML models compete
+# only on the residual queue.
+#
+# **Models compared**
+#
+# - classifier
+# - cost-sensitive classifier
+# - regressor
+# - expected-value model
+# - learning-to-rank
+#
+# **Primary metrics**
+#
+# - residual NDCG@K
+# - rule-missed severe recall@K
+# - residual dollars caught@K
+# - reviewer yield@K
+# - incremental utility@K
+#
+# **Working conclusion placeholder**
+#
+# Learning-to-rank is expected to be strongest for top-of-queue severity
+# ordering, while the expected-value model is expected to remain highly
+# competitive for residual dollar recovery. The final recommendation should
+# depend on whether the review team prioritizes severe-risk coverage or
+# financial recovery.
 
 # %% [markdown]
-# ## 1. Problem Framing
+# ## 1. Problem Framing: Residual Payroll Review After Hard Rules
 #
-# Explain why facility-period queues, temporal validation, and review-budget trade-offs define the operational problem more accurately than isolated record scoring.
+# This notebook does not ask whether ML can beat hard rules on obvious payroll
+# problems. It asks whether ML adds value after hard rules have already removed
+# the obvious cases.
 #
-# - unit = payroll record
-# - group = facility × payroll cycle
-# - business constraint = reviewers can only inspect top K%
-# - objective = maximize review utility
+# **Production assumption**
+#
+# Critical hard rules already catch impossible or obvious payroll records before
+# the ML stage begins.
+#
+# **Modeling question**
+#
+# Among employee-pay-cycle records not caught by critical hard rules, which ML
+# formulation best ranks the remaining payroll review candidates?
+#
+# **Queue framing**
+#
+# - item: employee-pay-cycle payroll record
+# - group: facility x payroll cycle
+# - business constraint: reviewers can inspect only the top K residual records
+# - objective: maximize review value in the top K residual records
+#
+# **Out of scope**
+#
+# - optimizing the hard rules themselves
+# - ranking all payroll records before hard rules
+# - evaluating a full hybrid production policy end to end
+# - UI or workflow implementation
+# - compliance, PBJ, and HPRD staffing metrics
 
 # %% [markdown]
-# ## 2. Data-Generating Process
+# ## 2. Synthetic SNF Payroll Data Generation
 #
-# This section will describe how synthetic employee-pay-cycle payroll records are generated, how supporting lower-level payroll context is retained, and how scenario controls shape the evaluation worlds.
-# It will also document the privacy-safe assumptions behind the synthetic dataset and the limits of synthetic evidence.
+# This section documents the simulated world only to the extent needed for the
+# residual-ranking experiment.
 #
-# Show:
+# The synthetic data should support two distinct populations:
 #
-# - facility hierarchy,
-# - employee generation,
-# - payroll cycles,
-# - latent true issues,
-# - observed historical labels,
-# - review bias.
+# - hard-rule-caught obvious payroll issues
+# - rule-missed residual issues that remain ambiguous after gating
+#
+# The notebook will show the generator setup, a compact process diagram, and a
+# small schema example rather than all generator internals.
 
+# %% [markdown]
+# ```mermaid
+# flowchart TD
+#     classDef default fill:#F7F9FC,stroke:#5B6B83,stroke-width:1px,font-family:Helvetica,color:#000000;
+#     linkStyle default stroke:#5B6B83,font-family:Helvetica;
+#     facilities["<b>Facility hierarchy</b><br/>region, size tier, payroll maturity, local pay patterns"]
+#     employees["<b>Employee generation</b><br/>role, tenure, base rate, home facility, lifecycle state"]
+#     payroll["<b>Payroll cycles and timekeeping</b><br/>hours, overtime, rate changes, punches, edits"]
+#     critical["<b>Critical hard-rule issues</b><br/>duplicate or impossible records removed before ML"]
+#     residual["<b>Residual latent issues</b><br/>ambiguous payroll risks that survive the hard-rule gate"]
+#     observed["<b>Observed history</b><br/>reviewed corrections are a biased subset of true issues"]
+#     cycles["<b>Employee-pay-cycle records</b><br/>active modeling grain for residual ranking"]
+#     facilities -->|work context| employees
+#     facilities -->|facility effects| payroll
+#     employees -->|employee behavior| payroll
+#     payroll -->|obvious violations| critical
+#     payroll -->|subtle issues| residual
+#     critical -->|gate out| cycles
+#     residual -->|evaluation labels| cycles
+#     residual -->|selective review| observed
+#     observed -->|historical signal| cycles
+# ```
 # %%
-import polars as pl
-from common.plots import (
-    LetsPlot,
-    aes,
-    geom_bar,
-    geom_density,
-    geom_histogram,
-    geom_point,
-    geom_tile,
-    ggplot,
-    labs,
-    rotated_x_labels,
-    theme_minimal,
-)
-from graphviz import Digraph
-
 from payroll_anomaly_ranking.columns import PayrollCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.data import generate_employee_pay_cycles
 from payroll_anomaly_ranking.features import build_employee_cycle_features
-
-# %%
-LetsPlot.setup_html()
 
 # %%
 sim_config = PayrollConfig(
@@ -88,63 +133,6 @@ sim_config = PayrollConfig(
 )
 
 data = generate_employee_pay_cycles(sim_config)
-
-
-# %%
-dgp = Digraph("employee_cycle_dgp")
-dgp.attr(rankdir="LR", nodesep="0.35", ranksep="0.6", bgcolor="transparent")
-dgp.attr(
-    "node",
-    shape="rect",
-    style="rounded,filled",
-    fillcolor="#F7F9FC",
-    color="#5B6B83",
-    fontname="Helvetica",
-)
-dgp.attr("edge", color="#5B6B83", fontname="Helvetica")
-
-dgp.node(
-    "facilities",
-    "Facility hierarchy\nregion, size tier, payroll maturity, staffing pressure",
-)
-dgp.node(
-    "employees",
-    "Employee generation\nrole, license, tenure, base rate, home facility",
-)
-dgp.node(
-    "schedules",
-    "Payroll cycles and shifts\nschedules, timeclock, hours, premiums, edits",
-)
-dgp.node(
-    "latent",
-    "Latent true issues\npolicy mismatches, overtime pressure, lifecycle exceptions",
-)
-dgp.node(
-    "observed",
-    "Observed history\nreviewed corrections are a biased subset of true issues",
-)
-dgp.node(
-    "cycles",
-    "Employee-pay-cycle records\ncycle-level payroll plus supporting lower-level context",
-)
-
-dgp.edge("facilities", "employees", label="staffing context")
-dgp.edge("facilities", "schedules", label="facility constraints")
-dgp.edge("employees", "schedules", label="assign work")
-dgp.edge("schedules", "latent", label="generate payable events")
-dgp.edge("latent", "observed", label="selective review")
-dgp.edge("schedules", "cycles", label="roll up")
-dgp.edge("latent", "cycles", label="evaluation labels")
-dgp.edge("observed", "cycles", label="historical signal")
-
-dgp
-
-
-# %% [markdown]
-# The active generator creates lower-level schedule, timeclock, and payroll-line
-# context first, injects latent anomalies into those records, then rolls them up
-# into employee-pay-cycle records for modeling while retaining the supporting
-# shift-level evidence for diagnostics and reviewer context.
 
 # %%
 data.payroll.select(
@@ -157,337 +145,269 @@ data.payroll.select(
 ).head()
 
 # %% [markdown]
-# ## 3. Simulation Sanity Checks
+# ## 3. Hard Rule Gate: Defining the Residual Universe
 #
-# These checks confirm that the synthetic employee-pay-cycle world is large
-# enough for evaluation, that anomaly prevalence is non-degenerate, and that the
-# historical observed-correction signal is a biased subset of the latent truth
-# rather than a duplicate of the evaluation labels.
-
-# %%
-sanity_overview = pl.DataFrame(
-    {
-        "metric": [
-            "employee-pay-cycle rows",
-            "supporting shift rows",
-            "facilities",
-            "employees",
-            "pay periods",
-            "true issue rate",
-            "observed correction rate",
-            "total anomaly dollars",
-            "observed correction dollars",
-        ],
-        "value": [
-            f"{data.payroll.height:,}",
-            f"{data.supporting_payroll.height:,}",
-            f"{data.payroll.select(pl.col(PayrollCol.FACILITY_ID).n_unique()).item():,}",
-            f"{data.payroll.select(pl.col(PayrollCol.EMPLOYEE_ID).n_unique()).item():,}",
-            f"{data.payroll.select(pl.col(PayrollCol.PAY_PERIOD_INDEX).n_unique()).item():,}",
-            f"{100 * data.payroll.select(pl.col(PayrollCol.IS_ANOMALY).mean()).item():.2f}%",
-            f"{100 * data.payroll.select(pl.col(PayrollCol.OBSERVED_CORRECTION).mean()).item():.2f}%",
-            f"${data.payroll.select(pl.sum(PayrollCol.ANOMALY_DOLLARS)).item():,.0f}",
-            f"${data.payroll.select(pl.sum(PayrollCol.OBSERVED_CORRECTION_DOLLARS)).item():,.0f}",
-        ],
-    },
-)
-
-sanity_overview
-
-
-# %%
-facility_issue_rates = (
-    data.payroll.group_by([PayrollCol.FACILITY_ID, PayrollCol.FACILITY_NAME])
-    .agg(
-        pl.len().alias("employee_cycles"),
-        pl.mean(PayrollCol.IS_ANOMALY).alias("true_issue_rate"),
-        pl.mean(PayrollCol.OBSERVED_CORRECTION).alias("observed_correction_rate"),
-        pl.sum(PayrollCol.ANOMALY_DOLLARS).alias("anomaly_dollars"),
-    )
-    .sort("employee_cycles", descending=True)
-)
-
-facility_issue_rates.head(10)
-
-# %%
-top_facility_issue_rates = facility_issue_rates.head(20).with_columns(
-    (100 * pl.col("true_issue_rate")).round(2).alias("true_issue_rate_pct"),
-)
-
-(
-    ggplot(
-        top_facility_issue_rates,
-        aes(x=PayrollCol.FACILITY_ID, y="true_issue_rate_pct"),
-    )
-    + geom_bar(stat="identity", fill="#4C78A8")
-    + labs(
-        title="True issue rate by facility",
-        x="Facility",
-        y="True issue rate (%)",
-    )
-    + theme_minimal()
-    + rotated_x_labels()
-)
-
-
-# %%
-overtime_by_role = data.payroll.select(
-    PayrollCol.ROLE,
-    PayrollCol.TOTAL_OVERTIME_HOURS,
-).filter(
-    pl.col(PayrollCol.TOTAL_OVERTIME_HOURS) > 0,
-)
-
-(
-    ggplot(
-        overtime_by_role,
-        aes(x=PayrollCol.TOTAL_OVERTIME_HOURS, color=PayrollCol.ROLE),
-    )
-    + geom_density(size=1.0)
-    + labs(
-        title="Overtime distribution by role",
-        x="Total overtime hours in employee-pay-cycle",
-        y="Density",
-        color="Role",
-    )
-    + theme_minimal()
-)
-
-
-# %%
-pay_rate_by_role = data.payroll.select(
-    PayrollCol.ROLE,
-    PayrollCol.BASE_PAY_RATE,
-)
-
-(
-    ggplot(
-        pay_rate_by_role,
-        aes(x=PayrollCol.BASE_PAY_RATE, color=PayrollCol.ROLE),
-    )
-    + geom_density(size=1.0)
-    + labs(
-        title="Base pay-rate distribution by role",
-        x="Base hourly rate",
-        y="Density",
-        color="Role",
-    )
-    + theme_minimal()
-)
-
-
-# %%
-true_vs_observed_rates = facility_issue_rates.select(
-    PayrollCol.FACILITY_ID,
-    (100 * pl.col("true_issue_rate")).round(2).alias("true_issue_rate_pct"),
-    (100 * pl.col("observed_correction_rate"))
-    .round(2)
-    .alias("observed_correction_rate_pct"),
-)
-
-(
-    ggplot(
-        true_vs_observed_rates,
-        aes(x="true_issue_rate_pct", y="observed_correction_rate_pct"),
-    )
-    + geom_point(color="#E45756", alpha=0.8)
-    # + geom_abline(slope=1, intercept=0, linetype="dashed", color="darkgray")
-    + labs(
-        title="True issue rate vs observed correction rate by facility",
-        x="True issue rate (%)",
-        y="Observed correction rate (%)",
-    )
-    + theme_minimal()
-)
-
-
-# %%
-facility_cycle_positives = (
-    data.payroll.group_by([PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX])
-    .agg(pl.sum(PayrollCol.IS_ANOMALY).alias("positive_cycles"))
-    .with_columns(pl.col("positive_cycles").clip(0, 8).alias("positive_cycles_capped"))
-)
-
-(
-    ggplot(
-        facility_cycle_positives,
-        aes(
-            x=PayrollCol.PAY_PERIOD_INDEX,
-            y=PayrollCol.FACILITY_ID,
-            fill="positive_cycles_capped",
-        ),
-    )
-    + geom_tile()
-    + labs(
-        title="Positive employee-pay-cycles per facility-period",
-        x="Pay period",
-        y="Facility",
-        fill="Positives\n(capped at 8)",
-    )
-    + theme_minimal()
-)
-
-
-# %%
-anomaly_dollars = data.payroll.select(PayrollCol.ANOMALY_DOLLARS).filter(
-    pl.col(PayrollCol.ANOMALY_DOLLARS) > 0,
-)
-
-(
-    ggplot(anomaly_dollars, aes(x=PayrollCol.ANOMALY_DOLLARS))
-    + geom_histogram(bins=30, fill="#72B7B2", color="#3B5C76")
-    + labs(
-        title="Dollar impact distribution for anomalous employee-pay-cycles",
-        x="Injected anomaly dollars",
-        y="Count",
-    )
-    + theme_minimal()
-)
-
+# Hard rules are an upstream gate, not a competing model.
+#
+# **Critical hard rules**
+#
+# These records leave the ML universe entirely. Examples include:
+#
+# - duplicate or overlapping shift
+# - negative hours
+# - gross pay equal to zero with positive hours
+# - missing pay rate
+# - physically impossible hours
+# - terminated employee paid regular hours
+#
+# **Soft warning signals**
+#
+# These do not remove a record from the ML universe. They remain candidate input
+# features because they are ambiguous contextual warnings rather than definitive
+# failures.
+#
+# Examples:
+#
+# - overtime above threshold
+# - manual edit
+# - missing punch
+# - unusual facility pattern
+# - pay-rate change
+# - high gross pay versus employee baseline
+#
+# **Residual universe**
+#
+# `residual_record = not critical_hard_rule_flagged`
+#
+# The ML task is to rank residual records within each facility x payroll cycle.
+#
+# **Planned funnel summary**
+#
+# | Stage | Records | % of total | True issues | Severe issues | Dollar impact |
+# | --- | ---: | ---: | ---: | ---: | ---: |
+# | All payroll records |  | 100% |  |  |  |
+# | Critical hard-rule flagged |  |  |  |  |  |
+# | Residual ML universe |  |  |  |  |  |
 
 # %% [markdown]
-# The simulation produces a broad facility-period panel with enough employee-pay-
-# cycle volume to support grouped queue evaluation. True issue rates vary across
-# facilities, while observed corrections remain lower because review is modeled
-# as a selective historical process that favors larger-dollar and more obvious
-# exceptions. Overtime and pay-rate distributions also differ meaningfully by
-# role, which is useful because the ranking task should separate normal clinical
-# workload patterns from unusually risky payroll cycles.
+# ## 4. Simulation Sanity Checks for the Residual Dataset
+#
+# This section should answer one question: after hard rules, is there still
+# enough signal and enough risk for ML ranking to matter?
+#
+# Planned residual-only checks:
+#
+# 1. residual issue rate by facility
+# 2. residual severe issue count per facility-cycle
+# 3. dollar impact distribution in residual records
+# 4. issue-type mix: hard-rule flagged versus residual
+# 5. residual records per facility-cycle
+#
+# Existing full-dataset plots were removed because they do not answer the
+# residual-universe question cleanly.
 
 # %% [markdown]
-# ## 4. Label Engineering
+# ## 5. Label Engineering for Residual Ranking
 #
-# This section will explain how evaluation-only anomaly labels are constructed at the employee-pay-cycle level and how dominant anomaly categories are assigned when multiple lower-level anomalies roll up into one cycle.
-# It will also make clear that labels are retained for evaluation and analysis only and are not part of active scoring inputs.
+# Labels in this notebook are residual-aware. They are defined after the
+# critical hard-rule gate and are aligned to the stage-2 ranking problem.
 #
-# - y_class = issue flag
-# - y_reg = dollar impact
-# - y_rank = graded relevance
-# - y_utility = business utility
+# **Core labels**
+#
+# - `y_issue`: latent residual issue truth used by classifier models
+# - `y_dollar`: residual dollar impact used by regression-style models
+# - `relevance_grade`: graded residual relevance used by learning-to-rank
+# - `rule_missed_severe_issue`: severe residual issue slice used in evaluation
+# - `net_utility`: evaluation-only business value after review cost
+# - `observed_correction`: biased historical review signal retained only for
+#   bias analysis or auxiliary comparisons
+#
+# **Relevance grade definition**
+#
+# - `0`: no known residual issue
+# - `1`: minor residual issue
+# - `2`: material residual issue
+# - `3`: severe rule-missed residual issue
+#
+# **Important note**
+#
+# `y_issue` means latent residual issue truth. It is not mixed with observed
+# historical review outcomes.
 
 # %% [markdown]
-# | Label | Used by | Meaning |
+# | Label | Column | Used by | Meaning |
+# | --- | --- | --- | --- |
+# | **residual issue** | `y_issue` | classifier, cost-sensitive classifier | latent residual issue truth after the hard-rule gate |
+# | **residual dollar impact** | `y_dollar` | regressor, expected-value | financial impact if the residual issue is ignored |
+# | **dominant category** | `anomaly_category` | diagnostics | highest-impact anomaly category still attached to the employee-pay-cycle |
+# | **relevance grade** | `relevance_grade` | learning-to-rank | 0 to 3 residual review priority |
+# | **rule-missed severe issue** | `rule_missed_severe_issue` | evaluation | key severe-issue slice that survived the hard-rule gate |
+# | **observed correction** | `observed_correction` | bias analysis | biased reviewed-and-corrected historical subset |
+# | **net utility** | `net_utility` | evaluation | residual business value minus review cost |
+
+# %% [markdown]
+# ## 6. Feature Engineering for Ambiguous Payroll Records
+#
+# Because the obvious records are removed first, the residual task depends more
+# on contextual deviation features than on raw threshold signals alone.
+#
+# Soft warning signals may remain as features. Compliance, PBJ, and HPRD metrics
+# are intentionally excluded.
+
+# %% [markdown]
+# | Feature family | Examples | Why it matters in the residual queue |
 # | --- | --- | --- |
-# | **issue_flag** | classifier | any known issue |
-# | **dollar_impact** | regressor | estimated financial exposure |
-# | **relevance_grade** | ranker | 0–3 review priority |
-# | **net_utility** | evaluation | business value of review |
-
-# %% [markdown]
-# ## 5. Feature Engineering
-#
-# This section will describe the leakage-safe historical, peer-relative, normalization, overtime, premium, and payroll-cycle context features used by the employee-pay-cycle workflow.
-# It will focus on how these features support stable comparison across periods and facilities without using current-period or future information as reference data.
-
-# %% [markdown]
-# | Feature family         | Examples                                 |
-# | ---------------------- | ---------------------------------------- |
-# | Raw payroll            | hours, OT, gross pay, pay type           |
-# | Employee history       | hours vs trailing median, rate changes   |
-# | Facility-role baseline | OT vs facility-role norm                 |
-# | Timekeeping            | missing punches, manual edits, overrides |
-# | SNF context            | census, role HPRD, agency share          |
-# | Temporal               | holiday cycle, drift event, seasonality  |
+# | Raw payroll | hours, overtime, gross pay, pay rate | basic residual signal |
+# | Employee history | hours versus trailing median, pay-rate change versus prior cycle | catches personal deviations |
+# | Facility-role baseline | pay rate versus facility-role median, overtime versus role norm | catches local anomalies |
+# | Timekeeping | missing punch, manual edit count, late entry | soft risk signals |
+# | Cross-facility | unusual facility, same-day multi-facility pattern | duplicate or allocation risk |
+# | Temporal | holiday cycle, vendor drift, staffing shock | seasonality and drift context |
 
 # %%
 employee_cycle_features = build_employee_cycle_features(data.payroll)
 employee_cycle_features.head()
 
 # %% [markdown]
-# ## 6. Model Formulations
+# ## 7. Model Formulations
 #
-# This section will introduce the set of active employee-pay-cycle formulations, including classification, regression, expected-value, ranking, ML-only, and final active ranking views.
-# It will explain what each formulation is trying to capture and why the workflow compares multiple formulations before making a production recommendation.
+# This section compares only ML models on the residual universe.
+#
+# Hard rules are the upstream gate. They are not a competing model in this
+# section.
 
 # %% [markdown]
-# ## 7. Main Queue-Based Results
-#
-# This section will present the main grouped queue results that matter for payroll review operations.
-# It will focus on facility-period review budgets, value capture, ranking quality, and how the active approach performs when review capacity is limited.
+# | Model | Training target | Queue score | Why include |
+# | --- | --- | --- | --- |
+# | Classifier | `y_issue` | `P(issue)` | baseline supervised model |
+# | Cost-sensitive classifier | weighted `y_issue` | weighted risk score | prioritizes severe residual issues |
+# | Regressor | `y_dollar` | predicted dollar impact | captures financial exposure |
+# | Expected-value model | issue + impact | `P(issue) x E(impact \| issue)` | strong traditional ML baseline |
+# | Learning-to-rank | `relevance_grade` | ranking score | directly optimizes residual queue order |
 
 # %% [markdown]
-# ## 8. Generalization Results
+# **Fair comparison rules**
 #
-# This section will summarize how the employee-pay-cycle workflow generalizes across time, facilities, and synthetic scenario settings.
-# It will emphasize temporal evidence, facility transfer behavior, and whether the ranking remains useful outside a single favorable run.
+# - same residual universe
+# - same facility x payroll cycle grouping
+# - same train and test splits
+# - same top-K evaluation budgets
+# - same leakage rules
+
+# %% [markdown]
+# ## 8. Main Results: Residual Queue Evaluation
+#
+# All headline metrics in this section should be computed only on residual
+# records within facility x payroll cycle groups.
+#
+# Planned primary outputs:
+#
+# 1. residual dollars caught versus percent residual reviewed
+# 2. rule-missed severe recall versus percent residual reviewed
+# 3. residual NDCG@K versus percent residual reviewed
+# 4. reviewer yield versus percent residual reviewed
+# 5. residual net utility versus percent residual reviewed
+#
+# The winner framing should stay specific: learning-to-rank may win top-of-queue
+# severity ordering, while expected-value may remain more competitive on dollar
+# recovery.
 
 # %% [markdown]
 # ## 9. Ablation Studies
 #
-# This section will compare simpler and more complex formulations to show what each level of modeling adds.
-# It will clarify where complexity improves queue prioritization and where simpler baselines remain informative or competitive.
+# Ablations in this notebook are residual-specific.
+#
+# **9.1 Feature ablation**
+#
+# Which feature families matter after hard rules remove obvious records?
+#
+# | Feature set | NDCG@5% | Rule-missed severe recall@5% | Residual dollars@5% |
+# | --- | ---: | ---: | ---: |
+# | Raw payroll only |  |  |  |
+# | + employee history |  |  |  |
+# | + facility-role baselines |  |  |  |
+# | + timekeeping signals |  |  |  |
+# | + temporal context |  |  |  |
+#
+# **9.2 Label ablation**
+#
+# Does the model winner change depending on how residual risk is defined?
+#
+# | Label | Best model | Interpretation |
+# | --- | --- | --- |
+# | binary issue | classifier | best for issue probability |
+# | dollar impact | regressor / EV | best for financial exposure |
+# | graded relevance | LTR | best for queue order |
+# | utility label | EV / LTR | best for business value |
+# | observed historical label | classifier | may inherit old review bias |
+# | latent true label | LTR / EV | better at missed residual risk |
+#
+# **9.3 Training universe ablation**
+#
+# Should models be trained on all records or only residual records?
+#
+# | Training universe | Scoring universe | Purpose |
+# | --- | --- | --- |
+# | all records | residual only | uses broader risk signal |
+# | residual records only | residual only | specialized ambiguous-case model |
+# | all records with hard-rule flag features | residual only | learns full context but adapts to the gate |
+#
+# **9.4 Validation split ablation**
+#
+# Does the residual model generalize to future cycles and unseen facilities?
 
 # %% [markdown]
-# ## 10. Deep Diagnostics
+# ## 10. Diagnostics, Explanations, and Final Recommendation
 #
-# This section will gather the internal evidence needed to inspect failure modes, leakage safeguards, category behavior, stability, and subgroup behavior in more detail.
-# It will provide the technical context needed to understand not only whether the ranking works, but also where it is fragile or incomplete.
+# This section combines diagnostic plots, reviewer-facing explanation examples,
+# and the final production recommendation into one compact decision section.
+#
+# **Planned diagnostics**
+#
+# - issue-type performance heatmap
+# - top-K overlap heatmap
+# - severe misses table
+#
+# **Reviewer-facing explanation template**
+#
+# ```text
+# Priority: High
+# Residual risk type: subtle pay-rate or role mismatch
+# Expected dollar impact: $430
+# Issue probability: 0.62
+# Queue rank: 8 of 740
+#
+# Reason codes:
+# - Pay rate is 19% above facility-role median
+# - Employee changed job code this cycle
+# - Manual edit count is above facility baseline
+# - Employee rarely works this facility
+#
+# Recommended action:
+# Verify job code, rate authorization, and facility allocation.
+# ```
+#
+# **Final recommendation template**
+#
+# | Objective | Recommended model |
+# | --- | --- |
+# | Best residual severity ordering | LTR |
+# | Best residual dollar recovery | Expected-value model |
+# | Best calibrated residual risk | Classifier / EV |
+# | Best new-facility robustness | holdout winner |
+# | Best production default | LTR or EV, depending on objective |
 
 # %% [markdown]
-# ## 11. Model Explanation and Reviewer UX
+# ## 11. Technical Appendix
 #
-# This section will explain how the model's output is translated into a reviewer-facing queue with clear reasons, recommended actions, and review-safe language.
-# It will focus on making the employee-pay-cycle workflow interpretable and useful for payroll review rather than treating the score as a black box.
-
-# %% [markdown]
-# ## 12. Robustness / Stress Tests
+# Appendix sections planned for the active notebook:
 #
-# This section will describe the stress conditions used to test whether ranking behavior remains usable under scenario drift, queue pressure, and other controlled perturbations.
-# It will focus on whether the workflow stays operationally credible when the synthetic environment becomes less favorable.
-
-# %% [markdown]
-# ## 13. Final Production Recommendation
-#
-# This section will summarize whether the current employee-pay-cycle workflow appears promotable into later production work.
-# It will tie together the main evidence, identify remaining gaps, and state the current recommendation without overstating what the repository has implemented.
-
-# %% [markdown]
-# ## 14. Technical Appendix
-#
-# This appendix will hold the deeper technical material that supports the main narrative without overwhelming the primary flow of the notebook.
-# It will contain the dense evidence and implementation notes needed for technical review of the employee-pay-cycle ranking workflow.
-
-# %% [markdown]
-# ### Metric Implementation Details
-#
-# This appendix section will document how the notebook's ranking, review-budget, exposure, and generalization metrics are defined and interpreted.
-
-# %% [markdown]
-# ### Full Ablation Matrix
-#
-# This appendix section will collect the complete formulation-comparison outputs that are too dense for the main narrative.
-
-# %% [markdown]
-# ### Hyperparameter Search Details
-#
-# This appendix section will document any active-search or tuning evidence used to support the formulation comparisons.
-
-# %% [markdown]
-# ### Extra Calibration Plots
-#
-# This appendix section will gather supplementary calibration or reliability views that support the diagnostic story.
-
-# %% [markdown]
-# ### Full Stress-Test Grid
-#
-# This appendix section will expand the robustness section into a broader grid of stress conditions, thresholds, and queue-demand settings.
-
-# %% [markdown]
-# ### Feature Importance by Split
-#
-# This appendix section will summarize how important features or score drivers vary across temporal or facility splits.
-
-# %% [markdown]
-# ### Per-Facility Diagnostics
-#
-# This appendix section will provide facility-level diagnostic views that are too detailed for the main notebook narrative.
-
-# %% [markdown]
-# ### Label-Bias Simulation Variants
-#
-# This appendix section will describe simulation variants that test how label construction choices influence evaluation conclusions.
-
-# %% [markdown]
-# ### Mathematical Ranking Objective Notes
-#
-# This appendix section will collect mathematical notes about the ranking objective, grouped queue framing, and related technical assumptions.
+# - A. Data dictionary
+# - B. Hard rule definitions
+# - C. Metric definitions
+# - D. Ranking group construction
+# - E. Handling zero-positive residual groups
+# - F. Hyperparameter search space
+# - G. Additional ablation tables
+# - H. Additional calibration plots
+# - I. Stress-test configurations
