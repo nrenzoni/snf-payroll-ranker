@@ -501,6 +501,36 @@ def test_employee_cycle_scoring_returns_formulation_columns() -> None:
     assert len(results.feature_columns) > 0
 
 
+def test_employee_cycle_scoring_uses_residual_targets_not_legacy_targets() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    payroll = generate_employee_pay_cycles(config).payroll
+
+    baseline = score_employee_pay_cycles(payroll, config).scored
+    relabeled = payroll.with_columns(
+        (1 - pl.col(PayrollCol.IS_ANOMALY)).alias(PayrollCol.IS_ANOMALY),
+        (pl.col(PayrollCol.ANOMALY_DOLLARS) + 999_999.0).alias(
+            PayrollCol.ANOMALY_DOLLARS,
+        ),
+    )
+    relabeled_scored = score_employee_pay_cycles(relabeled, config).scored
+
+    assert baseline.select(
+        ScoreCol.CLASSIFICATION_SCORE,
+        ScoreCol.REGRESSION_SCORE,
+        ScoreCol.EXPECTED_VALUE_SCORE,
+        ScoreCol.RANKING_SCORE,
+        ScoreCol.FINAL_ANOMALY_SCORE,
+    ).equals(
+        relabeled_scored.select(
+            ScoreCol.CLASSIFICATION_SCORE,
+            ScoreCol.REGRESSION_SCORE,
+            ScoreCol.EXPECTED_VALUE_SCORE,
+            ScoreCol.RANKING_SCORE,
+            ScoreCol.FINAL_ANOMALY_SCORE,
+        ),
+    )
+
+
 def test_employee_cycle_scoring_is_reproducible() -> None:
     config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
     payroll = generate_employee_pay_cycles(config).payroll
@@ -540,9 +570,13 @@ def test_employee_cycle_evaluation_reports_grouped_metrics() -> None:
     assert {
         MetricCol.PRECISION_AT_K,
         MetricCol.RECALL_AT_K,
+        MetricCol.RESIDUAL_NDCG_AT_K,
+        MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+        MetricCol.REVIEWER_YIELD_AT_K,
         MetricCol.MEAN_RECIPROCAL_RANK,
         MetricCol.DOLLAR_CAPTURE_RATE,
         MetricCol.NET_UTILITY_CAPTURED_AT_K,
+        MetricCol.INCREMENTAL_UTILITY_AT_K,
         MetricCol.UTILITY_PER_REVIEW,
     } <= set(evaluation.metrics.columns)
     assert evaluation.model_comparison.height >= 4

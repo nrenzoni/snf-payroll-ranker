@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import polars as pl
@@ -150,7 +151,10 @@ def evaluate_employee_cycle_scores(
     for k in config.review_budgets:
         rows.append(employee_cycle_grouped_metrics(scored, k))
     comparison = employee_cycle_model_comparison(scored, config)
-    category = category_error_analysis(scored, review_budget=max(config.review_budgets))
+    category = category_error_analysis(
+        _employee_cycle_residual_frame(scored),
+        review_budget=max(config.review_budgets),
+    )
     rolling = rolling_origin_evaluation(scored, config)
     production = employee_cycle_production_candidacy(
         scored,
@@ -174,30 +178,54 @@ def employee_cycle_grouped_metrics(
     scored: pl.DataFrame,
     k: int,
 ) -> dict[str, float | str]:
-    ranked = _employee_cycle_group_ranked(scored)
+    ranked = _employee_cycle_group_ranked(_employee_cycle_residual_frame(scored))
+    if ranked.height == 0:
+        return {
+            MetricCol.K: float(k),
+            MetricCol.PRECISION_AT_K: 0.0,
+            MetricCol.RECALL_AT_K: 0.0,
+            MetricCol.F1_AT_K: 0.0,
+            MetricCol.RESIDUAL_NDCG_AT_K: 0.0,
+            MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: 0.0,
+            MetricCol.REVIEWER_YIELD_AT_K: 0.0,
+            MetricCol.DOLLARS_CAPTURED_AT_K: 0.0,
+            MetricCol.EXPOSURE_CAPTURED_AT_K: 0.0,
+            MetricCol.EXPOSURE_PER_REVIEW: 0.0,
+            MetricCol.NET_UTILITY_CAPTURED_AT_K: 0.0,
+            MetricCol.INCREMENTAL_UTILITY_AT_K: 0.0,
+            MetricCol.UTILITY_PER_REVIEW: 0.0,
+            MetricCol.REVIEW_VOLUME: 0.0,
+            MetricCol.NATIVE_REVIEW_BURDEN: 0.0,
+            MetricCol.DOLLAR_CAPTURE_RATE: 0.0,
+            MetricCol.AVERAGE_ANOMALY_RANK: 0.0,
+            MetricCol.MEAN_RECIPROCAL_RANK: 0.0,
+            MetricCol.PR_AUC: 0.0,
+            "group_count": 0.0,
+            "aggregation_scheme": "mean_across_facility_pay_cycle_groups",
+        }
     reviewed = ranked.filter(pl.col("_employee_cycle_group_rank") <= k)
     group_metrics = (
         ranked.group_by([PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX])
         .agg(
             pl.len().alias("group_records"),
-            pl.sum(PayrollCol.IS_ANOMALY).alias("group_anomalies"),
+            pl.sum(PayrollCol.Y_ISSUE).alias("group_anomalies"),
             (pl.col("_employee_cycle_group_rank") <= k)
             .cast(pl.Int64)
             .sum()
             .alias("group_reviewed"),
             (
                 (pl.col("_employee_cycle_group_rank") <= k)
-                & (pl.col(PayrollCol.IS_ANOMALY) == 1)
+                & (pl.col(PayrollCol.Y_ISSUE) == 1)
             )
             .cast(pl.Int64)
             .sum()
             .alias("group_true_positive"),
-            pl.when(pl.col(PayrollCol.IS_ANOMALY) == 1)
+            pl.when(pl.col(PayrollCol.Y_ISSUE) == 1)
             .then(pl.col("_employee_cycle_group_rank"))
             .otherwise(None)
             .mean()
             .alias("group_average_anomaly_rank"),
-            pl.when(pl.col(PayrollCol.IS_ANOMALY) == 1)
+            pl.when(pl.col(PayrollCol.Y_ISSUE) == 1)
             .then(pl.col("_employee_cycle_group_rank"))
             .otherwise(None)
             .min()
@@ -217,28 +245,38 @@ def employee_cycle_grouped_metrics(
         )
     )
     total_dollars = float(
-        ranked.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
-        .select(pl.sum(PayrollCol.ANOMALY_DOLLARS))
+        ranked.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
+        .select(pl.sum(PayrollCol.Y_DOLLAR))
         .item()
         or 0.0,
     )
     captured_dollars = float(
-        reviewed.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
-        .select(pl.sum(PayrollCol.ANOMALY_DOLLARS))
+        reviewed.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
+        .select(pl.sum(PayrollCol.Y_DOLLAR))
         .item()
         or 0.0,
     )
     exposure = float(reviewed.select(pl.sum(ScoreCol.ESTIMATED_EXPOSURE)).item() or 0.0)
     utility = float(reviewed.select(pl.sum(PayrollCol.NET_UTILITY)).item() or 0.0)
+    total_severe = (
+        ranked.select(pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE)).item() or 0
+    )
+    reviewed_severe = (
+        reviewed.select(pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE)).item() or 0
+    )
     try:
         pr_auc = float(
             average_precision_score(
-                ranked.get_column(PayrollCol.IS_ANOMALY).to_numpy(),
+                ranked.get_column(PayrollCol.Y_ISSUE).to_numpy(),
                 ranked.get_column(ScoreCol.FINAL_ANOMALY_SCORE).to_numpy(),
             ),
         )
     except ValueError:
         pr_auc = 0.0
+    reviewer_yield = reviewed.filter(pl.col(PayrollCol.Y_ISSUE) == 1).height / max(
+        reviewed.height,
+        1,
+    )
     return {
         MetricCol.K: float(k),
         MetricCol.PRECISION_AT_K: float(
@@ -251,10 +289,18 @@ def employee_cycle_grouped_metrics(
             float(group_metrics.select(pl.mean("group_precision")).item() or 0.0),
             float(group_metrics.select(pl.mean("group_recall")).item() or 0.0),
         ),
+        MetricCol.RESIDUAL_NDCG_AT_K: _employee_cycle_residual_ndcg_at_k(ranked, k),
+        MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(reviewed_severe)
+        / max(
+            float(total_severe),
+            1.0,
+        ),
+        MetricCol.REVIEWER_YIELD_AT_K: reviewer_yield,
         MetricCol.DOLLARS_CAPTURED_AT_K: captured_dollars,
         MetricCol.EXPOSURE_CAPTURED_AT_K: exposure,
         MetricCol.EXPOSURE_PER_REVIEW: exposure / max(reviewed.height, 1),
         MetricCol.NET_UTILITY_CAPTURED_AT_K: utility,
+        MetricCol.INCREMENTAL_UTILITY_AT_K: utility,
         MetricCol.UTILITY_PER_REVIEW: utility / max(reviewed.height, 1),
         MetricCol.REVIEW_VOLUME: float(reviewed.height),
         MetricCol.NATIVE_REVIEW_BURDEN: float(reviewed.height),
@@ -796,6 +842,41 @@ def _employee_cycle_group_ranked(scored: pl.DataFrame) -> pl.DataFrame:
         .over([PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX])
         .alias("_employee_cycle_group_rank"),
     )
+
+
+def _employee_cycle_residual_frame(scored: pl.DataFrame) -> pl.DataFrame:
+    if PayrollCol.RESIDUAL_RECORD not in scored.columns:
+        return scored
+    return scored.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
+
+
+def _employee_cycle_residual_ndcg_at_k(scored: pl.DataFrame, k: int) -> float:
+    if scored.height == 0:
+        return 0.0
+    values: list[float] = []
+    for _, group in scored.group_by(
+        [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+    ):
+        relevances: list[float] = (
+            group.sort("_employee_cycle_group_rank")
+            .get_column(
+                PayrollCol.RELEVANCE_GRADE,
+            )
+            .cast(pl.Float64)
+            .to_list()
+        )
+        actual = _dcg(relevances[:k])
+        ideal = _dcg(sorted(relevances, reverse=True)[:k])
+        values.append(0.0 if ideal == 0 else actual / ideal)
+    return (sum(values) / len(values)) if values else 0.0
+
+
+def _dcg(relevances: list[float]) -> float:
+    total = 0.0
+    for index, relevance in enumerate(relevances, start=1):
+        gain = (2**relevance) - 1.0
+        total += gain / math.log2(index + 1.0)
+    return total
 
 
 def _f1(precision: float, recall: float) -> float:

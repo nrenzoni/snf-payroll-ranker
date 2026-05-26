@@ -368,13 +368,13 @@ def score_employee_pay_cycles(
     ml_raw = _employee_cycle_ml_scores(featured, config)
     classification = _employee_cycle_supervised_probability(
         featured,
-        PayrollCol.IS_ANOMALY,
+        PayrollCol.Y_ISSUE,
         config,
     )
     regression = _minmax(
         _employee_cycle_supervised_regression(
             featured,
-            PayrollCol.ANOMALY_DOLLARS,
+            PayrollCol.Y_DOLLAR,
             config,
             lower_bound=0.0,
         ),
