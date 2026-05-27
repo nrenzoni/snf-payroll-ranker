@@ -941,6 +941,29 @@ pl.DataFrame(
 )
 
 # %% [markdown]
+# ### severe-family plot interpretation
+#
+# The current synthetic residual task contains multiple anomaly families, but
+# the severe slice is concentrated in the highest-dollar overtime and rate
+# correction regimes. In this run, most severe residual cases come from
+# `overtime_double_shift`, with a much smaller contribution from
+# `retro_rate_mismatch` and only a few severe `cross_facility_allocation` cases.
+#
+# That concentration matters for interpretation: severe recall is not a broad
+# context-heavy "urgent review" concept. It is mostly a high-payroll-loss
+# concept. Because the expected-value model combines issue likelihood with dollar
+# exposure, it has a natural advantage when the severe label is dominated by the
+# same families that also drive the largest residual dollars.
+#
+# The above two plots:
+#
+# - `expected_value` leading severe recall is explainable, not suspicious
+# - `regressor` remains competitive for the same reason
+# - `learning_to_rank` is useful, but it is not operating on a severe
+#   target that is distinct enough from dollar-heavy loss events to dominate the
+#   aggregate severe-recall curve
+
+# %% [markdown]
 # ## 8. Main Results: Residual Queue Evaluation
 #
 # All headline metrics in this section should be computed only on residual
