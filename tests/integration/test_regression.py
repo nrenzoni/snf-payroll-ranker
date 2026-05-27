@@ -583,6 +583,31 @@ def test_employee_cycle_evaluation_reports_grouped_metrics() -> None:
     assert evaluation.production_candidacy.height >= 1
 
 
+def test_employee_cycle_evaluation_supports_percent_review_budgets() -> None:
+    config = PayrollConfig(
+        facility_count=25,
+        employee_count=120,
+        pay_periods=10,
+        employee_cycle_review_budget_percents=(0.05, 0.15, 0.30),
+    )
+    payroll = generate_employee_pay_cycles(config).payroll
+    scored = score_employee_pay_cycles(payroll, config).scored
+
+    evaluation = evaluate_employee_cycle_scores(scored, config)
+    queue = build_employee_cycle_review_queue(
+        scored,
+        top_k=max(config.employee_cycle_review_budget_percents or (0.0,)),
+    )
+
+    assert evaluation.metrics.height == len(config.review_budgets)
+    assert (
+        evaluation.metrics.get_column(MetricCol.K)
+        == pl.Series([0.05, 0.15, 0.30], dtype=pl.Float64)
+    ).all()
+    assert (evaluation.metrics.get_column(MetricCol.REVIEW_VOLUME) > 0).all()
+    assert queue.height > 0
+
+
 def test_employee_cycle_review_queue_uses_cycle_fields() -> None:
     config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
     payroll = generate_employee_pay_cycles(config).payroll

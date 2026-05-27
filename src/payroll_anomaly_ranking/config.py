@@ -14,6 +14,7 @@ class PayrollConfig:
     facility_count: int = 6
     shifts_per_employee_per_period: float = 4.5
     review_budgets: tuple[int, ...] = (10, 25, 50)
+    employee_cycle_review_budget_percents: tuple[float, ...] | None = None
     hybrid_weights: dict[ScoreCol, float] = field(
         default_factory=lambda: {
             ScoreCol.RULE_SCORE: 0.30,
@@ -78,6 +79,14 @@ def validate_snf_config(
         raise ValueError("pay_periods must be at least 4 for temporal evaluation")
     if not config.review_budgets or min(config.review_budgets) <= 0:
         raise ValueError("review_budgets must contain positive values")
+    if config.employee_cycle_review_budget_percents is not None and (
+        not config.employee_cycle_review_budget_percents
+        or min(config.employee_cycle_review_budget_percents) <= 0
+        or max(config.employee_cycle_review_budget_percents) > 1
+    ):
+        raise ValueError(
+            "employee_cycle_review_budget_percents must contain values in (0, 1]",
+        )
     if config.shifts_per_employee_per_period <= 0:
         raise ValueError("shifts_per_employee_per_period must be positive")
     if policy.overtime_multiplier < 1:

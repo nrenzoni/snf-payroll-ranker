@@ -147,8 +147,9 @@ def evaluate_employee_cycle_scores(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
 ) -> EvaluationResults:
+    review_budgets = _employee_cycle_review_budgets(config)
     rows = []
-    for k in config.review_budgets:
+    for k in review_budgets:
         rows.append(employee_cycle_grouped_metrics(scored, k))
     comparison = employee_cycle_model_comparison(scored, config)
     category = category_error_analysis(
@@ -176,12 +177,12 @@ def evaluate_employee_cycle_scores(
 
 def employee_cycle_grouped_metrics(
     scored: pl.DataFrame,
-    k: int,
+    k: float,
 ) -> dict[str, float | str]:
-    ranked = _employee_cycle_group_ranked(_employee_cycle_residual_frame(scored))
+    ranked = _employee_cycle_group_ranked(_employee_cycle_residual_frame(scored), k)
     if ranked.height == 0:
         return {
-            MetricCol.K: float(k),
+            MetricCol.K: k,
             MetricCol.PRECISION_AT_K: 0.0,
             MetricCol.RECALL_AT_K: 0.0,
             MetricCol.F1_AT_K: 0.0,
@@ -202,21 +203,19 @@ def employee_cycle_grouped_metrics(
             MetricCol.PR_AUC: 0.0,
             "group_count": 0.0,
             "aggregation_scheme": "mean_across_facility_pay_cycle_groups",
+            "review_budget_type": _employee_cycle_review_budget_type(k),
         }
-    reviewed = ranked.filter(pl.col("_employee_cycle_group_rank") <= k)
+    reviewed = ranked.filter(pl.col("_employee_cycle_in_budget"))
     group_metrics = (
         ranked.group_by([PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX])
         .agg(
             pl.len().alias("group_records"),
             pl.sum(PayrollCol.Y_ISSUE).alias("group_anomalies"),
-            (pl.col("_employee_cycle_group_rank") <= k)
+            pl.col("_employee_cycle_in_budget")
             .cast(pl.Int64)
             .sum()
             .alias("group_reviewed"),
-            (
-                (pl.col("_employee_cycle_group_rank") <= k)
-                & (pl.col(PayrollCol.Y_ISSUE) == 1)
-            )
+            (pl.col("_employee_cycle_in_budget") & (pl.col(PayrollCol.Y_ISSUE) == 1))
             .cast(pl.Int64)
             .sum()
             .alias("group_true_positive"),
@@ -278,7 +277,7 @@ def employee_cycle_grouped_metrics(
         1,
     )
     return {
-        MetricCol.K: float(k),
+        MetricCol.K: k,
         MetricCol.PRECISION_AT_K: float(
             group_metrics.select(pl.mean("group_precision")).item() or 0.0,
         ),
@@ -289,7 +288,7 @@ def employee_cycle_grouped_metrics(
             float(group_metrics.select(pl.mean("group_precision")).item() or 0.0),
             float(group_metrics.select(pl.mean("group_recall")).item() or 0.0),
         ),
-        MetricCol.RESIDUAL_NDCG_AT_K: _employee_cycle_residual_ndcg_at_k(ranked, k),
+        MetricCol.RESIDUAL_NDCG_AT_K: _employee_cycle_residual_ndcg_at_k(ranked),
         MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(reviewed_severe)
         / max(
             float(total_severe),
@@ -316,6 +315,7 @@ def employee_cycle_grouped_metrics(
         MetricCol.PR_AUC: pr_auc,
         "group_count": float(group_metrics.height),
         "aggregation_scheme": "mean_across_facility_pay_cycle_groups",
+        "review_budget_type": _employee_cycle_review_budget_type(k),
     }
 
 
@@ -323,6 +323,7 @@ def employee_cycle_model_comparison(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
 ) -> pl.DataFrame:
+    review_budgets = _employee_cycle_review_budgets(config)
     rows = []
     for score_name in [
         ScoreCol.CLASSIFICATION_SCORE,
@@ -343,7 +344,7 @@ def employee_cycle_model_comparison(
                     ScoreCol.FINAL_ANOMALY_SCORE,
                     "active_ranking",
                 ),
-                **employee_cycle_grouped_metrics(renamed, config.review_budgets[0]),
+                **employee_cycle_grouped_metrics(renamed, review_budgets[0]),
             },
         )
     return pl.DataFrame(rows)
@@ -353,6 +354,7 @@ def employee_cycle_backtest_by_period(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
 ) -> pl.DataFrame:
+    review_budgets = _employee_cycle_review_budgets(config)
     rows = []
     for period in sorted(
         scored.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list(),
@@ -363,7 +365,7 @@ def employee_cycle_backtest_by_period(
                 PayrollCol.PAY_PERIOD_INDEX: period,
                 **employee_cycle_grouped_metrics(
                     period_scores,
-                    config.review_budgets[0],
+                    review_budgets[0],
                 ),
             },
         )
@@ -376,7 +378,8 @@ def employee_cycle_production_candidacy(
     queue: pl.DataFrame | None,
     config: PayrollConfig = PayrollConfig(),
 ) -> pl.DataFrame:
-    top_k_metrics = employee_cycle_grouped_metrics(scored, config.review_budgets[0])
+    review_budgets = _employee_cycle_review_budgets(config)
+    top_k_metrics = employee_cycle_grouped_metrics(scored, review_budgets[0])
     precision_ready = float(top_k_metrics[MetricCol.PRECISION_AT_K]) > 0.05
     recall_ready = float(top_k_metrics[MetricCol.RECALL_AT_K]) > 0.05
     temporal_ready = bool(rolling_metrics.height)
@@ -409,7 +412,7 @@ def employee_cycle_production_candidacy(
         {
             "criterion": "top_k_ranking_value",
             "passed": precision_ready and recall_ready,
-            "evidence": f"precision_at_{config.review_budgets[0]}={float(top_k_metrics[MetricCol.PRECISION_AT_K]):.3f}; recall_at_{config.review_budgets[0]}={float(top_k_metrics[MetricCol.RECALL_AT_K]):.3f}",
+            "evidence": f"review_budget={_employee_cycle_review_budget_label(review_budgets[0])}; precision={float(top_k_metrics[MetricCol.PRECISION_AT_K]):.3f}; recall={float(top_k_metrics[MetricCol.RECALL_AT_K]):.3f}",
         },
         {
             "criterion": "uncertainty_behavior",
@@ -666,6 +669,7 @@ def rolling_origin_evaluation(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
 ) -> RollingOriginResults:
+    review_budgets = _employee_cycle_review_budgets(config)
     periods = sorted(scored.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list())
     if len(periods) < 6:
         return RollingOriginResults(pl.DataFrame(), pl.DataFrame(), pl.DataFrame())
@@ -685,10 +689,9 @@ def rolling_origin_evaluation(
         test_at_threshold = test.filter(
             pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= selected_threshold,
         )
-        budget = min(config.review_budgets[0], test.height)
         facility_period_metrics, reviewed_ids = _facility_period_review_metrics(
             test,
-            budget,
+            review_budgets[0],
         )
         queue_sets.append(reviewed_ids)
         metric_rows.append(
@@ -751,15 +754,16 @@ def rolling_origin_evaluation(
 
 def _facility_period_review_metrics(
     scored: pl.DataFrame,
-    budget: int,
+    budget: float,
 ) -> tuple[dict[str, float], set[int]]:
-    ranked = scored.with_columns(
-        pl.col(ScoreCol.FINAL_ANOMALY_SCORE)
-        .rank("ordinal", descending=True)
-        .over([PayrollCol.PAY_PERIOD_INDEX, PayrollCol.FACILITY_ID])
-        .alias("_facility_period_rank"),
+    ranked = _employee_cycle_group_ranked(scored, budget).rename(
+        {
+            "_employee_cycle_group_rank": "_facility_period_rank",
+            "_employee_cycle_group_budget_count": "_facility_period_budget_count",
+            "_employee_cycle_in_budget": "_facility_period_in_budget",
+        },
     )
-    reviewed = ranked.filter(pl.col("_facility_period_rank") <= budget)
+    reviewed = ranked.filter(pl.col("_facility_period_in_budget"))
     true_positive = reviewed.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height
     total_anomalies = ranked.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height
     exposure = float(reviewed.select(pl.sum(ScoreCol.ESTIMATED_EXPOSURE)).item() or 0.0)
@@ -779,7 +783,7 @@ def _facility_period_review_metrics(
     recall = true_positive / max(total_anomalies, 1)
     return (
         {
-            MetricCol.K: float(budget),
+            MetricCol.K: budget,
             MetricCol.REVIEW_VOLUME: float(reviewed.height),
             MetricCol.NATIVE_REVIEW_BURDEN: float(reviewed.height),
             MetricCol.PRECISION_AT_K: precision,
@@ -835,12 +839,30 @@ def leakage_checks_for_features(
     )
 
 
-def _employee_cycle_group_ranked(scored: pl.DataFrame) -> pl.DataFrame:
-    return scored.with_columns(
+def _employee_cycle_group_ranked(
+    scored: pl.DataFrame,
+    budget: float | None = None,
+) -> pl.DataFrame:
+    ranked = scored.with_columns(
         pl.col(ScoreCol.FINAL_ANOMALY_SCORE)
         .rank("ordinal", descending=True)
         .over([PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX])
         .alias("_employee_cycle_group_rank"),
+        pl.len()
+        .over([PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX])
+        .alias("_employee_cycle_group_size"),
+    )
+    if budget is None:
+        return ranked
+    return ranked.with_columns(
+        _employee_cycle_group_budget_count_expr(budget).alias(
+            "_employee_cycle_group_budget_count",
+        ),
+    ).with_columns(
+        (
+            pl.col("_employee_cycle_group_rank")
+            <= pl.col("_employee_cycle_group_budget_count")
+        ).alias("_employee_cycle_in_budget"),
     )
 
 
@@ -850,7 +872,7 @@ def _employee_cycle_residual_frame(scored: pl.DataFrame) -> pl.DataFrame:
     return scored.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
 
 
-def _employee_cycle_residual_ndcg_at_k(scored: pl.DataFrame, k: int) -> float:
+def _employee_cycle_residual_ndcg_at_k(scored: pl.DataFrame) -> float:
     if scored.height == 0:
         return 0.0
     values: list[float] = []
@@ -865,10 +887,40 @@ def _employee_cycle_residual_ndcg_at_k(scored: pl.DataFrame, k: int) -> float:
             .cast(pl.Float64)
             .to_list()
         )
-        actual = _dcg(relevances[:k])
-        ideal = _dcg(sorted(relevances, reverse=True)[:k])
+        budget_count = int(
+            group.select(pl.max("_employee_cycle_group_budget_count")).item() or 0,
+        )
+        actual = _dcg(relevances[:budget_count])
+        ideal = _dcg(sorted(relevances, reverse=True)[:budget_count])
         values.append(0.0 if ideal == 0 else actual / ideal)
     return (sum(values) / len(values)) if values else 0.0
+
+
+def _employee_cycle_group_budget_count_expr(budget: float) -> pl.Expr:
+    if budget <= 1:
+        return (
+            (pl.col("_employee_cycle_group_size") * budget)
+            .ceil()
+            .cast(pl.Int64)
+            .clip(1, None)
+        )
+    return pl.lit(max(math.ceil(budget), 1), dtype=pl.Int64)
+
+
+def _employee_cycle_review_budgets(config: PayrollConfig) -> tuple[float, ...]:
+    if config.employee_cycle_review_budget_percents is not None:
+        return config.employee_cycle_review_budget_percents
+    return tuple(float(budget) for budget in config.review_budgets)
+
+
+def _employee_cycle_review_budget_type(budget: float) -> str:
+    return "percent_of_group" if budget <= 1 else "top_k_per_group"
+
+
+def _employee_cycle_review_budget_label(budget: float) -> str:
+    if budget <= 1:
+        return f"{budget:.0%}"
+    return str(int(budget))
 
 
 def _dcg(relevances: list[float]) -> float:

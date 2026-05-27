@@ -316,20 +316,26 @@ def run_employee_cycle_pipeline(
         employee_cycle_backtest_by_period(scored, config) if include.backtest else None
     )
     analyst_queue = (
-        build_employee_cycle_review_queue(scored, top_k=max(config.review_budgets))
+        build_employee_cycle_review_queue(
+            scored,
+            top_k=_employee_cycle_queue_budget(config),
+        )
         if include.review_queues or include.leakage_checks
         else None
     )
     evaluation_queue = (
         build_employee_cycle_evaluation_review_queue(
             scored,
-            top_k=max(config.review_budgets),
+            top_k=_employee_cycle_queue_budget(config),
         )
         if include.review_queues
         else None
     )
     facility_summary = (
-        build_employee_cycle_facility_summary(scored, top_k=max(config.review_budgets))
+        build_employee_cycle_facility_summary(
+            scored,
+            top_k=_employee_cycle_queue_budget(config),
+        )
         if include.review_queues
         else None
     )
@@ -381,6 +387,12 @@ def run_employee_cycle_pipeline(
     if write_outputs:
         write_pipeline_outputs(results, config)
     return results
+
+
+def _employee_cycle_queue_budget(config: PayrollConfig) -> float:
+    if config.employee_cycle_review_budget_percents is not None:
+        return max(config.employee_cycle_review_budget_percents)
+    return float(max(config.review_budgets))
 
 
 def run_pipeline(

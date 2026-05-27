@@ -237,7 +237,7 @@ def sample_review_language() -> str:
 
 def build_employee_cycle_review_queue(
     scored: pl.DataFrame,
-    top_k: int = 25,
+    top_k: float = 25,
 ) -> pl.DataFrame:
     base = scored
     if ReviewCol.UNCERTAINTY_DRIVERS not in base.columns:
@@ -418,10 +418,20 @@ def build_employee_cycle_review_queue(
         ReviewCol.WHY_UNCERTAIN,
         ReviewCol.EXPLANATION,
     ]
+    latest_queue = explained.filter(
+        pl.col(PayrollCol.PAY_PERIOD_INDEX) == latest_period,
+    )
+    latest_queue = latest_queue.with_columns(
+        pl.len().over(PayrollCol.FACILITY_ID).alias("_employee_cycle_group_size"),
+    ).with_columns(
+        _employee_cycle_queue_budget_count_expr(top_k).alias(
+            "_employee_cycle_group_budget_count",
+        ),
+    )
     return (
-        explained.filter(
-            (pl.col(PayrollCol.PAY_PERIOD_INDEX) == latest_period)
-            & (pl.col(ScoreCol.PAY_PERIOD_RANK) <= top_k),
+        latest_queue.filter(
+            pl.col(ScoreCol.PAY_PERIOD_RANK)
+            <= pl.col("_employee_cycle_group_budget_count"),
         )
         .select(fields)
         .rename(
@@ -436,7 +446,7 @@ def build_employee_cycle_review_queue(
 
 def build_employee_cycle_evaluation_review_queue(
     scored: pl.DataFrame,
-    top_k: int = 25,
+    top_k: float = 25,
 ) -> pl.DataFrame:
     return build_employee_cycle_review_queue(scored, top_k).join(
         scored.select(
@@ -454,12 +464,25 @@ def build_employee_cycle_evaluation_review_queue(
 
 def build_employee_cycle_facility_summary(
     scored: pl.DataFrame,
-    top_k: int = 25,
+    top_k: float = 25,
 ) -> pl.DataFrame:
     latest_period = scored.select(pl.max(PayrollCol.PAY_PERIOD_INDEX)).item()
     latest = scored.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) == latest_period)
-    queued = latest.with_columns(
-        (pl.col(ScoreCol.PAY_PERIOD_RANK) <= top_k).alias("in_queue"),
+    queued = (
+        latest.with_columns(
+            pl.len().over(PayrollCol.FACILITY_ID).alias("_employee_cycle_group_size"),
+        )
+        .with_columns(
+            _employee_cycle_queue_budget_count_expr(top_k).alias(
+                "_employee_cycle_group_budget_count",
+            ),
+        )
+        .with_columns(
+            (
+                pl.col(ScoreCol.PAY_PERIOD_RANK)
+                <= pl.col("_employee_cycle_group_budget_count")
+            ).alias("in_queue"),
+        )
     )
     return queued.group_by([PayrollCol.PAY_PERIOD_INDEX, PayrollCol.FACILITY_ID]).agg(
         pl.first(PayrollCol.FACILITY_NAME).alias(PayrollCol.FACILITY_NAME),
@@ -479,3 +502,14 @@ def build_employee_cycle_facility_summary(
         .alias("high_priority_count"),
         pl.sum(ScoreCol.ESTIMATED_EXPOSURE).alias("estimated_exposure"),
     )
+
+
+def _employee_cycle_queue_budget_count_expr(budget: float) -> pl.Expr:
+    if budget <= 1:
+        return (
+            (pl.col("_employee_cycle_group_size") * budget)
+            .ceil()
+            .cast(pl.Int64)
+            .clip(1, None)
+        )
+    return pl.lit(max(int(budget), 1), dtype=pl.Int64)

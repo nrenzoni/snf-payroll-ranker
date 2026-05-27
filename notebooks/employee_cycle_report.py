@@ -38,11 +38,11 @@
 #
 # **Primary metrics**
 #
-# - residual NDCG@K
-# - rule-missed severe recall@K
-# - residual dollars caught@K
-# - reviewer yield@K
-# - incremental utility@K
+# - residual NDCG by review-budget percentage
+# - rule-missed severe recall by review-budget percentage
+# - residual dollars caught by review-budget percentage
+# - reviewer yield by review-budget percentage
+# - incremental utility by review-budget percentage
 #
 # **Working conclusion placeholder**
 #
@@ -73,8 +73,8 @@
 #
 # - item: employee-pay-cycle payroll record
 # - group: facility x payroll cycle
-# - business constraint: reviewers can inspect only the top K residual records
-# - objective: maximize review value in the top K residual records
+# - business constraint: reviewers can inspect only a limited share of each residual queue
+# - objective: maximize review value within the reviewed share of each residual queue
 #
 # **Out of scope**
 #
@@ -157,10 +157,13 @@ fast_mode = notebook_fast_mode()
 
 # %%
 sim_config = PayrollConfig(
-    facility_count=24 if fast_mode else 75,
-    employee_count=180 if fast_mode else 650,
+    facility_count=25,
+    employee_count=650,
     pay_periods=16 if fast_mode else 36,
-    review_budgets=(10, 25, 50),
+    employee_cycle_review_budget_percents=(0.01, 0.03, 0.05, 0.10),
+)
+review_budget_percents = sim_config.employee_cycle_review_budget_percents or tuple(
+    float(budget) for budget in sim_config.review_budgets
 )
 
 data = generate_employee_pay_cycles(sim_config)
@@ -172,7 +175,7 @@ hard_rule_flagged = data.payroll.filter(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLA
 
 def build_model_budget_metrics(
     scored_frame: pl.DataFrame,
-    review_budgets: tuple[int, ...],
+    review_budgets: tuple[float, ...],
 ) -> pl.DataFrame:
     rows: list[dict[str, float | str]] = []
     for model_name, score_col in [
@@ -189,9 +192,53 @@ def build_model_budget_metrics(
             rows.append(
                 {
                     "model": model_name,
+                    "review_budget_label": format_review_budget_pct(budget),
                     **employee_cycle_grouped_metrics(scored_for_model, budget),
                 },
             )
+    return pl.DataFrame(rows)
+
+
+def format_review_budget_pct(budget: float) -> str:
+    return f"{budget:.0%}" if budget <= 1 else str(int(budget))
+
+
+def build_review_budget_diagnostics(
+    residual_records_per_group: pl.DataFrame,
+    review_budgets: tuple[float, ...],
+) -> pl.DataFrame:
+    rows: list[dict[str, float | str]] = []
+    total_groups = max(residual_records_per_group.height, 1)
+    for budget in review_budgets:
+        reviewed_counts = residual_records_per_group.with_columns(
+            (pl.col("residual_records") * budget if budget <= 1 else pl.lit(budget))
+            .ceil()
+            .cast(pl.Int64)
+            .clip(1, None)
+            .alias("reviewed_records"),
+        )
+        rows.append(
+            {
+                "review_budget_pct": format_review_budget_pct(budget),
+                "avg_records_reviewed_per_group": round(
+                    float(
+                        reviewed_counts.select(pl.mean("reviewed_records")).item()
+                        or 0.0,
+                    ),
+                    2,
+                ),
+                "pct_groups_fully_reviewed": round(
+                    reviewed_counts.filter(
+                        pl.col("reviewed_records") >= pl.col("residual_records"),
+                    ).height
+                    / total_groups,
+                    4,
+                ),
+                "max_group_size": float(
+                    reviewed_counts.select(pl.max("residual_records")).item() or 0,
+                ),
+            },
+        )
     return pl.DataFrame(rows)
 
 
@@ -452,7 +499,11 @@ scored = scoring_results.scored
 residual_scored = scored.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
 evaluation = evaluate_employee_cycle_scores(scored, sim_config)
 backtest = employee_cycle_backtest_by_period(scored, sim_config)
-model_budget_metrics = build_model_budget_metrics(scored, sim_config.review_budgets)
+model_budget_metrics = build_model_budget_metrics(scored, review_budget_percents)
+budget_diagnostics = build_review_budget_diagnostics(
+    residual_diagnostics["residual_records_per_facility_cycle"],
+    review_budget_percents,
+)
 
 # %% [markdown]
 # ### feature families
@@ -591,7 +642,7 @@ pl.DataFrame(
         "applied_setting": [
             "residual records only for notebook comparison outputs",
             "facility x payroll cycle",
-            ", ".join(str(k) for k in sim_config.review_budgets),
+            ", ".join(format_review_budget_pct(k) for k in review_budget_percents),
             "same employee-cycle temporal split logic for all formulations",
             "evaluation labels remain excluded from feature columns",
             "cost-sensitive classifier intentionally excluded from this pass",
@@ -600,11 +651,16 @@ pl.DataFrame(
 )
 
 # %% [markdown]
-# ### residual metrics by budget
+# ### residual metrics by review-budget percentage
 
 # %%
 evaluation.metrics.select(
-    MetricCol.K,
+    pl.col(MetricCol.K)
+    .map_elements(
+        format_review_budget_pct,
+        return_dtype=pl.String,
+    )
+    .alias("review_budget_pct"),
     MetricCol.RESIDUAL_NDCG_AT_K,
     MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
     MetricCol.DOLLARS_CAPTURED_AT_K,
@@ -612,6 +668,12 @@ evaluation.metrics.select(
     MetricCol.INCREMENTAL_UTILITY_AT_K,
     MetricCol.PR_AUC,
 )
+
+# %% [markdown]
+# ### review-budget diagnostics
+
+# %%
+budget_diagnostics
 
 # %% [markdown]
 # ### model comparison
@@ -675,37 +737,45 @@ pl.DataFrame(
 )
 
 # %% [markdown]
-# ### residual dollars captured by budget
+# ### residual dollars captured by review-budget percentage
 
 # %%
 (
     ggplot(
         model_budget_metrics,
-        aes(x=MetricCol.K, y=MetricCol.DOLLARS_CAPTURED_AT_K, color="model"),
+        aes(
+            x="review_budget_label",
+            y=MetricCol.DOLLARS_CAPTURED_AT_K,
+            color="model",
+        ),
     )
     + geom_line()
     + geom_point()
     + theme_minimal()
     + rotated_x_labels()
-    + labs(x="Review budget K", y="Residual dollars captured", color="Model")
-    + ggtitle("Residual Dollars Captured by Review Budget")
+    + labs(x="Residual queue reviewed", y="Residual dollars captured", color="Model")
+    + ggtitle("Residual Dollars Captured by Review-Budget Percentage")
 )
 
 # %% [markdown]
-# ### severe recall by budget
+# ### severe recall by review-budget percentage
 
 # %%
 (
     ggplot(
         model_budget_metrics,
-        aes(x=MetricCol.K, y=MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K, color="model"),
+        aes(
+            x="review_budget_label",
+            y=MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+            color="model",
+        ),
     )
     + geom_line()
     + geom_point()
     + theme_minimal()
     + rotated_x_labels()
-    + labs(x="Review budget K", y="Rule-missed severe recall", color="Model")
-    + ggtitle("Residual Severe-Issue Recall by Review Budget")
+    + labs(x="Residual queue reviewed", y="Rule-missed severe recall", color="Model")
+    + ggtitle("Residual Severe-Issue Recall by Review-Budget Percentage")
 )
 
 # %% [markdown]
@@ -718,7 +788,7 @@ pl.DataFrame(
 #
 # 1. residual dollars caught versus percent residual reviewed
 # 2. rule-missed severe recall versus percent residual reviewed
-# 3. residual NDCG@K versus percent residual reviewed
+# 3. residual NDCG versus percent residual reviewed
 # 4. reviewer yield versus percent residual reviewed
 # 5. residual net utility versus percent residual reviewed
 #
