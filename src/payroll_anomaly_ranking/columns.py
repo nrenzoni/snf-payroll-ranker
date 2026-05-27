@@ -161,6 +161,7 @@ class RuleCol(StrEnum):
 
 class ScoreCol(StrEnum):
     CLASSIFICATION_SCORE = "classification_score"
+    COST_SENSITIVE_CLASSIFICATION_SCORE = "cost_sensitive_classification_score"
     REGRESSION_SCORE = "regression_score"
     EXPECTED_VALUE_SCORE = "expected_value_score"
     RANKING_SCORE = "ranking_score"

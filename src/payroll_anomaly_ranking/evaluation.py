@@ -15,6 +15,10 @@ from payroll_anomaly_ranking.columns import (
     ScoreCol,
 )
 from payroll_anomaly_ranking.config import PayrollConfig
+from payroll_anomaly_ranking.models import (
+    EMPLOYEE_CYCLE_FEATURE_FAMILIES,
+    score_employee_pay_cycles,
+)
 
 
 @dataclass(frozen=True)
@@ -327,6 +331,7 @@ def employee_cycle_model_comparison(
     rows = []
     for score_name in [
         ScoreCol.CLASSIFICATION_SCORE,
+        ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
         ScoreCol.REGRESSION_SCORE,
         ScoreCol.EXPECTED_VALUE_SCORE,
         ScoreCol.RANKING_SCORE,
@@ -348,6 +353,273 @@ def employee_cycle_model_comparison(
             },
         )
     return pl.DataFrame(rows)
+
+
+def employee_cycle_feature_ablation(
+    payroll: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+    review_budget: float | None = None,
+) -> pl.DataFrame:
+    budget = review_budget or _default_employee_cycle_ablation_budget(config)
+    cumulative_feature_sets = []
+    selected: list[str] = []
+    for feature_set, feature_columns in EMPLOYEE_CYCLE_FEATURE_FAMILIES.items():
+        selected.extend(str(column) for column in feature_columns)
+        cumulative_feature_sets.append((feature_set, tuple(dict.fromkeys(selected))))
+
+    rows: list[dict[str, float | str]] = []
+    for feature_set, feature_columns in cumulative_feature_sets:
+        scored = score_employee_pay_cycles(
+            payroll,
+            config,
+            feature_columns=feature_columns,
+        ).scored
+        metrics = employee_cycle_grouped_metrics(scored, budget)
+        rows.append(
+            {
+                "feature_set": feature_set,
+                MetricCol.K: budget,
+                MetricCol.RESIDUAL_NDCG_AT_K: float(
+                    metrics[MetricCol.RESIDUAL_NDCG_AT_K],
+                ),
+                MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(
+                    metrics[MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K],
+                ),
+                MetricCol.DOLLARS_CAPTURED_AT_K: float(
+                    metrics[MetricCol.DOLLARS_CAPTURED_AT_K],
+                ),
+                MetricCol.REVIEWER_YIELD_AT_K: float(
+                    metrics[MetricCol.REVIEWER_YIELD_AT_K],
+                ),
+                MetricCol.INCREMENTAL_UTILITY_AT_K: float(
+                    metrics[MetricCol.INCREMENTAL_UTILITY_AT_K],
+                ),
+            },
+        )
+    return pl.DataFrame(rows)
+
+
+def employee_cycle_training_universe_ablation(
+    payroll: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+    review_budget: float | None = None,
+) -> pl.DataFrame:
+    budget = review_budget or _default_employee_cycle_ablation_budget(config)
+    scenarios = [
+        ("all_records", "residual_only", False),
+        ("residual_records_only", "residual_only", False),
+        ("all_records_with_gate_feature", "all_records_with_gate_feature", True),
+    ]
+    rows: list[dict[str, float | str]] = []
+    for label, training_universe, include_gate_feature in scenarios:
+        scored = score_employee_pay_cycles(
+            payroll,
+            config,
+            training_universe=training_universe,
+            include_hard_rule_flag_feature=include_gate_feature,
+        ).scored
+        metrics = employee_cycle_grouped_metrics(scored, budget)
+        rows.append(
+            {
+                "training_universe": label,
+                "scoring_universe": "residual_only",
+                MetricCol.K: budget,
+                MetricCol.RESIDUAL_NDCG_AT_K: float(
+                    metrics[MetricCol.RESIDUAL_NDCG_AT_K],
+                ),
+                MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(
+                    metrics[MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K],
+                ),
+                MetricCol.DOLLARS_CAPTURED_AT_K: float(
+                    metrics[MetricCol.DOLLARS_CAPTURED_AT_K],
+                ),
+                MetricCol.REVIEWER_YIELD_AT_K: float(
+                    metrics[MetricCol.REVIEWER_YIELD_AT_K],
+                ),
+                MetricCol.INCREMENTAL_UTILITY_AT_K: float(
+                    metrics[MetricCol.INCREMENTAL_UTILITY_AT_K],
+                ),
+            },
+        )
+    return pl.DataFrame(rows)
+
+
+def employee_cycle_label_ablation(
+    scored: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+    review_budget: float | None = None,
+) -> pl.DataFrame:
+    budget = review_budget or _default_employee_cycle_ablation_budget(config)
+    comparison_rows = []
+    for model_name, score_name in _employee_cycle_model_scores(scored):
+        renamed = scored.with_columns(
+            pl.col(score_name).alias(ScoreCol.FINAL_ANOMALY_SCORE),
+        )
+        metrics = employee_cycle_grouped_metrics(renamed, budget)
+        comparison_rows.append({"model": model_name, **metrics})
+    comparison = pl.DataFrame(comparison_rows)
+
+    return pl.DataFrame(
+        [
+            _label_ablation_row(
+                comparison,
+                "binary_issue",
+                ["classifier", "cost_sensitive_classifier"],
+                MetricCol.PR_AUC,
+                "Best residual issue-probability ranking among binary classifiers.",
+            ),
+            _label_ablation_row(
+                comparison,
+                "dollar_impact",
+                ["regressor", "expected_value"],
+                MetricCol.DOLLARS_CAPTURED_AT_K,
+                "Financial exposure targets still matter after the hard-rule gate.",
+            ),
+            _label_ablation_row(
+                comparison,
+                "graded_relevance",
+                ["learning_to_rank", "final_active_ranking"],
+                MetricCol.RESIDUAL_NDCG_AT_K,
+                "Direct graded ranking tends to help top-of-queue ordering.",
+            ),
+            _label_ablation_row(
+                comparison,
+                "utility_label",
+                ["expected_value", "final_active_ranking"],
+                MetricCol.INCREMENTAL_UTILITY_AT_K,
+                "Utility-aware winners balance recovery against wasted review effort.",
+            ),
+            _label_ablation_row(
+                comparison,
+                "observed_historical_label",
+                ["classifier", "cost_sensitive_classifier"],
+                MetricCol.REVIEWER_YIELD_AT_K,
+                "Observed-correction-style signals favor issue triage but can inherit review bias.",
+            ),
+            _label_ablation_row(
+                comparison,
+                "latent_true_label",
+                ["learning_to_rank", "expected_value", "final_active_ranking"],
+                MetricCol.RESIDUAL_NDCG_AT_K,
+                "Latent residual truth highlights methods that preserve queue quality after gating.",
+            ),
+        ],
+    )
+
+
+def employee_cycle_issue_type_model_performance(
+    scored: pl.DataFrame,
+    review_budget: float,
+) -> pl.DataFrame:
+    rows: list[dict[str, float | str]] = []
+    for model_name, score_name in _employee_cycle_model_scores(scored):
+        ranked = _employee_cycle_group_ranked(
+            _employee_cycle_residual_frame(
+                scored.with_columns(
+                    pl.col(score_name).alias(ScoreCol.FINAL_ANOMALY_SCORE),
+                ),
+            ),
+            review_budget,
+        )
+        category_metrics = (
+            ranked.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
+            .group_by(PayrollCol.ANOMALY_CATEGORY)
+            .agg(
+                pl.len().alias("issue_records"),
+                pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE).alias(
+                    "severe_issue_records",
+                ),
+                pl.sum(PayrollCol.Y_DOLLAR).alias("issue_dollars"),
+                pl.col("_employee_cycle_in_budget")
+                .cast(pl.Int64)
+                .sum()
+                .alias("reviewed_issues"),
+                (
+                    pl.col("_employee_cycle_in_budget")
+                    & (pl.col(PayrollCol.RULE_MISSED_SEVERE_ISSUE) == 1)
+                )
+                .cast(pl.Int64)
+                .sum()
+                .alias("reviewed_severe_issues"),
+                pl.when(pl.col("_employee_cycle_in_budget"))
+                .then(pl.col(PayrollCol.Y_DOLLAR))
+                .otherwise(0.0)
+                .sum()
+                .alias("reviewed_dollars"),
+            )
+            .with_columns(
+                pl.lit(model_name).alias("model"),
+                pl.lit(review_budget).alias(MetricCol.K),
+                (
+                    pl.col("reviewed_issues") / pl.col("issue_records").clip(1, None)
+                ).alias(
+                    MetricCol.RECALL_AT_K,
+                ),
+                (
+                    pl.col("reviewed_severe_issues")
+                    / pl.col("severe_issue_records").clip(1, None)
+                ).alias(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
+                (
+                    pl.col("reviewed_dollars")
+                    / pl.col("issue_dollars").clip(1e-9, None)
+                ).alias(
+                    MetricCol.DOLLAR_CAPTURE_RATE,
+                ),
+            )
+        )
+        rows.extend(category_metrics.to_dicts())
+    return pl.DataFrame(rows).sort(
+        ["model", MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K, "issue_records"],
+        descending=[False, True, True],
+    )
+
+
+def employee_cycle_severe_miss_examples(
+    scored: pl.DataFrame,
+    review_budget: float,
+    *,
+    limit_per_model: int = 5,
+) -> pl.DataFrame:
+    rows: list[pl.DataFrame] = []
+    for model_name, score_name in _employee_cycle_model_scores(scored):
+        ranked = _employee_cycle_group_ranked(
+            _employee_cycle_residual_frame(
+                scored.with_columns(
+                    pl.col(score_name).alias(ScoreCol.FINAL_ANOMALY_SCORE),
+                ),
+            ),
+            review_budget,
+        )
+        rows.append(
+            ranked.filter(
+                (pl.col(PayrollCol.RULE_MISSED_SEVERE_ISSUE) == 1)
+                & (~pl.col("_employee_cycle_in_budget")),
+            )
+            .with_columns(
+                pl.lit(model_name).alias("model"),
+                pl.lit(review_budget).alias(MetricCol.K),
+            )
+            .sort(
+                [PayrollCol.Y_DOLLAR, ScoreCol.FINAL_ANOMALY_SCORE],
+                descending=[True, True],
+            )
+            .select(
+                "model",
+                MetricCol.K,
+                PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+                PayrollCol.EMPLOYEE_ID,
+                PayrollCol.FACILITY_ID,
+                PayrollCol.PAY_PERIOD_INDEX,
+                PayrollCol.ANOMALY_CATEGORY,
+                PayrollCol.Y_DOLLAR,
+                PayrollCol.RELEVANCE_GRADE,
+                ScoreCol.FINAL_ANOMALY_SCORE,
+                "_employee_cycle_group_rank",
+                "_employee_cycle_group_budget_count",
+            )
+            .head(limit_per_model),
+        )
+    return pl.concat(rows, how="vertical") if rows else pl.DataFrame()
 
 
 def employee_cycle_backtest_by_period(
@@ -870,6 +1142,58 @@ def _employee_cycle_residual_frame(scored: pl.DataFrame) -> pl.DataFrame:
     if PayrollCol.RESIDUAL_RECORD not in scored.columns:
         return scored
     return scored.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
+
+
+def _employee_cycle_model_scores(scored: pl.DataFrame) -> list[tuple[str, str]]:
+    model_scores = [
+        ("classifier", ScoreCol.CLASSIFICATION_SCORE),
+        (
+            "cost_sensitive_classifier",
+            ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
+        ),
+        ("regressor", ScoreCol.REGRESSION_SCORE),
+        ("expected_value", ScoreCol.EXPECTED_VALUE_SCORE),
+        ("learning_to_rank", ScoreCol.RANKING_SCORE),
+        ("final_active_ranking", ScoreCol.FINAL_ANOMALY_SCORE),
+    ]
+    return [
+        (model_name, score_name)
+        for model_name, score_name in model_scores
+        if score_name in scored.columns
+    ]
+
+
+def _label_ablation_row(
+    comparison: pl.DataFrame,
+    label_name: str,
+    candidate_models: list[str],
+    selection_metric: str,
+    interpretation: str,
+) -> dict[str, float | str]:
+    candidates = comparison.filter(pl.col("model").is_in(candidate_models))
+    if candidates.is_empty():
+        return {
+            "label": label_name,
+            "best_model": "unavailable",
+            "selection_metric": selection_metric,
+            "selection_value": 0.0,
+            "interpretation": interpretation,
+        }
+    winner = candidates.sort(selection_metric, descending=True).row(0, named=True)
+    return {
+        "label": label_name,
+        "best_model": str(winner["model"]),
+        "selection_metric": selection_metric,
+        "selection_value": float(winner[selection_metric] or 0.0),
+        "interpretation": interpretation,
+    }
+
+
+def _default_employee_cycle_ablation_budget(config: PayrollConfig) -> float:
+    review_budgets = _employee_cycle_review_budgets(config)
+    if 0.05 in review_budgets:
+        return 0.05
+    return review_budgets[0]
 
 
 def _employee_cycle_residual_ndcg_at_k(scored: pl.DataFrame) -> float:

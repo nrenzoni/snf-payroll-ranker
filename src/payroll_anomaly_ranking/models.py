@@ -54,6 +54,46 @@ EMPLOYEE_CYCLE_FEATURE_COLUMNS = (
     FeatureCol.GROSS_PAY_MAD_SCORE,
 )
 
+EMPLOYEE_CYCLE_FEATURE_FAMILIES: dict[str, tuple[str, ...]] = {
+    "raw_payroll": (
+        PayrollCol.TOTAL_GROSS_PAY,
+        PayrollCol.TOTAL_NET_PAY,
+        PayrollCol.TOTAL_REGULAR_HOURS,
+        PayrollCol.TOTAL_OVERTIME_HOURS,
+        PayrollCol.TOTAL_SCHEDULED_HOURS,
+        PayrollCol.TOTAL_WORKED_HOURS,
+        PayrollCol.TOTAL_PAID_HOURS,
+        PayrollCol.TOTAL_PREMIUM_PAY,
+        PayrollCol.TOTAL_EXPECTED_GROSS_PAY,
+        PayrollCol.SHIFT_COUNT,
+    ),
+    "employee_history": (
+        FeatureCol.GROSS_PAY_PCT_CHANGE,
+        FeatureCol.DEDUCTION_RATIO,
+        FeatureCol.DEDUCTION_RATIO_ROLLING_MEDIAN,
+        FeatureCol.NET_TO_GROSS_RATIO,
+    ),
+    "facility_role_baseline": (
+        FeatureCol.PEER_GROSS_DEVIATION_RATIO,
+        FeatureCol.PEER_OVERTIME_DEVIATION_RATIO,
+        FeatureCol.FACILITY_GROSS_ROBUST_Z,
+    ),
+    "timekeeping_signals": (
+        FeatureCol.OVERTIME_PER_SCHEDULED_HOUR,
+        FeatureCol.WORKED_TO_SCHEDULED_RATIO,
+        FeatureCol.PAID_TO_SCHEDULED_RATIO,
+        FeatureCol.PREMIUM_PAY_SHARE,
+        FeatureCol.GROSS_TO_EXPECTED_SHIFT_PAY,
+        FeatureCol.PAID_MINUS_SCHEDULED_HOURS,
+        FeatureCol.PREMIUM_ELIGIBILITY_MISMATCH,
+        FeatureCol.REST_GAP_RISK,
+    ),
+    "temporal_context": (
+        FeatureCol.GROSS_PAY_ROBUST_Z,
+        FeatureCol.GROSS_PAY_MAD_SCORE,
+    ),
+}
+
 
 @dataclass(frozen=True)
 class TemporalSplit:
@@ -361,21 +401,47 @@ def score_payroll(
 def score_employee_pay_cycles(
     payroll: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
+    *,
+    feature_columns: tuple[str, ...] | None = None,
+    training_universe: str = "all_records",
+    include_hard_rule_flag_feature: bool = False,
 ) -> EmployeeCycleScoringResults:
     featured = build_employee_cycle_features(payroll)
     if PayrollCol.RECORD_ID not in featured.columns:
         featured = featured.with_row_index(name=PayrollCol.RECORD_ID)
-    ml_raw = _employee_cycle_ml_scores(featured, config)
+    selected_feature_columns = _employee_cycle_selected_feature_columns(
+        feature_columns,
+        include_hard_rule_flag_feature=include_hard_rule_flag_feature,
+    )
+    train_frame = _employee_cycle_training_frame(featured, training_universe)
+    ml_raw = _employee_cycle_ml_scores(
+        featured,
+        config,
+        feature_columns=selected_feature_columns,
+        train_frame=train_frame,
+    )
     classification = _employee_cycle_supervised_probability(
+        train_frame,
         featured,
         PayrollCol.Y_ISSUE,
         config,
+        feature_columns=selected_feature_columns,
+    )
+    cost_sensitive = _employee_cycle_supervised_probability(
+        train_frame,
+        featured,
+        PayrollCol.Y_ISSUE,
+        config,
+        feature_columns=selected_feature_columns,
+        sample_weight=_employee_cycle_cost_sensitive_weights(train_frame),
     )
     regression = _minmax(
         _employee_cycle_supervised_regression(
+            train_frame,
             featured,
             PayrollCol.Y_DOLLAR,
             config,
+            feature_columns=selected_feature_columns,
             lower_bound=0.0,
         ),
     )
@@ -383,22 +449,26 @@ def score_employee_pay_cycles(
     expected_value = _minmax(estimated_exposure * np.clip(classification, 0.05, 1.0))
     ranking = _minmax(
         _employee_cycle_supervised_regression(
+            train_frame,
             featured,
             PayrollCol.RELEVANCE_GRADE,
             config,
+            feature_columns=selected_feature_columns,
             lower_bound=0.0,
             upper_bound=3.0,
         ),
     )
     final_ranking = _minmax(
-        ranking * 0.55
-        + classification * 0.20
+        ranking * 0.45
+        + classification * 0.15
+        + cost_sensitive * 0.15
         + regression * 0.10
         + expected_value * 0.15,
     )
     scored = featured.with_columns(
         pl.Series(ScoreCol.ML_SCORE, ml_raw),
         pl.Series(ScoreCol.CLASSIFICATION_SCORE, classification),
+        pl.Series(ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE, cost_sensitive),
         pl.Series(ScoreCol.REGRESSION_SCORE, regression),
         pl.Series(ScoreCol.EXPECTED_VALUE_SCORE, expected_value),
         pl.Series(ScoreCol.RANKING_SCORE, ranking),
@@ -415,12 +485,13 @@ def score_employee_pay_cycles(
         scored=scored,
         score_columns=(
             ScoreCol.CLASSIFICATION_SCORE,
+            ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
             ScoreCol.REGRESSION_SCORE,
             ScoreCol.EXPECTED_VALUE_SCORE,
             ScoreCol.RANKING_SCORE,
             ScoreCol.FINAL_ANOMALY_SCORE,
         ),
-        feature_columns=tuple(str(column) for column in EMPLOYEE_CYCLE_FEATURE_COLUMNS),
+        feature_columns=tuple(str(column) for column in selected_feature_columns),
     )
 
 
@@ -586,12 +657,13 @@ def _feature_matrix(frame: pl.DataFrame) -> np.ndarray:
     ).to_numpy()
 
 
-def _employee_cycle_feature_matrix(frame: pl.DataFrame) -> np.ndarray:
+def _employee_cycle_feature_matrix(
+    frame: pl.DataFrame,
+    feature_columns: tuple[str, ...] | None = None,
+) -> np.ndarray:
+    selected = feature_columns or EMPLOYEE_CYCLE_FEATURE_COLUMNS
     return frame.select(
-        [
-            pl.col(column).cast(pl.Float64).fill_null(0)
-            for column in EMPLOYEE_CYCLE_FEATURE_COLUMNS
-        ],
+        [pl.col(column).cast(pl.Float64).fill_null(0) for column in selected],
     ).to_numpy()
 
 
@@ -606,10 +678,12 @@ def _minmax(values: np.ndarray) -> np.ndarray:
 def _employee_cycle_ml_scores(
     payroll: pl.DataFrame,
     config: PayrollConfig,
+    *,
+    feature_columns: tuple[str, ...],
+    train_frame: pl.DataFrame,
 ) -> np.ndarray:
-    splits = temporal_split(payroll)
-    train = _employee_cycle_feature_matrix(splits.train)
-    all_features = _employee_cycle_feature_matrix(payroll)
+    train = _employee_cycle_feature_matrix(train_frame, feature_columns)
+    all_features = _employee_cycle_feature_matrix(payroll, feature_columns)
     if len(train) == 0:
         train = all_features
     model = IsolationForest(
@@ -623,34 +697,41 @@ def _employee_cycle_ml_scores(
 
 
 def _employee_cycle_supervised_probability(
+    train_frame: pl.DataFrame,
     payroll: pl.DataFrame,
     target: str,
     config: PayrollConfig,
+    *,
+    feature_columns: tuple[str, ...],
+    sample_weight: np.ndarray | None = None,
 ) -> np.ndarray:
-    splits = temporal_split(payroll)
-    train_frame = splits.train if splits.train.height else payroll
     train_target = train_frame.get_column(target).fill_null(0).to_numpy()
-    all_features = _employee_cycle_feature_matrix(payroll)
+    all_features = _employee_cycle_feature_matrix(payroll, feature_columns)
     if len(np.unique(train_target)) < 2:
         return np.full(
             payroll.height,
             float(train_target.mean() if len(train_target) else 0.0),
         )
     model = HistGradientBoostingClassifier(random_state=config.seed, max_depth=3)
-    model.fit(_employee_cycle_feature_matrix(train_frame), train_target)
+    model.fit(
+        _employee_cycle_feature_matrix(train_frame, feature_columns),
+        train_target,
+        sample_weight=sample_weight,
+    )
     return cast(np.ndarray, model.predict_proba(all_features)[:, 1])
 
 
 def _employee_cycle_supervised_regression(
+    train_frame: pl.DataFrame,
     payroll: pl.DataFrame,
     target: str,
     config: PayrollConfig,
     *,
+    feature_columns: tuple[str, ...],
     lower_bound: float | None = None,
     upper_bound: float | None = None,
+    sample_weight: np.ndarray | None = None,
 ) -> np.ndarray:
-    splits = temporal_split(payroll)
-    train_frame = splits.train if splits.train.height else payroll
     train_target = train_frame.get_column(target).fill_null(0).to_numpy()
     if len(train_target) == 0 or float(np.std(train_target)) == 0.0:
         prediction = np.full(
@@ -659,10 +740,14 @@ def _employee_cycle_supervised_regression(
         )
     else:
         model = HistGradientBoostingRegressor(random_state=config.seed, max_depth=3)
-        model.fit(_employee_cycle_feature_matrix(train_frame), train_target)
+        model.fit(
+            _employee_cycle_feature_matrix(train_frame, feature_columns),
+            train_target,
+            sample_weight=sample_weight,
+        )
         prediction = cast(
             np.ndarray,
-            model.predict(_employee_cycle_feature_matrix(payroll)),
+            model.predict(_employee_cycle_feature_matrix(payroll, feature_columns)),
         )
     if lower_bound is not None:
         prediction = np.maximum(prediction, lower_bound)
@@ -697,6 +782,52 @@ def _employee_cycle_estimated_exposure(payroll: pl.DataFrame) -> np.ndarray:
         payroll.get_column(PayrollCol.TOTAL_PREMIUM_PAY).fill_null(0).to_numpy()
     )
     return gross_gap + overtime_component + paid_minus_scheduled + premium_component
+
+
+def _employee_cycle_selected_feature_columns(
+    feature_columns: tuple[str, ...] | None,
+    *,
+    include_hard_rule_flag_feature: bool,
+) -> tuple[str, ...]:
+    selected = feature_columns or EMPLOYEE_CYCLE_FEATURE_COLUMNS
+    if (
+        include_hard_rule_flag_feature
+        and PayrollCol.CRITICAL_HARD_RULE_FLAG not in selected
+    ):
+        return (*selected, PayrollCol.CRITICAL_HARD_RULE_FLAG)
+    return selected
+
+
+def _employee_cycle_training_frame(
+    payroll: pl.DataFrame,
+    training_universe: str,
+) -> pl.DataFrame:
+    if training_universe == "all_records":
+        return payroll
+    if training_universe in {"residual_only", "residual_records_only"}:
+        residual_only = payroll.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
+        return residual_only if residual_only.height else payroll
+    if training_universe == "all_records_with_gate_feature":
+        return payroll
+    raise ValueError(
+        f"Unsupported employee-cycle training universe: {training_universe}",
+    )
+
+
+def _employee_cycle_cost_sensitive_weights(train_frame: pl.DataFrame) -> np.ndarray:
+    weighted = train_frame.select(
+        pl.when(pl.col(PayrollCol.Y_ISSUE) == 1)
+        .then(
+            1.0
+            + (pl.col(PayrollCol.Y_DOLLAR).fill_null(0.0) / 75.0).clip(0.0, 6.0)
+            + pl.col(PayrollCol.RULE_MISSED_SEVERE_ISSUE).fill_null(0).cast(pl.Float64)
+            * 2.5
+            + pl.col(PayrollCol.RELEVANCE_GRADE).fill_null(0).cast(pl.Float64) * 0.35,
+        )
+        .otherwise(1.0)
+        .alias("sample_weight"),
+    )
+    return weighted.get_column("sample_weight").to_numpy()
 
 
 def _rows_by_period(

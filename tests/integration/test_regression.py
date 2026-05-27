@@ -39,6 +39,11 @@ from payroll_anomaly_ranking.diagnostics import (
     top_subgroup_diagnostics,
 )
 from payroll_anomaly_ranking.evaluation import (
+    employee_cycle_feature_ablation,
+    employee_cycle_issue_type_model_performance,
+    employee_cycle_label_ablation,
+    employee_cycle_severe_miss_examples,
+    employee_cycle_training_universe_ablation,
     evaluate_employee_cycle_scores,
     evaluate_scores,
     leakage_checks,
@@ -511,6 +516,7 @@ def test_employee_cycle_scoring_returns_formulation_columns() -> None:
 
     assert {
         ScoreCol.CLASSIFICATION_SCORE,
+        ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
         ScoreCol.REGRESSION_SCORE,
         ScoreCol.EXPECTED_VALUE_SCORE,
         ScoreCol.RANKING_SCORE,
@@ -519,6 +525,7 @@ def test_employee_cycle_scoring_returns_formulation_columns() -> None:
     } <= set(results.scored.columns)
     assert results.score_columns == (
         ScoreCol.CLASSIFICATION_SCORE,
+        ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
         ScoreCol.REGRESSION_SCORE,
         ScoreCol.EXPECTED_VALUE_SCORE,
         ScoreCol.RANKING_SCORE,
@@ -563,6 +570,7 @@ def test_employee_cycle_scoring_uses_residual_targets_not_legacy_targets() -> No
 
     assert baseline.select(
         ScoreCol.CLASSIFICATION_SCORE,
+        ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
         ScoreCol.REGRESSION_SCORE,
         ScoreCol.EXPECTED_VALUE_SCORE,
         ScoreCol.RANKING_SCORE,
@@ -570,6 +578,7 @@ def test_employee_cycle_scoring_uses_residual_targets_not_legacy_targets() -> No
     ).equals(
         relabeled_scored.select(
             ScoreCol.CLASSIFICATION_SCORE,
+            ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
             ScoreCol.REGRESSION_SCORE,
             ScoreCol.EXPECTED_VALUE_SCORE,
             ScoreCol.RANKING_SCORE,
@@ -588,6 +597,7 @@ def test_employee_cycle_scoring_is_reproducible() -> None:
     assert scored_a.select(
         PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
         ScoreCol.CLASSIFICATION_SCORE,
+        ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
         ScoreCol.REGRESSION_SCORE,
         ScoreCol.EXPECTED_VALUE_SCORE,
         ScoreCol.RANKING_SCORE,
@@ -597,6 +607,7 @@ def test_employee_cycle_scoring_is_reproducible() -> None:
         scored_b.select(
             PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
             ScoreCol.CLASSIFICATION_SCORE,
+            ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
             ScoreCol.REGRESSION_SCORE,
             ScoreCol.EXPECTED_VALUE_SCORE,
             ScoreCol.RANKING_SCORE,
@@ -628,6 +639,67 @@ def test_employee_cycle_evaluation_reports_grouped_metrics() -> None:
     } <= set(evaluation.metrics.columns)
     assert evaluation.model_comparison.height >= 4
     assert evaluation.production_candidacy.height >= 1
+
+
+def test_employee_cycle_ablation_helpers_return_runtime_backed_outputs() -> None:
+    config = PayrollConfig(
+        facility_count=12,
+        employee_count=180,
+        pay_periods=12,
+        employee_cycle_review_budget_percents=(0.05, 0.10),
+    )
+    payroll = generate_employee_pay_cycles(config).payroll
+    scored = score_employee_pay_cycles(payroll, config).scored
+
+    feature_ablation = employee_cycle_feature_ablation(payroll, config)
+    training_ablation = employee_cycle_training_universe_ablation(payroll, config)
+    label_ablation = employee_cycle_label_ablation(scored, config)
+
+    assert {"raw_payroll", "employee_history", "facility_role_baseline"} <= set(
+        feature_ablation.get_column("feature_set").to_list(),
+    )
+    assert {
+        "all_records",
+        "residual_records_only",
+        "all_records_with_gate_feature",
+    } <= set(training_ablation.get_column("training_universe").to_list())
+    assert {
+        "binary_issue",
+        "dollar_impact",
+        "graded_relevance",
+        "utility_label",
+        "observed_historical_label",
+        "latent_true_label",
+    } <= set(label_ablation.get_column("label").to_list())
+
+
+def test_employee_cycle_residual_diagnostic_helpers_return_issue_and_miss_views() -> (
+    None
+):
+    config = PayrollConfig(
+        facility_count=12,
+        employee_count=180,
+        pay_periods=12,
+        employee_cycle_review_budget_percents=(0.05, 0.10),
+    )
+    payroll = generate_employee_pay_cycles(config).payroll
+    scored = score_employee_pay_cycles(payroll, config).scored
+
+    issue_type_metrics = employee_cycle_issue_type_model_performance(scored, 0.05)
+    severe_misses = employee_cycle_severe_miss_examples(scored, 0.05, limit_per_model=2)
+
+    assert issue_type_metrics.height > 0
+    assert {
+        "model",
+        PayrollCol.ANOMALY_CATEGORY,
+        MetricCol.RECALL_AT_K,
+        MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+        MetricCol.DOLLAR_CAPTURE_RATE,
+    } <= set(issue_type_metrics.columns)
+    assert severe_misses.height > 0
+    assert {"model", PayrollCol.EMPLOYEE_PAY_CYCLE_ID, PayrollCol.Y_DOLLAR} <= set(
+        severe_misses.columns,
+    )
 
 
 def test_employee_cycle_evaluation_supports_percent_review_budgets() -> None:
