@@ -452,6 +452,32 @@ def test_employee_cycle_residual_gate_artifacts_exist() -> None:
     assert PayrollCol.Y_DOLLAR in diagnostics["residual_dollar_distribution"].columns
 
 
+def test_employee_cycle_residual_labels_and_families_are_heterogeneous() -> None:
+    config = PayrollConfig(facility_count=10, employee_count=180, pay_periods=12)
+    payroll = generate_employee_pay_cycles(config).payroll
+    residual = payroll.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
+    positive_residual = residual.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
+
+    severe_share = float(
+        positive_residual.select(pl.mean(PayrollCol.RULE_MISSED_SEVERE_ISSUE)).item()
+        or 0.0,
+    )
+    grade_counts = {
+        int(row[PayrollCol.RELEVANCE_GRADE]): int(row["len"])
+        for row in positive_residual.group_by(PayrollCol.RELEVANCE_GRADE)
+        .len()
+        .to_dicts()
+    }
+
+    assert positive_residual.height > 0
+    assert positive_residual.get_column(PayrollCol.ANOMALY_CATEGORY).n_unique() >= 4
+    assert 0.01 <= severe_share <= 0.25
+    assert grade_counts.get(1, 0) > 0
+    assert grade_counts.get(2, 0) > 0
+    assert grade_counts.get(3, 0) > 0
+    assert grade_counts.get(3, 0) < positive_residual.height // 3
+
+
 def test_employee_cycle_features_use_only_prior_period_history() -> None:
     config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
     payroll = generate_employee_pay_cycles(config).payroll
@@ -499,6 +525,27 @@ def test_employee_cycle_scoring_returns_formulation_columns() -> None:
         ScoreCol.FINAL_ANOMALY_SCORE,
     )
     assert len(results.feature_columns) > 0
+
+
+def test_employee_cycle_formulations_are_not_collapsed_onto_one_signal() -> None:
+    config = PayrollConfig(facility_count=10, employee_count=180, pay_periods=12)
+    payroll = generate_employee_pay_cycles(config).payroll
+
+    scored = score_employee_pay_cycles(payroll, config).scored.filter(
+        pl.col(PayrollCol.RESIDUAL_RECORD) == 1,
+    )
+
+    correlations = scored.select(
+        pl.corr(ScoreCol.CLASSIFICATION_SCORE, ScoreCol.REGRESSION_SCORE).alias(
+            "classification_vs_regression",
+        ),
+        pl.corr(ScoreCol.CLASSIFICATION_SCORE, ScoreCol.RANKING_SCORE).alias(
+            "classification_vs_ranking",
+        ),
+    ).row(0, named=True)
+
+    assert float(correlations["classification_vs_regression"] or 0.0) < 0.95
+    assert float(correlations["classification_vs_ranking"] or 0.0) < 0.98
 
 
 def test_employee_cycle_scoring_uses_residual_targets_not_legacy_targets() -> None:

@@ -242,6 +242,147 @@ def build_review_budget_diagnostics(
     return pl.DataFrame(rows)
 
 
+def build_residual_label_diagnostics(residual_records: pl.DataFrame) -> pl.DataFrame:
+    positive_residual = residual_records.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
+    residual_issue_count = max(positive_residual.height, 1)
+    grade_counts = {
+        int(row[PayrollCol.RELEVANCE_GRADE]): int(row["records"])
+        for row in positive_residual.group_by(PayrollCol.RELEVANCE_GRADE)
+        .agg(pl.len().alias("records"))
+        .to_dicts()
+    }
+    severe_count = int(
+        positive_residual.select(pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE)).item()
+        or 0,
+    )
+    return pl.DataFrame(
+        {
+            "diagnostic": [
+                "residual issue count",
+                "severe share of residual issues",
+                "grade 1 share of residual issues",
+                "grade 2 share of residual issues",
+                "grade 3 share of residual issues",
+                "distinct residual anomaly families",
+            ],
+            "value": [
+                float(positive_residual.height),
+                round(severe_count / residual_issue_count, 4),
+                round(grade_counts.get(1, 0) / residual_issue_count, 4),
+                round(grade_counts.get(2, 0) / residual_issue_count, 4),
+                round(grade_counts.get(3, 0) / residual_issue_count, 4),
+                float(
+                    positive_residual.get_column(
+                        PayrollCol.ANOMALY_CATEGORY,
+                    ).n_unique(),
+                ),
+            ],
+        },
+    )
+
+
+def build_residual_family_mix(residual_records: pl.DataFrame) -> pl.DataFrame:
+    positive_residual = residual_records.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
+    issue_count = max(positive_residual.height, 1)
+    return (
+        positive_residual.group_by(PayrollCol.ANOMALY_CATEGORY)
+        .agg(
+            pl.len().alias("records"),
+            pl.mean(PayrollCol.Y_DOLLAR).round(2).alias("avg_residual_dollars"),
+            pl.mean(PayrollCol.RULE_MISSED_SEVERE_ISSUE).round(4).alias("severe_share"),
+        )
+        .with_columns(
+            (pl.col("records") / issue_count)
+            .round(4)
+            .alias("share_of_residual_issues"),
+        )
+        .sort(["records", PayrollCol.ANOMALY_CATEGORY], descending=[True, False])
+    )
+
+
+def build_model_similarity_diagnostics(
+    scored_frame: pl.DataFrame,
+    review_budgets: tuple[float, ...],
+) -> pl.DataFrame:
+    residual_scored = scored_frame.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
+    comparison_budget = 0.05 if 0.05 in review_budgets else review_budgets[0]
+    model_scores = [
+        ("classifier", ScoreCol.CLASSIFICATION_SCORE),
+        ("regressor", ScoreCol.REGRESSION_SCORE),
+        ("expected_value", ScoreCol.EXPECTED_VALUE_SCORE),
+        ("learning_to_rank", ScoreCol.RANKING_SCORE),
+        ("final_active_ranking", ScoreCol.FINAL_ANOMALY_SCORE),
+    ]
+    group_cols = [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX]
+
+    def reviewed_records(score_col: ScoreCol, budget: float) -> pl.DataFrame:
+        ranked = residual_scored.with_columns(
+            pl.col(score_col)
+            .rank("ordinal", descending=True)
+            .over(group_cols)
+            .alias("_group_rank"),
+            pl.len().over(group_cols).alias("_group_size"),
+        ).with_columns(
+            (pl.col("_group_size") * budget)
+            .ceil()
+            .cast(pl.Int64)
+            .clip(1, None)
+            .alias("_group_budget_count"),
+        )
+        return ranked.filter(
+            pl.col("_group_rank") <= pl.col("_group_budget_count"),
+        ).select(
+            *group_cols,
+            PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+        )
+
+    top_1_records = {
+        model_name: reviewed_records(score_col, 0.01)
+        for model_name, score_col in model_scores
+    }
+    budget_records = {
+        model_name: reviewed_records(score_col, comparison_budget)
+        for model_name, score_col in model_scores
+    }
+
+    rows: list[dict[str, float | str]] = []
+    for index, (left_name, left_score) in enumerate(model_scores):
+        for right_name, right_score in model_scores[index + 1 :]:
+            top_1_overlap = top_1_records[left_name].join(
+                top_1_records[right_name],
+                on=group_cols + [PayrollCol.EMPLOYEE_PAY_CYCLE_ID],
+                how="inner",
+            ).height / max(top_1_records[left_name].height, 1)
+            budget_overlap = budget_records[left_name].join(
+                budget_records[right_name],
+                on=group_cols + [PayrollCol.EMPLOYEE_PAY_CYCLE_ID],
+                how="inner",
+            ).height / max(budget_records[left_name].height, 1)
+            correlation = float(
+                residual_scored.select(
+                    pl.corr(left_score, right_score).alias("correlation"),
+                ).item()
+                or 0.0,
+            )
+            rows.append(
+                {
+                    "model_a": left_name,
+                    "model_b": right_name,
+                    "score_correlation": round(correlation, 4),
+                    "top_1_overlap": round(top_1_overlap, 4),
+                    f"top_{format_review_budget_pct(comparison_budget)}_overlap": round(
+                        budget_overlap,
+                        4,
+                    ),
+                },
+            )
+    return pl.DataFrame(rows)
+
+
+residual_label_diagnostics = build_residual_label_diagnostics(residual_payroll)
+residual_family_mix = build_residual_family_mix(residual_payroll)
+
+
 # %% [markdown]
 # snapshot
 
@@ -480,6 +621,18 @@ residual_payroll.select(
 )
 
 # %% [markdown]
+# ### residual label diagnostics
+
+# %%
+residual_label_diagnostics
+
+# %% [markdown]
+# ### residual anomaly-family mix
+
+# %%
+residual_family_mix
+
+# %% [markdown]
 # ## 6. Feature Engineering for Ambiguous Payroll Records
 
 # %% [markdown]
@@ -502,6 +655,10 @@ backtest = employee_cycle_backtest_by_period(scored, sim_config)
 model_budget_metrics = build_model_budget_metrics(scored, review_budget_percents)
 budget_diagnostics = build_review_budget_diagnostics(
     residual_diagnostics["residual_records_per_facility_cycle"],
+    review_budget_percents,
+)
+model_similarity_diagnostics = build_model_similarity_diagnostics(
+    scored,
     review_budget_percents,
 )
 
@@ -651,6 +808,12 @@ pl.DataFrame(
 )
 
 # %% [markdown]
+# ### model similarity diagnostics
+
+# %%
+model_similarity_diagnostics
+
+# %% [markdown]
 # ### residual metrics by review-budget percentage
 
 # %%
@@ -700,13 +863,14 @@ backtest.select(
     MetricCol.DOLLARS_CAPTURED_AT_K,
     MetricCol.REVIEWER_YIELD_AT_K,
     MetricCol.INCREMENTAL_UTILITY_AT_K,
-).sort(PayrollCol.PAY_PERIOD_INDEX).head()
+).sort(PayrollCol.PAY_PERIOD_INDEX).head(10)
 
 # %% [markdown]
 # ### winner summary
 
 # %%
 comparison_for_summary = evaluation.model_comparison
+
 pl.DataFrame(
     {
         "objective": [
@@ -716,22 +880,20 @@ pl.DataFrame(
             "best overall default in this run",
         ],
         "winner": [
-            comparison_for_summary.sort(
-                MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-                descending=True,
-            ).row(0, named=True)["model"],
-            comparison_for_summary.sort(
-                MetricCol.DOLLARS_CAPTURED_AT_K,
-                descending=True,
-            ).row(0, named=True)["model"],
-            comparison_for_summary.sort(
-                MetricCol.INCREMENTAL_UTILITY_AT_K,
-                descending=True,
-            ).row(0, named=True)["model"],
-            comparison_for_summary.sort(
-                [MetricCol.RESIDUAL_NDCG_AT_K, MetricCol.INCREMENTAL_UTILITY_AT_K],
-                descending=[True, True],
-            ).row(0, named=True)["model"],
+            comparison_for_summary.top_k(
+                1,
+                by=MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+            )["model"][0],
+            comparison_for_summary.top_k(1, by=MetricCol.DOLLARS_CAPTURED_AT_K)[
+                "model"
+            ][0],
+            comparison_for_summary.top_k(1, by=MetricCol.INCREMENTAL_UTILITY_AT_K)[
+                "model"
+            ][0],
+            comparison_for_summary.top_k(
+                1,
+                by=[MetricCol.RESIDUAL_NDCG_AT_K, MetricCol.INCREMENTAL_UTILITY_AT_K],
+            )["model"][0],
         ],
     },
 )

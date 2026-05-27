@@ -403,6 +403,8 @@ class SNFAnomalyCategory(StrEnum):
     OVERTIME_DOUBLE_SHIFT = "overtime_double_shift"
     REST_GAP_RISK = "rest_gap_risk"
     PAID_VS_SCHEDULED_MISMATCH = "paid_vs_scheduled_mismatch"
+    RETRO_RATE_MISMATCH = "retro_rate_mismatch"
+    CROSS_FACILITY_ALLOCATION = "cross_facility_allocation"
     UNSUPPORTED_SHIFT_DIFFERENTIAL = "unsupported_shift_differential"
     UNSUPPORTED_WEEKEND_PREMIUM = "unsupported_weekend_premium"
     DUPLICATE_PREMIUM = "duplicate_premium"

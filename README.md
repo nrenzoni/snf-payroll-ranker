@@ -148,6 +148,8 @@ Notebook-only plotting code lives in Jupytext notebook sources and shared plotti
 
 Fast-path notebook validation (reduced workload, `/tmp` output, no paired `.ipynb` churn):
 
+Template: `uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/notebook.fast.ipynb <notebook.py>`
+
 ```bash
 NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/employee-cycle-report.fast.ipynb notebooks/employee_cycle_report.py
 ```
