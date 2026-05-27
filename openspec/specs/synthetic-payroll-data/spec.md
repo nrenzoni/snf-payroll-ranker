@@ -97,6 +97,13 @@ The synthetic employee-pay-cycle workflow SHALL emit a documented evaluation lab
 - **AND** the notebook documents that `y_issue` reflects latent residual issue truth rather than observed historical review outcomes
 - **AND** the notebook documents that `observed_correction` is a biased historical signal while `relevance_grade`, `rule_missed_severe_issue`, and `net_utility` are evaluation-oriented residual labels
 
+#### Scenario: Residual labels remain semantically distinct
+- **WHEN** employee-pay-cycle residual labels are constructed for evaluation
+- **THEN** `y_issue` represents any true residual payroll issue that survives the hard-rule gate
+- **AND** `rule_missed_severe_issue` represents a narrower severe subset of residual payroll issues rather than the default label for most positive residual cases
+- **AND** `relevance_grade` represents graded review priority rather than a restatement of the severe-label split alone
+- **AND** the highest review-priority grade is reserved for a minority of positive residual cases rather than being assigned to nearly all residual positives
+
 ### Requirement: Hard-rule gate and residual issue coverage
 The synthetic employee-pay-cycle workflow SHALL support a residual-ranking experiment by generating both hard-rule-caught issues and rule-missed residual issues.
 
@@ -111,6 +118,25 @@ The synthetic employee-pay-cycle workflow SHALL support a residual-ranking exper
 #### Scenario: Soft warning signals are available for residual modeling
 - **WHEN** synthetic employee-pay-cycle payroll data is generated for the active notebook workflow
 - **THEN** the observable fields include soft warning signals such as overtime above threshold, manual edits, missing punches, unusual facility patterns, pay-rate changes, and high gross pay versus employee baseline for use as residual-model features
+
+### Requirement: Heterogeneous residual payroll issue regimes
+The synthetic employee-pay-cycle workflow SHALL generate a plausible residual payroll-review task with multiple operationally distinct risk regimes so model choice can matter for substantive reasons.
+
+#### Scenario: Residual anomaly families are heterogeneous
+- **WHEN** synthetic employee-pay-cycle payroll data is generated for the active residual-ranking notebook
+- **THEN** the residual universe includes multiple plausible anomaly families with meaningfully different payroll, timekeeping, rate, facility-context, or review-priority signatures rather than one dominant residual issue pattern
+- **AND** those families include both more frequent lower-materiality issues and rarer higher-priority or higher-dollar issues
+- **AND** the residual universe also includes warning-heavy clean records so precision tradeoffs remain meaningful
+
+#### Scenario: Residual family mix supports legitimate model tradeoffs
+- **WHEN** residual anomaly families are implemented for employee-pay-cycle research
+- **THEN** their observable signals differ enough that classification, regression, expected-value, and learning-to-rank formulations can legitimately exhibit different strengths on the same residual universe
+- **AND** the synthetic task is not intentionally constructed so that one residual label collapses all formulations onto the same dominant signal
+
+#### Scenario: Residual issue mix is not dominated by the highest-priority tier
+- **WHEN** residual labels are profiled for notebook or validation outputs
+- **THEN** the positive residual universe contains a meaningful mix of minor, material, severe, and severe high-dollar issues
+- **AND** the highest-priority severe tiers remain a minority of residual positives rather than absorbing nearly all positive residual cases
 
 ### Requirement: Compliance and staffing metrics remain out of scope
 The active residual-ranking notebook SHALL not depend on compliance or staffing metrics that are outside the payroll financial-loss objective.

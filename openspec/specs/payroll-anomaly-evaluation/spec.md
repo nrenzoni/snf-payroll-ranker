@@ -256,6 +256,19 @@ The system SHALL validate whether internal diagnostic plots provide useful signa
 - **THEN** validation outputs identify when configured review budgets saturate most facility-cycle groups, leaving little or no contrast between budget levels or scoring methods
 - **AND** they report enough supporting context such as grouped residual queue sizes, effective reviewed counts, or dominant saturation thresholds to explain why the plots are not decision-useful
 
+### Requirement: Residual-task separability diagnostics
+The system SHALL report diagnostics that explain whether the residual employee-pay-cycle task contains enough heterogeneous signal for model-comparison outputs to be decision-useful.
+
+#### Scenario: Residual heterogeneity diagnostics are reported
+- **WHEN** model comparison outputs are generated for the active employee-pay-cycle notebook
+- **THEN** validation outputs include diagnostics that explain whether the residual task contains enough distinct issue regimes for formulation choice to matter
+- **AND** those diagnostics may include severe-share summaries, relevance-grade distributions, anomaly-family mix, inter-model score correlations, top-budget overlap, or equivalent measures of residual-task diversity and model similarity
+
+#### Scenario: Weak model separation is explained
+- **WHEN** review-budget curves or formulation-comparison summaries show little separation across models
+- **THEN** supporting diagnostics distinguish between budget-saturation effects, strongly correlated model scores, collapsed residual labels, or insufficient residual anomaly-family diversity
+- **AND** the notebook or supporting validation outputs explain whether weak separation reflects a realistic modeling conclusion or an under-differentiated synthetic residual task
+
 ### Requirement: Technical ML value and ablation notebook
 The active employee-pay-cycle notebook SHALL include sections that demonstrate incremental residual-formulation value using evaluation-safe synthetic labels and temporal validation framing.
 

@@ -57,3 +57,16 @@ The notebook's label-engineering section SHALL describe the real employee-pay-cy
 - **WHEN** a reviewer reads section `5. Label Engineering for Residual Ranking`
 - **THEN** it explains how employee-pay-cycle residual `y_issue`, residual `y_dollar`, dominant `anomaly_category`, `relevance_grade`, `rule_missed_severe_issue`, `observed_correction`, and `net_utility` are constructed
 - **AND** it states which labels are evaluation-only and excluded from scoring inputs
+
+### Requirement: Notebook demonstrates residual-risk heterogeneity
+The primary employee-pay-cycle notebook SHALL show compact evidence that the residual ranking task contains meaningful heterogeneity before asking reviewers to interpret formulation-comparison plots.
+
+#### Scenario: Residual-task heterogeneity evidence is visible
+- **WHEN** a reviewer reads the active notebook's residual sanity-check, label-engineering, or model-formulation sections
+- **THEN** the notebook shows concise diagnostics describing residual anomaly-family mix, severe-label selectivity, and relevance-grade distribution
+- **AND** the notebook explains why those diagnostics matter for interpreting classifier, regressor, expected-value, and learning-to-rank comparisons
+
+#### Scenario: Model similarity evidence accompanies comparison visuals
+- **WHEN** the active notebook presents model-comparison visuals or summaries for the residual queue
+- **THEN** it also shows whether candidate models are producing materially different rankings through score-correlation, top-budget overlap, or equivalent similarity diagnostics
+- **AND** it does not present near-flat comparison plots without enough surrounding context to explain whether the underlying residual task is genuinely differentiating the candidate formulations
