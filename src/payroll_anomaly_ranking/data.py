@@ -236,7 +236,13 @@ def generate_employees(
                 PayrollCol.BASE_PAY_RATE: round(base_rate, 2),
             },
         )
-    return pl.DataFrame(rows)
+    return pl.DataFrame(
+        rows,
+        schema_overrides={
+            PayrollCol.HIRE_DATE: pl.Date,
+            PayrollCol.TERMINATION_DATE: pl.Date,
+        },
+    )
 
 
 def generate_schedules(
