@@ -11,6 +11,8 @@ Python 3.13 payroll anomaly ranking pipeline using Polars, NumPy, scikit-learn, 
 - Use `uv sync --extra notebooks` before executing notebooks or rendering Lets-Plot visuals.
 - After any notebook `.py` source change, validate each changed notebook with the fast path: `NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/notebook-name.fast.ipynb notebook.py`. This uses reduced diagnostic workloads and minimal pipeline artifacts where notebooks support fast mode, preserves notebook-local imports, and writes the executed notebook only under `/tmp` without creating or overwriting paired `.ipynb` artifacts.
 - Use full non-fast notebook execution only when the user requests a complete rerender, paired `.ipynb` refresh, analyst-visible output sync, or full-workload validation: `uv run jupytext --set-formats ipynb,py:percent --execute notebook.py`. This creates/updates the paired `.ipynb`, executes the full workload, reports failures, and lets you inspect outputs on success.
+- When an AI agent needs to review a notebook's outputs, first ensure the paired `.ipynb` artifact is up to date (run the full Jupytext command above, or use an existing `.ipynb` if the user explicitly requests it). Then convert it to Markdown for readable output, writing the result under `/tmp`:  
+  `uv run jupyter nbconvert --config jupyter_nbconvert_config.py --to markdown --output-dir /tmp notebooks/<NOTEBOOK_NAME>.ipynb`
 
 ## Specs
 

@@ -122,8 +122,10 @@
 # ```
 # %%
 import polars as pl
+
+# %%
 import polars.selectors as pl_selectors
-from common.display import setup_notebook_html
+from common.display import setup_notebook_html, setup_polars_display
 from common.execution import notebook_fast_mode
 from common.plots import (
     aes,
@@ -136,7 +138,7 @@ from common.plots import (
     theme_minimal,
 )
 
-from payroll_anomaly_ranking.columns import MetricCol, PayrollCol, ScoreCol
+from payroll_anomaly_ranking.columns import MetricCol, PayrollCol, ReviewCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.data import (
     employee_cycle_hard_rule_funnel,
@@ -145,22 +147,31 @@ from payroll_anomaly_ranking.data import (
 )
 from payroll_anomaly_ranking.evaluation import (
     employee_cycle_backtest_by_period,
+    employee_cycle_feature_ablation,
     employee_cycle_grouped_metrics,
+    employee_cycle_issue_type_model_performance,
+    employee_cycle_label_ablation,
+    employee_cycle_severe_miss_examples,
+    employee_cycle_training_universe_ablation,
     evaluate_employee_cycle_scores,
 )
+from payroll_anomaly_ranking.explainability import build_employee_cycle_review_queue
 from payroll_anomaly_ranking.features import build_employee_cycle_features
 from payroll_anomaly_ranking.models import score_employee_pay_cycles
 
 # %%
 setup_notebook_html()
+setup_polars_display()
 fast_mode = notebook_fast_mode()
 
 # %%
 sim_config = PayrollConfig(
-    facility_count=25,
+    facility_count=5 if fast_mode else 25,
     employee_count=650,
     pay_periods=16 if fast_mode else 36,
-    employee_cycle_review_budget_percents=(0.01, 0.03, 0.05, 0.10),
+    employee_cycle_review_budget_percents=(
+        (0.01, 0.03) if fast_mode else (0.01, 0.03, 0.05, 0.10)
+    ),
 )
 review_budget_percents = sim_config.employee_cycle_review_budget_percents or tuple(
     float(budget) for budget in sim_config.review_budgets
@@ -384,7 +395,7 @@ residual_family_mix = build_residual_family_mix(residual_payroll)
 
 
 # %% [markdown]
-# snapshot
+# ### snapshot
 
 # %%
 pl.DataFrame(
@@ -424,7 +435,7 @@ pl.DataFrame(
 )
 
 # %% [markdown]
-# Section 1 framing
+# ### Section 1 framing
 #
 # | Workflow Assumption | Active Contract |
 # | --- | --- |
@@ -436,7 +447,7 @@ pl.DataFrame(
 # | **Out Of Scope** | PBJ, HPRD, and compliance staffing metrics |
 
 # %% [markdown]
-# schema example:
+# ### schema example:
 
 # %%
 data.payroll.select(
@@ -660,6 +671,25 @@ budget_diagnostics = build_review_budget_diagnostics(
 model_similarity_diagnostics = build_model_similarity_diagnostics(
     scored,
     review_budget_percents,
+)
+feature_ablation = employee_cycle_feature_ablation(data.payroll, sim_config)
+training_universe_ablation = employee_cycle_training_universe_ablation(
+    data.payroll,
+    sim_config,
+)
+label_ablation = employee_cycle_label_ablation(scored, sim_config)
+issue_type_model_performance = employee_cycle_issue_type_model_performance(
+    scored,
+    0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
+)
+severe_miss_examples = employee_cycle_severe_miss_examples(
+    scored,
+    0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
+    limit_per_model=3,
+)
+review_queue_examples = build_employee_cycle_review_queue(
+    scored,
+    top_k=0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
 )
 
 # %% [markdown]
@@ -982,6 +1012,111 @@ pl.DataFrame(
 # recovery.
 
 # %% [markdown]
+# The primary residual queue results are now shown in five aligned views so the
+# model choice does not depend on one metric alone. The practical question is
+# whether a formulation changes what gets reviewed when payroll analysts inspect
+# only 1% to 10% of each facility-cycle residual queue.
+
+# %% [markdown]
+# ### residual NDCG by review-budget percentage
+
+# %%
+(
+    ggplot(
+        model_budget_metrics,
+        aes(
+            x="review_budget_label",
+            y=MetricCol.RESIDUAL_NDCG_AT_K,
+            color="model",
+        ),
+    )
+    + geom_line()
+    + geom_point()
+    + theme_minimal()
+    + rotated_x_labels()
+    + labs(x="Residual queue reviewed", y="Residual NDCG", color="Model")
+    + ggtitle("Residual NDCG by Review-Budget Percentage")
+)
+
+# %% [markdown]
+# ### reviewer yield by review-budget percentage
+
+# %%
+(
+    ggplot(
+        model_budget_metrics,
+        aes(
+            x="review_budget_label",
+            y=MetricCol.REVIEWER_YIELD_AT_K,
+            color="model",
+        ),
+    )
+    + geom_line()
+    + geom_point()
+    + theme_minimal()
+    + rotated_x_labels()
+    + labs(x="Residual queue reviewed", y="Reviewer yield", color="Model")
+    + ggtitle("Reviewer Yield by Review-Budget Percentage")
+)
+
+# %% [markdown]
+# ### incremental utility by review-budget percentage
+
+# %%
+(
+    ggplot(
+        model_budget_metrics,
+        aes(
+            x="review_budget_label",
+            y=MetricCol.INCREMENTAL_UTILITY_AT_K,
+            color="model",
+        ),
+    )
+    + geom_line()
+    + geom_point()
+    + theme_minimal()
+    + rotated_x_labels()
+    + labs(x="Residual queue reviewed", y="Incremental utility", color="Model")
+    + ggtitle("Residual Utility by Review-Budget Percentage")
+)
+
+# %% [markdown]
+# ### compact main-results table
+
+# %%
+evaluation.model_comparison.select(
+    "model",
+    MetricCol.RESIDUAL_NDCG_AT_K,
+    MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+    MetricCol.DOLLARS_CAPTURED_AT_K,
+    MetricCol.REVIEWER_YIELD_AT_K,
+    MetricCol.INCREMENTAL_UTILITY_AT_K,
+    MetricCol.PR_AUC,
+).sort(
+    [MetricCol.RESIDUAL_NDCG_AT_K, MetricCol.INCREMENTAL_UTILITY_AT_K],
+    descending=[True, True],
+)
+
+# %% [markdown]
+# ### temporal stability context
+
+# %%
+backtest.select(
+    PayrollCol.PAY_PERIOD_INDEX,
+    MetricCol.RESIDUAL_NDCG_AT_K,
+    MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+    MetricCol.DOLLARS_CAPTURED_AT_K,
+    MetricCol.REVIEWER_YIELD_AT_K,
+    MetricCol.INCREMENTAL_UTILITY_AT_K,
+).sort(PayrollCol.PAY_PERIOD_INDEX)
+
+# %% [markdown]
+# The main-results readout should be interpreted together with the similarity
+# diagnostics above. If the curves are close, that can reflect correlated model
+# scores or a residual queue that is already partly saturated at low budgets,
+# not necessarily that formulation choice is meaningless.
+
+# %% [markdown]
 # ## 9. Ablation Studies
 #
 # Ablations in this notebook are residual-specific.
@@ -1026,6 +1161,94 @@ pl.DataFrame(
 # Does the residual model generalize to future cycles and unseen facilities?
 
 # %% [markdown]
+# ### 9.1 feature-family ablation
+
+# %%
+feature_ablation.with_columns(
+    pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
+    pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
+    pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
+    pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
+    pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
+)
+
+# %% [markdown]
+# ### 9.2 label-oriented winner summary
+
+# %%
+label_ablation.with_columns(
+    pl.col("selection_value").round(4),
+)
+
+# %% [markdown]
+# ### 9.3 training-universe ablation
+
+# %%
+training_universe_ablation.with_columns(
+    pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
+    pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
+    pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
+    pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
+    pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
+)
+
+# %% [markdown]
+# ### 9.4 validation split ablation via temporal backtest
+
+# %%
+pl.DataFrame(
+    {
+        "diagnostic": [
+            "evaluated pay periods",
+            "min residual ndcg",
+            "max residual ndcg",
+            "min severe recall",
+            "max severe recall",
+        ],
+        "value": [
+            float(backtest.height),
+            round(
+                float(
+                    backtest.select(pl.min(MetricCol.RESIDUAL_NDCG_AT_K)).item() or 0.0,
+                ),
+                4,
+            ),
+            round(
+                float(
+                    backtest.select(pl.max(MetricCol.RESIDUAL_NDCG_AT_K)).item() or 0.0,
+                ),
+                4,
+            ),
+            round(
+                float(
+                    backtest.select(
+                        pl.min(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
+                    ).item()
+                    or 0.0,
+                ),
+                4,
+            ),
+            round(
+                float(
+                    backtest.select(
+                        pl.max(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
+                    ).item()
+                    or 0.0,
+                ),
+                4,
+            ),
+        ],
+    },
+)
+
+# %% [markdown]
+# The ablation pattern answers a different question than the main comparison.
+# It shows what each additional layer buys after hard rules have already removed
+# the obvious cases. In this residual setting, feature breadth and graded queue
+# targets matter more than raw issue probability alone when the review budget is
+# tight.
+
+# %% [markdown]
 # ## 10. Diagnostics, Explanations, and Final Recommendation
 #
 # This section combines diagnostic plots, reviewer-facing explanation examples,
@@ -1065,6 +1288,97 @@ pl.DataFrame(
 # | Best calibrated residual risk | Classifier / EV |
 # | Best new-facility robustness | holdout winner |
 # | Best production default | LTR or EV, depending on objective |
+
+# %% [markdown]
+# ### issue-type performance by model
+
+# %%
+issue_type_model_performance.with_columns(
+    pl.col(MetricCol.RECALL_AT_K).round(4),
+    pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
+    pl.col(MetricCol.DOLLAR_CAPTURE_RATE).round(4),
+)
+
+# %% [markdown]
+# ### top-budget overlap diagnostics
+
+# %%
+model_similarity_diagnostics
+
+# %% [markdown]
+# ### severe residual miss examples
+
+# %%
+severe_miss_examples
+
+# %% [markdown]
+# ### reviewer-facing queue examples
+
+# %%
+review_queue_examples.select(
+    ReviewCol.RANK,
+    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+    PayrollCol.EMPLOYEE_ID,
+    PayrollCol.FACILITY_ID,
+    PayrollCol.PAY_PERIOD_INDEX,
+    ReviewCol.APPROVAL_RISK_CATEGORY,
+    ReviewCol.RECOMMENDED_ACTION,
+    ReviewCol.SOURCE_TO_CHECK,
+    ReviewCol.PRIMARY_REASON,
+    ReviewCol.SECONDARY_REASON,
+    ScoreCol.FINAL_ANOMALY_SCORE,
+    ScoreCol.CLASSIFICATION_SCORE,
+    ScoreCol.EXPECTED_VALUE_SCORE,
+    ScoreCol.RANKING_SCORE,
+    ReviewCol.EXPLANATION,
+).head(10)
+
+# %% [markdown]
+# ### final recommendation
+
+# %%
+pl.DataFrame(
+    {
+        "objective": [
+            "best residual severity ordering",
+            "best residual dollar recovery",
+            "best calibrated residual risk",
+            "best production default",
+        ],
+        "recommended_model": [
+            evaluation.model_comparison.top_k(
+                1,
+                by=MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+            )["model"][0],
+            evaluation.model_comparison.top_k(
+                1,
+                by=MetricCol.DOLLARS_CAPTURED_AT_K,
+            )["model"][0],
+            evaluation.model_comparison.top_k(
+                1,
+                by=MetricCol.PR_AUC,
+            )["model"][0],
+            evaluation.model_comparison.top_k(
+                1,
+                by=[MetricCol.RESIDUAL_NDCG_AT_K, MetricCol.INCREMENTAL_UTILITY_AT_K],
+            )["model"][0],
+        ],
+        "why": [
+            "Highest severe residual recall at the active review budget.",
+            "Best recovery of residual dollar impact within the review budget.",
+            "Strongest residual issue-probability ranking among comparable models.",
+            "Best balance of queue quality and residual utility in this run.",
+        ],
+    },
+)
+
+# %% [markdown]
+# The final recommendation should remain objective-specific. If the payroll team
+# mainly wants to catch the most severe rule-missed cases near the top of the
+# queue, the graded ranking winner is the best default. If the team instead
+# optimizes for financial recovery, the expected-value path remains a credible
+# alternative and should stay in the comparison set rather than being discarded
+# as a weaker baseline.
 
 # %% [markdown]
 # ## 11. Technical Appendix

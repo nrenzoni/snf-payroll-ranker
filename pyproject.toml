@@ -66,4 +66,5 @@ project-includes = [
 ]
 project-excludes = [
     "**/.ipynb_checkpoints/**",
+    "jupyter_nbconvert_config.py",
 ]
