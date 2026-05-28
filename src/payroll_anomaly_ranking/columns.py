@@ -80,6 +80,7 @@ class PayrollCol(StrEnum):
     RESIDUAL_RECORD = "residual_record"
     Y_ISSUE = "y_issue"
     Y_DOLLAR = "y_dollar"
+    SEVERE_ISSUE = "severe_issue"
     RULE_MISSED_SEVERE_ISSUE = "rule_missed_severe_issue"
     OOD_PAY_CODE_CONTEXT = "ood_pay_code_context"
     SHIFT_COUNT = "shift_count"

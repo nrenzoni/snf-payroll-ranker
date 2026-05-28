@@ -406,6 +406,7 @@ def test_employee_cycle_label_engineering_produces_bounded_relevance_and_utility
     assert {
         PayrollCol.Y_ISSUE,
         PayrollCol.Y_DOLLAR,
+        PayrollCol.SEVERE_ISSUE,
         PayrollCol.RULE_MISSED_SEVERE_ISSUE,
     } <= set(payroll.columns)
     assert (
@@ -425,6 +426,21 @@ def test_employee_cycle_label_engineering_produces_bounded_relevance_and_utility
         .select(pl.col(PayrollCol.Y_DOLLAR).max())
         .item()
         == 0.0
+    )
+    assert (
+        payroll.select(
+            (
+                pl.col(PayrollCol.RULE_MISSED_SEVERE_ISSUE)
+                <= pl.col(PayrollCol.SEVERE_ISSUE)
+            ).all(),
+        ).item()
+        == 1
+    )
+    assert (
+        payroll.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 0)
+        .select(pl.col(PayrollCol.RULE_MISSED_SEVERE_ISSUE).max())
+        .item()
+        == 0
     )
 
 
@@ -455,6 +471,15 @@ def test_employee_cycle_residual_gate_artifacts_exist() -> None:
     } <= set(diagnostics)
     assert diagnostics["facility_residual_issue_rate"].height > 0
     assert PayrollCol.Y_DOLLAR in diagnostics["residual_dollar_distribution"].columns
+    all_stage = funnel.filter(pl.col("stage") == "All payroll records").row(
+        0,
+        named=True,
+    )
+    residual_stage = funnel.filter(pl.col("stage") == "Residual ML universe").row(
+        0,
+        named=True,
+    )
+    assert residual_stage["severe_issues"] <= all_stage["severe_issues"]
 
 
 def test_employee_cycle_residual_labels_and_families_are_heterogeneous() -> None:
@@ -1399,6 +1424,7 @@ def test_employee_cycle_scoring_excludes_evaluation_labels_from_features() -> No
     assert PayrollCol.ANOMALY_DOLLARS not in results.feature_columns
     assert PayrollCol.Y_ISSUE not in results.feature_columns
     assert PayrollCol.Y_DOLLAR not in results.feature_columns
+    assert PayrollCol.SEVERE_ISSUE not in results.feature_columns
     assert PayrollCol.RULE_MISSED_SEVERE_ISSUE not in results.feature_columns
     assert PayrollCol.RELEVANCE_GRADE not in results.feature_columns
     assert PayrollCol.NET_UTILITY not in results.feature_columns

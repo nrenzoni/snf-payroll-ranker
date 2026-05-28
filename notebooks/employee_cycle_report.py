@@ -512,9 +512,13 @@ data.payroll.select(
 #
 # `residual_record = not critical_hard_rule_flagged`
 #
+# Hard rules remove some severe issues upstream, but they do not clear the
+# queue. In this run, the gate removes some severe cases before ML begins while
+# leaving a much larger severe residual tail for stage-2 ranking.
+#
 # The ML task is to rank residual records within each facility x payroll cycle.
 #
-# **Planned funnel summary**
+# **Observed funnel summary**
 #
 # | Stage | Records | % of total | True issues | Severe issues | Dollar impact |
 # | --- | ---: | ---: | ---: | ---: | ---: |
@@ -584,6 +588,8 @@ residual_diagnostics["residual_dollar_distribution"].head(10)
 #
 # - `y_issue`: latent residual issue truth used by classifier models
 # - `y_dollar`: residual dollar impact used by regression-style models
+# - `severe_issue`: overall severe anomaly label used for funnel and upstream
+#   gate reporting across all employee-pay-cycles
 # - `relevance_grade`: graded residual relevance used by learning-to-rank
 # - `rule_missed_severe_issue`: severe residual issue slice used in evaluation
 # - `net_utility`: evaluation-only business value after review cost
@@ -600,13 +606,17 @@ residual_diagnostics["residual_dollar_distribution"].head(10)
 # **Important note**
 #
 # `y_issue` means latent residual issue truth. It is not mixed with observed
-# historical review outcomes.
+# historical review outcomes. `severe_issue` tracks the full severe anomaly
+# population for funnel accounting, while `rule_missed_severe_issue` is the
+# narrower severe residual slice that survives the hard-rule gate and remains
+# relevant for stage-2 model evaluation.
 
 # %% [markdown]
 # | Label | Column | Used by | Meaning |
 # | --- | --- | --- | --- |
 # | **residual issue** | `y_issue` | classifier, cost-sensitive classifier | latent residual issue truth after the hard-rule gate |
 # | **residual dollar impact** | `y_dollar` | regressor, expected-value | financial impact if the residual issue is ignored |
+# | **overall severe issue** | `severe_issue` | funnel reporting, gate diagnostics | severe anomaly regardless of whether a hard rule caught it |
 # | **dominant category** | `anomaly_category` | diagnostics | highest-impact anomaly category still attached to the employee-pay-cycle |
 # | **relevance grade** | `relevance_grade` | learning-to-rank | 0 to 3 residual review priority |
 # | **rule-missed severe issue** | `rule_missed_severe_issue` | evaluation | key severe-issue slice that survived the hard-rule gate |

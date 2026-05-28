@@ -909,6 +909,7 @@ def employee_pay_cycle_records(payroll: pl.DataFrame) -> pl.DataFrame:
             .alias(PayrollCol.Y_DOLLAR),
         )
         .with_columns(
+            _employee_cycle_severe_issue_expr().alias(PayrollCol.SEVERE_ISSUE),
             _employee_cycle_rule_missed_severe_issue_expr().alias(
                 PayrollCol.RULE_MISSED_SEVERE_ISSUE,
             ),
@@ -935,11 +936,34 @@ def employee_pay_cycle_labels(employee_cycles: pl.DataFrame) -> pl.DataFrame:
         PayrollCol.RESIDUAL_RECORD,
         PayrollCol.Y_ISSUE,
         PayrollCol.Y_DOLLAR,
+        PayrollCol.SEVERE_ISSUE,
         PayrollCol.RULE_MISSED_SEVERE_ISSUE,
         PayrollCol.RELEVANCE_GRADE,
         PayrollCol.NET_UTILITY,
         PayrollCol.SCENARIO_FAMILY,
     )
+
+
+def _employee_cycle_base_severe_expr() -> pl.Expr:
+    return (pl.col(PayrollCol.IS_ANOMALY) == 1) & (
+        (pl.col(PayrollCol.ANOMALY_DOLLARS) >= 260.0)
+        | (
+            pl.col(PayrollCol.ANOMALY_CATEGORY).is_in(SEVERE_RESIDUAL_CATEGORIES)
+            & (pl.col(PayrollCol.ANOMALY_DOLLARS) >= 150.0)
+        )
+        | (
+            (
+                pl.col(PayrollCol.ANOMALY_CATEGORY)
+                == str(SNFAnomalyCategory.CROSS_FACILITY_ALLOCATION)
+            )
+            & (pl.col(PayrollCol.ANOMALOUS_SHIFT_COUNT) >= 2)
+            & (pl.col(PayrollCol.ANOMALY_DOLLARS) >= 90.0)
+        )
+    )
+
+
+def _employee_cycle_severe_issue_expr() -> pl.Expr:
+    return _employee_cycle_base_severe_expr().cast(pl.Int8)
 
 
 def _employee_cycle_relevance_grade_expr() -> pl.Expr:
@@ -965,20 +989,8 @@ def _employee_cycle_relevance_grade_expr() -> pl.Expr:
 
 
 def _employee_cycle_rule_missed_severe_issue_expr() -> pl.Expr:
-    severe_residual_signal = (pl.col(PayrollCol.Y_ISSUE) == 1) & (
-        (pl.col(PayrollCol.ANOMALY_DOLLARS) >= 260.0)
-        | (
-            pl.col(PayrollCol.ANOMALY_CATEGORY).is_in(SEVERE_RESIDUAL_CATEGORIES)
-            & (pl.col(PayrollCol.ANOMALY_DOLLARS) >= 150.0)
-        )
-        | (
-            (
-                pl.col(PayrollCol.ANOMALY_CATEGORY)
-                == str(SNFAnomalyCategory.CROSS_FACILITY_ALLOCATION)
-            )
-            & (pl.col(PayrollCol.ANOMALOUS_SHIFT_COUNT) >= 2)
-            & (pl.col(PayrollCol.ANOMALY_DOLLARS) >= 90.0)
-        )
+    severe_residual_signal = _employee_cycle_base_severe_expr() & (
+        pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG).fill_null(0) == 0
     )
     return severe_residual_signal.cast(pl.Int8)
 
@@ -1005,10 +1017,7 @@ def employee_cycle_hard_rule_funnel(employee_cycles: pl.DataFrame) -> pl.DataFra
                 employee_cycles.select(pl.sum(PayrollCol.IS_ANOMALY)).item() or 0,
             ),
             "severe_issues": int(
-                employee_cycles.select(
-                    pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE),
-                ).item()
-                or 0,
+                employee_cycles.select(pl.sum(PayrollCol.SEVERE_ISSUE)).item() or 0,
             ),
             "dollar_impact": float(
                 employee_cycles.select(pl.sum(PayrollCol.ANOMALY_DOLLARS)).item()
@@ -1039,7 +1048,13 @@ def employee_cycle_hard_rule_funnel(employee_cycles: pl.DataFrame) -> pl.DataFra
                 "pct_of_total": frame.height / max(employee_cycles.height, 1),
                 "true_issues": int(frame.select(pl.sum(issue_col)).item() or 0),
                 "severe_issues": int(
-                    frame.select(pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE)).item()
+                    frame.select(
+                        pl.sum(
+                            PayrollCol.RULE_MISSED_SEVERE_ISSUE
+                            if stage_name == "Residual ML universe"
+                            else PayrollCol.SEVERE_ISSUE,
+                        ),
+                    ).item()
                     or 0,
                 ),
                 "dollar_impact": float(frame.select(pl.sum(dollar_col)).item() or 0.0),
