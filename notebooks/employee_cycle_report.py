@@ -167,7 +167,7 @@ fast_mode = notebook_fast_mode()
 # %%
 sim_config = PayrollConfig(
     facility_count=5 if fast_mode else 25,
-    employee_count=650,
+    employee_count=1500,
     pay_periods=16 if fast_mode else 36,
     employee_cycle_review_budget_percents=(
         (0.01, 0.03) if fast_mode else (0.01, 0.03, 0.05, 0.10)
