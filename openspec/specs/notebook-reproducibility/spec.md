@@ -36,19 +36,19 @@ Notebook-owned diagnostic workflows SHALL provide rich diagnostic coverage while
 - **WHEN** notebook-owned internal diagnostics are executed with default settings
 - **THEN** they generate rich scenario, evaluation, queue simulation, and plot-input diagnostics without requiring excessive runtime or memory
 
-### Requirement: Dense internal notebook defaults with fast mode
-The active employee-pay-cycle notebook and notebook-owned diagnostics SHALL support dense defaults and an explicit fast mode for quicker refreshes.
+### Requirement: Dense internal notebook defaults with validation mode
+The active employee-pay-cycle notebook and notebook-owned diagnostics SHALL support dense defaults and an explicit validation mode for execution checks.
 
-#### Scenario: Fast mode limits diagnostic workload
-- **WHEN** notebook fast mode is enabled
+#### Scenario: Validation mode limits execution-check workload
+- **WHEN** notebook validation mode is enabled
 - **THEN** scenario counts, Monte Carlo repetitions, plot density, expensive diagnostics, and non-required pipeline artifact generation are reduced while preserving representative outputs for execution-error checks
 
-#### Scenario: Fast mode avoids paired output refresh
-- **WHEN** a fast notebook error check is run with `NOTEBOOK_FAST=1`
+#### Scenario: Validation mode avoids paired output refresh
+- **WHEN** a notebook validation check is run with `NOTEBOOK_VALIDATE=1`
 - **THEN** Jupytext writes the executed notebook to a temporary repo-local `tmp/` output rather than creating or overwriting the paired `.ipynb` artifact
 
 #### Scenario: Full mode uses complete artifact generation
-- **WHEN** the active notebook is executed without fast mode for full evaluation or paired output refresh
+- **WHEN** the active notebook is executed without validation mode for full evaluation or paired output refresh
 - **THEN** the notebook uses dense defaults and full pipeline artifact generation unless the notebook explicitly documents a narrower requirement
 
 ### Requirement: Paired notebook outputs are refreshable
@@ -58,37 +58,37 @@ The active employee-pay-cycle notebook SHALL produce paired outputs that can be 
 - **WHEN** paired notebook-output refresh commands are run with a fixed seed
 - **THEN** paired tables, plot inputs, scenario summaries, and generated artifacts are refreshed consistently and documented as reproducible outputs
 
-### Requirement: Changed notebooks use fast validation
-Changed Jupytext notebook `.py` sources SHALL be validated with the fast notebook execution command before the change is considered complete, unless the user explicitly requests full notebook execution instead.
+### Requirement: Changed notebooks use validation mode
+Changed Jupytext notebook `.py` sources SHALL be validated with the notebook validation execution command before the change is considered complete, unless the user explicitly requests full notebook execution instead.
 
-#### Scenario: Fast validation runs after notebook source change
+#### Scenario: Validation mode runs after notebook source change
 - **WHEN** a notebook `.py` source file is changed
-- **THEN** the changed notebook is executed with `NOTEBOOK_FAST=1`, `uv run jupytext --to ipynb --execute --run-path notebooks`, and an output path under the repo-local `tmp/` directory
+- **THEN** the changed notebook is executed with `NOTEBOOK_VALIDATE=1`, `uv run jupytext --to ipynb --execute --run-path notebooks`, and an output path under the repo-local `tmp/` directory
 
-#### Scenario: Fast validation does not refresh paired notebook artifact
-- **WHEN** fast validation is run after a notebook source change
+#### Scenario: Validation mode does not refresh paired notebook artifact
+- **WHEN** notebook validation is run after a notebook source change
 - **THEN** the paired repository `.ipynb` artifact is not created or overwritten by the validation command
 
 ### Requirement: Full notebook execution is explicit
-Full non-fast notebook execution SHALL be reserved for requested full rerenders, paired `.ipynb` refreshes, analyst-visible output synchronization, or full-workload validation.
+Full non-validation notebook execution SHALL be reserved for requested full rerenders, paired `.ipynb` refreshes, analyst-visible output synchronization, or full-workload validation.
 
 #### Scenario: User requests paired output refresh
 - **WHEN** the user requests a complete notebook rerender, paired `.ipynb` refresh, analyst-visible output sync, or full-workload validation
-- **THEN** the notebook is executed without `NOTEBOOK_FAST=1` using the documented full Jupytext command that updates the paired notebook outputs
+- **THEN** the notebook is executed without `NOTEBOOK_VALIDATE=1` using the documented full Jupytext command that updates the paired notebook outputs
 
 #### Scenario: Routine notebook source change does not imply full rerender
 - **WHEN** a notebook `.py` source changes and the user has not requested a full rerender or paired output refresh
-- **THEN** routine validation uses the fast repo-local `tmp/` execution path instead of updating paired `.ipynb` outputs
+- **THEN** routine validation uses the repo-local `tmp/` validation execution path instead of updating paired `.ipynb` outputs
 
-### Requirement: Material notebook workloads support fast mode
-Notebook sources that perform material pipeline workloads SHALL provide a fast execution path when needed to keep routine notebook validation practical and representative.
+### Requirement: Material notebook workloads support validation mode
+Notebook sources that perform material pipeline workloads SHALL provide a validation execution path when needed to keep routine notebook validation practical and representative.
 
 #### Scenario: Notebook performs repeated or expensive pipeline execution
 - **WHEN** a notebook performs repeated pipeline runs, dense diagnostics, simulations, or other expensive execution during normal cell evaluation
-- **THEN** `NOTEBOOK_FAST=1` reduces non-required workload while preserving representative outputs for execution-error checks
+- **THEN** `NOTEBOOK_VALIDATE=1` reduces non-required workload while preserving representative outputs for execution-error checks
 
-#### Scenario: Fast mode preserves displayed output requirements
-- **WHEN** a notebook uses fast mode
+#### Scenario: Validation mode preserves displayed output requirements
+- **WHEN** a notebook uses validation mode
 - **THEN** the reduced workload still produces the result objects and tables required by the executed notebook cells
 
 ### Requirement: Expanded notebook reporting documentation
@@ -99,9 +99,9 @@ The documented notebook reporting contract SHALL identify the single active empl
 - **THEN** it identifies the single active employee-pay-cycle notebook
 - **AND** it briefly explains that the notebook covers business framing, formulation comparison, queue results, diagnostics, stress testing, and the technical appendix in one deliverable
 
-### Requirement: Active notebook supports fast execution
-The primary employee-pay-cycle notebook SHALL support fast validation when it performs repeated pipeline runs, scenario comparisons, or other material workloads.
+### Requirement: Active notebook supports validation execution
+The primary employee-pay-cycle notebook SHALL support validation execution when it performs repeated pipeline runs, scenario comparisons, or other material workloads.
 
-#### Scenario: Fast validation executes active notebook
-- **WHEN** `NOTEBOOK_FAST=1` fast validation is run for the primary employee-pay-cycle notebook
+#### Scenario: Validation mode executes active notebook
+- **WHEN** `NOTEBOOK_VALIDATE=1` notebook validation is run for the primary employee-pay-cycle notebook
 - **THEN** the notebook reduces expensive workloads while still producing representative section outputs needed to catch execution errors

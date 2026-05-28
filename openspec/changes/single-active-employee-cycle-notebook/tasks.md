@@ -15,7 +15,7 @@
 - [x] 2.2a Replace section 5 label-engineering scaffolding with implemented formulas, tables, and examples for residual `y_issue`, residual `y_dollar`, `anomaly_category`, `relevance_grade`, `rule_missed_severe_issue`, `observed_correction`, and `net_utility`.
 - [x] 2.2b Remove compliance, PBJ, and HPRD framing from notebook text, targets, features, and evaluation metrics.
 - [ ] 2.3 Implement ablation, diagnostics, explanations, and appendix sections using active employee-pay-cycle diagnostics or notebook-owned assembly built from active outputs.
-- [x] 2.4 Ensure the notebook supports `NOTEBOOK_FAST=1` and still produces representative outputs for all required sections during fast validation.
+- [x] 2.4 Ensure the notebook supports `NOTEBOOK_VALIDATE=1` and still produces representative outputs for all required sections during notebook validation.
 
 ## 3. Spec And Documentation Updates
 
@@ -27,6 +27,6 @@
 
 - [x] 4.1 Add or update tests that cover the new active notebook contract, residual-gating artifact integrity, and any new diagnostic helper behavior.
 - [x] 4.1a Add or update tests that cover `relevance_grade`, `net_utility`, utility-aware metrics, and employee-cycle leakage checks.
-- [x] 4.2 Run fast notebook validation for the new Jupytext notebook using `NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/...`.
+- [x] 4.2 Run notebook validation for the new Jupytext notebook using `NOTEBOOK_VALIDATE=1 uv run jupytext --to ipynb --execute --run-path notebooks --output /tmp/...`.
 - [x] 4.3 Run `uv run pytest tests/smoke` and targeted regression checks for scoring, evaluation, and notebook behavior affected by the change.
 - [x] 4.4 Run `uv run prek run --all-files` and resolve all reported issues.

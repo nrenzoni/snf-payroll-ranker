@@ -23,7 +23,7 @@
 # %%
 import polars as pl
 from common.display import setup_notebook_html
-from common.execution import notebook_fast_mode
+from common.execution import notebook_validation_mode
 from common.plots import (
     aes,
     coord_flip,
@@ -61,32 +61,36 @@ setup_notebook_html()
 
 # %%
 config = PayrollConfig(employee_count=220, pay_periods=14, review_budgets=(10, 25))
-FAST_MODE_CONFIG = PayrollConfig(
+VALIDATION_MODE_CONFIG = PayrollConfig(
     employee_count=90,
     pay_periods=10,
     review_budgets=(10, 25),
 )
 QUEUE_SCENARIOS = ("baseline", "queue-stress", "calendar-drift", "exposure-heavy")
 QUEUE_THRESHOLD_GRID = (0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70)
-FAST_MODE_THRESHOLD_GRID = (0.45, 0.60)
+VALIDATION_MODE_THRESHOLD_GRID = (0.45, 0.60)
 QUEUE_ITERATIONS = 300
 OPERATING_THRESHOLD = 0.60
 CAPACITY_SHOCK_PERIODS = (8, 9, 10, 11)
 CAPACITY_SHOCK_START_GUIDE = min(CAPACITY_SHOCK_PERIODS) - 0.5
 CAPACITY_SHOCK_END_GUIDE = max(CAPACITY_SHOCK_PERIODS) + 0.5
-FAST_MODE_QUEUE_SCENARIOS = ("baseline", "queue-stress")
-FAST_MODE_ITERATIONS = 20
-FAST_MODE_NOTE = "Dense defaults: 4 queue scenarios, 220 employees, 14 pay periods, threshold grid (0.30 through 0.70 by 0.05), iterations=300. Fast mode: reduce to FAST_MODE_CONFIG, FAST_MODE_QUEUE_SCENARIOS, FAST_MODE_THRESHOLD_GRID, or FAST_MODE_ITERATIONS."
-NOTEBOOK_FAST = notebook_fast_mode()
-active_config = FAST_MODE_CONFIG if NOTEBOOK_FAST else config
-active_queue_scenarios = FAST_MODE_QUEUE_SCENARIOS if NOTEBOOK_FAST else QUEUE_SCENARIOS
-active_queue_iterations = FAST_MODE_ITERATIONS if NOTEBOOK_FAST else QUEUE_ITERATIONS
+VALIDATION_MODE_QUEUE_SCENARIOS = ("baseline", "queue-stress")
+VALIDATION_MODE_ITERATIONS = 20
+VALIDATION_MODE_NOTE = "Dense defaults: 4 queue scenarios, 220 employees, 14 pay periods, threshold grid (0.30 through 0.70 by 0.05), iterations=300. Validation mode reduces workload to VALIDATION_MODE_CONFIG, VALIDATION_MODE_QUEUE_SCENARIOS, VALIDATION_MODE_THRESHOLD_GRID, or VALIDATION_MODE_ITERATIONS."
+NOTEBOOK_VALIDATE = notebook_validation_mode()
+active_config = VALIDATION_MODE_CONFIG if NOTEBOOK_VALIDATE else config
+active_queue_scenarios = (
+    VALIDATION_MODE_QUEUE_SCENARIOS if NOTEBOOK_VALIDATE else QUEUE_SCENARIOS
+)
+active_queue_iterations = (
+    VALIDATION_MODE_ITERATIONS if NOTEBOOK_VALIDATE else QUEUE_ITERATIONS
+)
 active_queue_threshold_grid = (
-    FAST_MODE_THRESHOLD_GRID if NOTEBOOK_FAST else QUEUE_THRESHOLD_GRID
+    VALIDATION_MODE_THRESHOLD_GRID if NOTEBOOK_VALIDATE else QUEUE_THRESHOLD_GRID
 )
 active_pipeline_include = (
     PipelineIncludeConfig.scored_only()
-    if NOTEBOOK_FAST
+    if NOTEBOOK_VALIDATE
     else PipelineIncludeConfig.all()
 )
 queue_spec = QueueSimulationSpec(

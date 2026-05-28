@@ -100,7 +100,7 @@ Alternatives considered:
 
 - [Deep-diagnostic sections require more than notebook reshuffling] -> Mitigation: treat employee-cycle diagnostic and stress helpers as first-class implementation tasks before notebook assembly.
 - [Spec replacement touches multiple active capabilities and can drift if edited partially] -> Mitigation: change all listed capabilities in one OpenSpec change and explicitly remove sequence-era wording from docs at the same time.
-- [Single notebook may become heavy to execute] -> Mitigation: preserve fast-mode execution, keep dense appendix workloads bounded in fast mode, and confine expensive repeated-world diagnostics to reduced representative settings when `NOTEBOOK_FAST=1`.
+- [Single notebook may become heavy to execute] -> Mitigation: preserve validation-mode execution, keep dense appendix workloads bounded in validation mode, and confine expensive repeated-world diagnostics to reduced representative settings when `NOTEBOOK_VALIDATE=1`.
 - [Legacy notebook references may continue to confuse contributors] -> Mitigation: update README and `notebooks/README.md` to mark the new notebook as the only active contract and mark legacy notebooks as historical reference only.
 - [Appendix asks for artifacts not yet available in active runtime] -> Mitigation: separate runtime-owned evidence from notebook-owned assembly and explicitly implement the missing active diagnostics needed for calibration, stress grids, and facility diagnostics.
 - [Residual-only framing can drift back toward broad SNF staffing narratives] -> Mitigation: explicitly exclude compliance, PBJ, and HPRD metrics from change specs, notebook text, and feature lists.

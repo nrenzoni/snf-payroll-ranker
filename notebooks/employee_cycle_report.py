@@ -126,7 +126,7 @@ import polars as pl
 # %%
 import polars.selectors as pl_selectors
 from common.display import setup_notebook_html, setup_polars_display
-from common.execution import notebook_fast_mode
+from common.execution import notebook_validation_mode
 from common.plots import (
     aes,
     geom_line,
@@ -156,21 +156,20 @@ from payroll_anomaly_ranking.evaluation import (
     evaluate_employee_cycle_scores,
 )
 from payroll_anomaly_ranking.explainability import build_employee_cycle_review_queue
-from payroll_anomaly_ranking.features import build_employee_cycle_features
 from payroll_anomaly_ranking.models import score_employee_pay_cycles
 
 # %%
 setup_notebook_html()
 setup_polars_display()
-fast_mode = notebook_fast_mode()
+validation_mode = notebook_validation_mode()
 
 # %%
 sim_config = PayrollConfig(
-    facility_count=5 if fast_mode else 25,
-    employee_count=1500,
-    pay_periods=16 if fast_mode else 36,
+    facility_count=4 if validation_mode else 25,
+    employee_count=150 if validation_mode else 1500,
+    pay_periods=8 if validation_mode else 36,
     employee_cycle_review_budget_percents=(
-        (0.01, 0.03) if fast_mode else (0.01, 0.03, 0.05, 0.10)
+        (0.01, 0.05) if validation_mode else (0.01, 0.03, 0.05, 0.10)
     ),
 )
 review_budget_percents = sim_config.employee_cycle_review_budget_percents or tuple(
@@ -681,12 +680,10 @@ residual_family_mix
 # | Temporal | holiday cycle, vendor drift, staffing shock | seasonality and drift context |
 
 # %%
-employee_cycle_features = build_employee_cycle_features(data.payroll)
 scoring_results = score_employee_pay_cycles(data.payroll, sim_config)
 scored = scoring_results.scored
 residual_scored = scored.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
 evaluation = evaluate_employee_cycle_scores(scored, sim_config)
-backtest = employee_cycle_backtest_by_period(scored, sim_config)
 model_budget_metrics = build_model_budget_metrics(scored, review_budget_percents)
 budget_diagnostics = build_review_budget_diagnostics(
     residual_diagnostics["residual_records_per_facility_cycle"],
@@ -696,25 +693,33 @@ model_similarity_diagnostics = build_model_similarity_diagnostics(
     scored,
     review_budget_percents,
 )
-feature_ablation = employee_cycle_feature_ablation(data.payroll, sim_config)
-training_universe_ablation = employee_cycle_training_universe_ablation(
-    data.payroll,
-    sim_config,
-)
-label_ablation = employee_cycle_label_ablation(scored, sim_config)
-issue_type_model_performance = employee_cycle_issue_type_model_performance(
-    scored,
-    0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
-)
-severe_miss_examples = employee_cycle_severe_miss_examples(
-    scored,
-    0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
-    limit_per_model=3,
-)
 review_queue_examples = build_employee_cycle_review_queue(
     scored,
     top_k=0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
 )
+backtest: pl.DataFrame | None = None
+feature_ablation: pl.DataFrame | None = None
+training_universe_ablation: pl.DataFrame | None = None
+label_ablation: pl.DataFrame | None = None
+issue_type_model_performance: pl.DataFrame | None = None
+severe_miss_examples: pl.DataFrame | None = None
+if not validation_mode:
+    backtest = employee_cycle_backtest_by_period(scored, sim_config)
+    feature_ablation = employee_cycle_feature_ablation(data.payroll, sim_config)
+    training_universe_ablation = employee_cycle_training_universe_ablation(
+        data.payroll,
+        sim_config,
+    )
+    label_ablation = employee_cycle_label_ablation(scored, sim_config)
+    issue_type_model_performance = employee_cycle_issue_type_model_performance(
+        scored,
+        0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
+    )
+    severe_miss_examples = employee_cycle_severe_miss_examples(
+        scored,
+        0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
+        limit_per_model=3,
+    )
 comparison_for_summary = evaluation.model_comparison.with_columns(
     pl.col("model").map_elements(notebook_model_label, return_dtype=pl.String),
 )
@@ -992,14 +997,15 @@ evaluation.model_comparison.select(
 # ### backtest by period
 
 # %%
-backtest.select(
-    PayrollCol.PAY_PERIOD_INDEX,
-    MetricCol.RESIDUAL_NDCG_AT_K,
-    MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-    MetricCol.DOLLARS_CAPTURED_AT_K,
-    MetricCol.REVIEWER_YIELD_AT_K,
-    MetricCol.INCREMENTAL_UTILITY_AT_K,
-).sort(PayrollCol.PAY_PERIOD_INDEX).head(10)
+if backtest is not None:
+    backtest.select(
+        PayrollCol.PAY_PERIOD_INDEX,
+        MetricCol.RESIDUAL_NDCG_AT_K,
+        MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+        MetricCol.DOLLARS_CAPTURED_AT_K,
+        MetricCol.REVIEWER_YIELD_AT_K,
+        MetricCol.INCREMENTAL_UTILITY_AT_K,
+    ).sort(PayrollCol.PAY_PERIOD_INDEX).head(10)
 
 # %% [markdown]
 # ### winner summary
@@ -1180,14 +1186,15 @@ comparison_for_summary.select(
 # ### temporal stability context
 
 # %%
-backtest.select(
-    PayrollCol.PAY_PERIOD_INDEX,
-    MetricCol.RESIDUAL_NDCG_AT_K,
-    MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-    MetricCol.DOLLARS_CAPTURED_AT_K,
-    MetricCol.REVIEWER_YIELD_AT_K,
-    MetricCol.INCREMENTAL_UTILITY_AT_K,
-).sort(PayrollCol.PAY_PERIOD_INDEX)
+if backtest is not None:
+    backtest.select(
+        PayrollCol.PAY_PERIOD_INDEX,
+        MetricCol.RESIDUAL_NDCG_AT_K,
+        MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+        MetricCol.DOLLARS_CAPTURED_AT_K,
+        MetricCol.REVIEWER_YIELD_AT_K,
+        MetricCol.INCREMENTAL_UTILITY_AT_K,
+    ).sort(PayrollCol.PAY_PERIOD_INDEX)
 
 # %% [markdown]
 # The main-results readout should be interpreted together with the similarity
@@ -1238,83 +1245,89 @@ backtest.select(
 # ### 9.1 feature-family ablation
 
 # %%
-feature_ablation.with_columns(
-    pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
-    pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
-    pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
-    pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
-    pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
-)
+if feature_ablation is not None:
+    feature_ablation.with_columns(
+        pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
+        pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
+        pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
+        pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
+        pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
+    )
 
 # %% [markdown]
 # ### 9.2 label-oriented winner summary
 
 # %%
-label_ablation.with_columns(
-    pl.col("selection_value").round(4),
-)
+if label_ablation is not None:
+    label_ablation.with_columns(
+        pl.col("selection_value").round(4),
+    )
 
 # %% [markdown]
 # ### 9.3 training-universe ablation
 
 # %%
-training_universe_ablation.with_columns(
-    pl.col("train_hard_rule_share").round(4),
-    pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
-    pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
-    pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
-    pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
-    pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
-)
+if training_universe_ablation is not None:
+    training_universe_ablation.with_columns(
+        pl.col("train_hard_rule_share").round(4),
+        pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
+        pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
+        pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
+        pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
+        pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
+    )
 
 # %% [markdown]
 # ### 9.4 validation split ablation via temporal backtest
 
 # %%
-pl.DataFrame(
-    {
-        "diagnostic": [
-            "evaluated pay periods",
-            "min residual ndcg",
-            "max residual ndcg",
-            "min severe recall",
-            "max severe recall",
-        ],
-        "value": [
-            float(backtest.height),
-            round(
-                float(
-                    backtest.select(pl.min(MetricCol.RESIDUAL_NDCG_AT_K)).item() or 0.0,
+if backtest is not None:
+    pl.DataFrame(
+        {
+            "diagnostic": [
+                "evaluated pay periods",
+                "min residual ndcg",
+                "max residual ndcg",
+                "min severe recall",
+                "max severe recall",
+            ],
+            "value": [
+                float(backtest.height),
+                round(
+                    float(
+                        backtest.select(pl.min(MetricCol.RESIDUAL_NDCG_AT_K)).item()
+                        or 0.0,
+                    ),
+                    4,
                 ),
-                4,
-            ),
-            round(
-                float(
-                    backtest.select(pl.max(MetricCol.RESIDUAL_NDCG_AT_K)).item() or 0.0,
+                round(
+                    float(
+                        backtest.select(pl.max(MetricCol.RESIDUAL_NDCG_AT_K)).item()
+                        or 0.0,
+                    ),
+                    4,
                 ),
-                4,
-            ),
-            round(
-                float(
-                    backtest.select(
-                        pl.min(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
-                    ).item()
-                    or 0.0,
+                round(
+                    float(
+                        backtest.select(
+                            pl.min(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
+                        ).item()
+                        or 0.0,
+                    ),
+                    4,
                 ),
-                4,
-            ),
-            round(
-                float(
-                    backtest.select(
-                        pl.max(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
-                    ).item()
-                    or 0.0,
+                round(
+                    float(
+                        backtest.select(
+                            pl.max(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
+                        ).item()
+                        or 0.0,
+                    ),
+                    4,
                 ),
-                4,
-            ),
-        ],
-    },
-)
+            ],
+        },
+    )
 
 # %% [markdown]
 # The ablation pattern answers a different question than the main comparison.
@@ -1337,11 +1350,12 @@ pl.DataFrame(
 # ### issue-type performance by model
 
 # %%
-issue_type_model_performance.with_columns(
-    pl.col(MetricCol.RECALL_AT_K).round(4),
-    pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
-    pl.col(MetricCol.DOLLAR_CAPTURE_RATE).round(4),
-)
+if issue_type_model_performance is not None:
+    issue_type_model_performance.with_columns(
+        pl.col(MetricCol.RECALL_AT_K).round(4),
+        pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
+        pl.col(MetricCol.DOLLAR_CAPTURE_RATE).round(4),
+    )
 
 # %% [markdown]
 # ### top-budget overlap diagnostics
@@ -1360,7 +1374,8 @@ model_similarity_diagnostics
 # ### severe residual miss examples
 
 # %%
-severe_miss_examples
+if severe_miss_examples is not None:
+    severe_miss_examples
 
 # %% [markdown]
 # ### reviewer-facing queue examples

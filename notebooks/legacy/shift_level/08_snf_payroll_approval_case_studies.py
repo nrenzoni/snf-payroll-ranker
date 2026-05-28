@@ -32,7 +32,7 @@
 # %%
 import polars as pl
 from common.display import setup_notebook_html
-from common.execution import notebook_fast_mode
+from common.execution import notebook_validation_mode
 from common.plots import (
     aes,
     coord_flip,
@@ -79,8 +79,8 @@ setup_notebook_html()
 # %%
 config = PayrollConfig(employee_count=160, pay_periods=12, review_budgets=(5, 10, 25))
 FAST_CONFIG = PayrollConfig(employee_count=90, pay_periods=10, review_budgets=(5, 10))
-NOTEBOOK_FAST = notebook_fast_mode()
-active_config = FAST_CONFIG if NOTEBOOK_FAST else config
+NOTEBOOK_VALIDATE = notebook_validation_mode()
+active_config = FAST_CONFIG if NOTEBOOK_VALIDATE else config
 active_pipeline_include = (
     PipelineIncludeConfig(
         validation=False,
@@ -91,10 +91,10 @@ active_pipeline_include = (
         review_queues=True,
         leakage_checks=True,
     )
-    if NOTEBOOK_FAST
+    if NOTEBOOK_VALIDATE
     else PipelineIncludeConfig.all()
 )
-proof_seeds = (11, 19) if NOTEBOOK_FAST else (11, 19, 29)
+proof_seeds = (11, 19) if NOTEBOOK_VALIDATE else (11, 19, 29)
 main_scenarios = diagnostic_scenario_presets(BUSINESS_PROOF_MAIN_SCENARIOS)
 primary_scenario = "overtime-staffing-pressure"
 primary_scenario_label = primary_scenario.replace("-", " ")
@@ -260,7 +260,7 @@ def _scenario_labels(frame: pl.DataFrame) -> pl.DataFrame:
 def _appendix_queue_stress(frame: pl.DataFrame) -> pl.DataFrame:
     policies = {
         "fixed top-k capacity": QueueSimulationSpec(
-            iterations=5 if NOTEBOOK_FAST else 12,
+            iterations=5 if NOTEBOOK_VALIDATE else 12,
             review_budget=active_config.review_budgets[0],
             fixed_capacity=active_config.review_budgets[0],
             capacity_sd=0.0,
@@ -268,7 +268,7 @@ def _appendix_queue_stress(frame: pl.DataFrame) -> pl.DataFrame:
             scenario="queue stress",
         ),
         "broad threshold": QueueSimulationSpec(
-            iterations=5 if NOTEBOOK_FAST else 12,
+            iterations=5 if NOTEBOOK_VALIDATE else 12,
             review_budget=active_config.review_budgets[0],
             score_threshold=0.35,
             fixed_capacity=active_config.review_budgets[0],
@@ -277,7 +277,7 @@ def _appendix_queue_stress(frame: pl.DataFrame) -> pl.DataFrame:
             scenario="queue stress",
         ),
         "adaptive top decile": QueueSimulationSpec(
-            iterations=5 if NOTEBOOK_FAST else 12,
+            iterations=5 if NOTEBOOK_VALIDATE else 12,
             review_budget=active_config.review_budgets[0],
             adaptive_threshold_quantile=0.90,
             fixed_capacity=active_config.review_budgets[0],
@@ -286,7 +286,7 @@ def _appendix_queue_stress(frame: pl.DataFrame) -> pl.DataFrame:
             scenario="queue stress",
         ),
         "threshold capacity shock": QueueSimulationSpec(
-            iterations=5 if NOTEBOOK_FAST else 12,
+            iterations=5 if NOTEBOOK_VALIDATE else 12,
             review_budget=active_config.review_budgets[0],
             score_threshold=0.45,
             fixed_capacity=active_config.review_budgets[0],
@@ -299,7 +299,7 @@ def _appendix_queue_stress(frame: pl.DataFrame) -> pl.DataFrame:
             scenario="queue stress",
         ),
         "threshold catch-up staffing": QueueSimulationSpec(
-            iterations=5 if NOTEBOOK_FAST else 12,
+            iterations=5 if NOTEBOOK_VALIDATE else 12,
             review_budget=active_config.review_budgets[0],
             score_threshold=0.45,
             fixed_capacity=round(active_config.review_budgets[0] * 1.5),

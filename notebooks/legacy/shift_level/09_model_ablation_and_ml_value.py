@@ -23,7 +23,7 @@
 # %%
 import polars as pl
 from common.display import setup_notebook_html
-from common.execution import notebook_fast_mode
+from common.execution import notebook_validation_mode
 from common.plots import (
     aes,
     geom_bar,
@@ -53,8 +53,8 @@ setup_notebook_html()
 # %%
 config = PayrollConfig(employee_count=200, pay_periods=14, review_budgets=(10, 25, 50))
 FAST_CONFIG = PayrollConfig(employee_count=90, pay_periods=10, review_budgets=(10, 25))
-NOTEBOOK_FAST = notebook_fast_mode()
-active_config = FAST_CONFIG if NOTEBOOK_FAST else config
+NOTEBOOK_VALIDATE = notebook_validation_mode()
+active_config = FAST_CONFIG if NOTEBOOK_VALIDATE else config
 active_include = (
     PipelineIncludeConfig(
         validation=False,
@@ -65,7 +65,7 @@ active_include = (
         review_queues=True,
         leakage_checks=True,
     )
-    if NOTEBOOK_FAST
+    if NOTEBOOK_VALIDATE
     else PipelineIncludeConfig.all()
 )
 scenario = diagnostic_scenario_presets(("premium-mismatch",))["premium-mismatch"]

@@ -30,5 +30,5 @@ The documented notebook reporting contract SHALL identify the single active empl
 The primary employee-pay-cycle notebook SHALL support fast validation when it performs repeated pipeline runs, scenario comparisons, or other material workloads.
 
 #### Scenario: Fast validation executes active notebook
-- **WHEN** `NOTEBOOK_FAST=1` fast validation is run for the primary employee-pay-cycle notebook
+- **WHEN** `NOTEBOOK_VALIDATE=1` notebook validation is run for the primary employee-pay-cycle notebook
 - **THEN** the notebook reduces expensive workloads while still producing representative section outputs needed to catch execution errors

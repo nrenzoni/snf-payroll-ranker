@@ -146,12 +146,12 @@ The active notebook describes and validates the residual employee-pay-cycle rank
 
 Notebook-only plotting code lives in Jupytext notebook sources and shared plotting adapters under `notebooks/common/`. The runtime package remains free of Jupyter and Lets-Plot imports.
 
-Fast-path notebook validation (reduced workload, repo-local `tmp/` output, no paired `.ipynb` churn):
+Notebook validation path (reduced execution-check workload, repo-local `tmp/` output, no paired `.ipynb` churn):
 
-Template: `uv run jupytext --to ipynb --execute --run-path notebooks --output tmp/notebook.fast.ipynb <notebook.py>`
+Template: `uv run jupytext --to ipynb --execute --run-path notebooks --output tmp/notebook.validate.ipynb <notebook.py>`
 
 ```bash
-NOTEBOOK_FAST=1 uv run jupytext --to ipynb --execute --run-path notebooks --output tmp/employee-cycle-report.fast.ipynb notebooks/employee_cycle_report.py
+NOTEBOOK_VALIDATE=1 uv run jupytext --to ipynb --execute --run-path notebooks --output tmp/employee-cycle-report.validate.ipynb notebooks/employee_cycle_report.py
 ```
 
 Full paired-output refresh for the active notebook:
@@ -239,7 +239,7 @@ uv run prek run --all-files
 
 The project is designed for agentic iteration. See [`AGENTS.md`](AGENTS.md) for the full workflow contract.
 
-- **Fast-path notebook validation**: `NOTEBOOK_FAST=1` runs reduced diagnostic workloads and writes executed notebooks only under the repo-local `tmp/` directory, avoiding paired `.ipynb` churn on every check.
+- **Notebook validation path**: `NOTEBOOK_VALIDATE=1` runs reduced execution-check workloads and writes executed notebooks only under the repo-local `tmp/` directory, avoiding paired `.ipynb` churn on every check.
 - **Pre-commit quality gates**: `uv run prek run --all-files` enforces Ruff lint/format, Pyrefly type checking, YAML validation, and trailing-comma consistency automatically.
 - **Tiered testing**: smoke suite for quick sanity; targeted integration filters (`-k "scoring or uncertainty"`) for focused validation; full suite for pipeline-wide changes.
 - **Lets-Plot render failures surface as exceptions**: `notebooks/common/plots.py` wraps `CheckedPlot` around Lets-Plot to parse generated HTML for embedded error messages and raise `LetsPlotRenderError`, so agent/CI loops detect broken plots instead of accepting silent render failures.
