@@ -1,0 +1,2 @@
+# Override .gitignore for AI agents and ripgrep: ensure notebooks are discoverable.
+!notebooks/**/*.ipynb
