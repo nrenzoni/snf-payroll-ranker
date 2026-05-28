@@ -21,12 +21,11 @@
 #
 # **Goal**
 #
-# Rank ambiguous SNF payroll records that were not caught by critical hard rules.
+# Rank ambiguous SNF payroll records that were not caught by hard rules.
 #
 # **Workflow setup**
 #
-# Critical hard rules remove obvious payroll violations first. ML models compete
-# only on the residual queue.
+# Hard rules remove obvious payroll violations first. ML models compete on the residual queue.
 #
 # **Models compared**
 #
@@ -46,27 +45,26 @@
 #
 # **Working conclusion**
 #
-# In this run, the expected-value model is the strongest overall default for
-# residual payroll review. It leads the main comparison on residual NDCG,
+# The expected-value model is the strongest overall default for
+# residual payroll review. It leads on residual NDCG,
 # residual dollars captured, and incremental utility. The regressor ties the
-# top severe-recall level, while the classifier remains the strongest pure
+# top severe-recall, while the classifier remains the strongest pure
 # issue-probability signal by PR-AUC.
 
 # %% [markdown]
-# ## 1. Problem Framing: Residual Payroll Review After Hard Rules
+# ## 1. Problem: Residual Payroll Review After Hard Rules
 #
-# This notebook does not ask whether ML can beat hard rules on obvious payroll
-# problems. It asks whether ML adds value after hard rules have already removed
-# the obvious cases.
+# Does ML add value after hard rules have already removed
+# the obvious cases?
 #
 # **Production assumption**
 #
-# Critical hard rules already catch impossible or obvious payroll records before
+# hard rules already catch impossible or obvious payroll records before
 # the ML stage begins.
 #
 # **Modeling question**
 #
-# Among employee-pay-cycle records not caught by critical hard rules, which ML
+# Among employee-pay-cycle records not caught by hard rules, which ML
 # formulation best ranks the remaining payroll review candidates?
 #
 # **Queue framing**
@@ -78,7 +76,7 @@
 #
 # **Out of scope**
 #
-# - optimizing the hard rules themselves
+# - optimizing the hard rules
 # - ranking all payroll records before hard rules
 # - evaluating a full hybrid production policy end to end
 # - UI or workflow implementation
@@ -87,16 +85,12 @@
 # %% [markdown]
 # ## 2. Synthetic SNF Payroll Data Generation
 #
-# This section documents the simulated world only to the extent needed for the
-# residual-ranking experiment.
+# This section documents the simulated world relevant for this experiment.
 #
-# The synthetic data should support two distinct populations:
+# The synthetic data supports two distinct populations:
 #
 # - hard-rule-caught obvious payroll issues
 # - rule-missed residual issues that remain ambiguous after gating
-#
-# The notebook will show the generator setup, a compact process diagram, and a
-# small schema example rather than all generator internals.
 
 # %% [markdown]
 # ```mermaid
@@ -414,7 +408,7 @@ pl.DataFrame(
     {
         "metric": [
             "employee-pay-cycle records",
-            "critical hard-rule flagged",
+            "hard-rule flagged",
             "residual records",
             "residual issue rate",
             "residual severe issues",
@@ -447,18 +441,6 @@ pl.DataFrame(
 )
 
 # %% [markdown]
-# ### Section 1 framing
-#
-# | Workflow Assumption | Active Contract |
-# | --- | --- |
-# | **Modeling Grain** | employee-pay-cycle |
-# | **Hard-Rule Role** | remove obvious payroll problems before ML |
-# | **Scoring Universe** | only residual records not flagged by critical hard rules |
-# | **Queue Group** | facility x payroll cycle |
-# | **Review Objective** | prioritize ambiguous payroll records under limited review capacity |
-# | **Out Of Scope** | PBJ, HPRD, and compliance staffing metrics |
-
-# %% [markdown]
 # ### schema example:
 
 # %%
@@ -482,7 +464,7 @@ data.payroll.select(
 #
 # **Critical hard rules**
 #
-# These records leave the ML universe entirely. Examples include:
+# These filter records out of the ML universe. Examples include:
 #
 # - duplicate or overlapping shift
 # - negative hours
@@ -494,8 +476,7 @@ data.payroll.select(
 # **Soft warning signals**
 #
 # These do not remove a record from the ML universe. They remain candidate input
-# features because they are ambiguous contextual warnings rather than definitive
-# failures.
+# features because they are contextual info.
 #
 # Examples:
 #
@@ -508,49 +489,36 @@ data.payroll.select(
 #
 # **Residual universe**
 #
-# `residual_record = not critical_hard_rule_flagged`
-#
-# Hard rules remove some severe issues upstream, but they do not clear the
-# queue. In this run, the gate removes some severe cases before ML begins while
-# leaving a much larger severe residual tail for stage-2 ranking.
-#
-# The ML task is to rank residual records within each facility x payroll cycle.
-#
-# **Observed funnel summary**
-#
-# | Stage | Records | % of total | True issues | Severe issues | Dollar impact |
-# | --- | ---: | ---: | ---: | ---: | ---: |
-# | All payroll records |  | 100% |  |  |  |
-# | Critical hard-rule flagged |  |  |  |  |  |
-# | Residual ML universe |  |  |  |  |  |
+# Hard rules remove some severe issues upstream before ML begins, while
+# - leaving a much larger severe residual tail for stage-2 ranking.
+# - The ML task is to rank residual records within each facility x payroll cycle.
 
 # %% [markdown]
-# hard-rule funnel
+# **Observed funnel summary**
 
 # %%
-(
-    funnel.with_columns(
-        pl.col("pct_of_total").round(4),
-        pl.col("dollar_impact").round(2),
-    )
+funnel.with_columns(
+    pl.col("pct_of_total").round(4),
+    pl.col("dollar_impact").round(2),
 )
 
 # %% [markdown]
 # ## 4. Simulation Sanity Checks for the Residual Dataset
 #
-# This section should answer one question: after hard rules, is there still
-# enough signal and enough risk for ML ranking to matter?
+# After the hard-rule gate, the residual dataset still contains enough signal
+# and enough financial exposure to justify ML ranking.
 #
-# Planned residual-only checks:
+# In this run, three properties stand out:
 #
-# 1. residual issue rate by facility
-# 2. residual severe issue count per facility-cycle
-# 3. dollar impact distribution in residual records
-# 4. issue-type mix: hard-rule flagged versus residual
-# 5. residual records per facility-cycle
+# 1. residual issue rates are fairly consistent across facilities, staying in a
+#    narrow band around 5% to 6%
+# 2. severe residual issues are relatively rare but cluster in specific
+#    facility-cycle queues
+# 3. the highest-dollar residual tail is concentrated in a small set of anomaly
+#    families, led by `overtime_double_shift`
 #
-# Existing full-dataset plots were removed because they do not answer the
-# residual-universe question cleanly.
+# The checks below stay inside the residual universe, since full-dataset views
+# obscure the stage-2 ranking problem.
 
 # %% [markdown]
 # ### residual issue rate by facility
@@ -573,14 +541,23 @@ residual_diagnostics["issue_type_mix"]
 # %% [markdown]
 # ### top residual dollar records
 
+# %% [markdown]
+# Taken together, these diagnostics show that the residual queue is not random
+# cleanup noise. The remaining records still contain meaningful issue density,
+# a non-trivial severe tail, and concentrated dollar risk. That is the setting
+# where ranking quality can materially change review outcomes.
+
 # %%
 residual_diagnostics["residual_dollar_distribution"].head(10)
 
 # %% [markdown]
 # ## 5. Label Engineering for Residual Ranking
 #
-# Labels in this notebook are residual-aware. They are defined after the
-# critical hard-rule gate and are aligned to the stage-2 ranking problem.
+# The labels in this notebook are defined for the post-gate ranking problem
+# rather than the full payroll universe. In this run, the residual universe
+# contains 46,307 records, including 2,314 residual issues and 211 rule-missed
+# severe issues, so the label design needs to separate common ambiguous issues
+# from the smaller severe tail.
 #
 # **Core labels**
 #
@@ -662,6 +639,18 @@ residual_label_diagnostics
 # %% [markdown]
 # ### residual anomaly-family mix
 
+# %% [markdown]
+# The residual label mix is dominated by material but non-severe issues: grade
+# 2 accounts for most residual issues, while the severe grade-3 slice is much
+# smaller. The residual problem is therefore broader than severe-case
+# detection; it is a prioritization task with a smaller but important severe
+# tail.
+#
+# The anomaly-family mix is also concentrated. `paid_vs_scheduled_mismatch` is
+# the largest family by count, while `overtime_double_shift` is the most severe
+# and dollar-heavy family, making it disproportionately important for top-of-
+# queue review quality.
+
 # %%
 residual_family_mix
 
@@ -669,11 +658,19 @@ residual_family_mix
 # ## 6. Feature Engineering for Ambiguous Payroll Records
 
 # %% [markdown]
+# Because hard rules already remove obvious violations, the residual ranking
+# problem depends on contextual and comparative features rather than
+# deterministic failure signals. The feature set is designed to answer a
+# narrower question: which surviving employee-pay-cycle records look most
+# abnormal relative to the employee's history, local peers, and current-cycle
+# context?
+
+# %% [markdown]
 # | Feature family | Examples | Why it matters in the residual queue |
 # | --- | --- | --- |
-# | Raw payroll | hours, overtime, gross pay, pay rate | basic residual signal |
-# | Employee history | hours versus trailing median, pay-rate change versus prior cycle | catches personal deviations |
-# | Facility-role baseline | pay rate versus facility-role median, overtime versus role norm | catches local anomalies |
+# | Raw payroll | hours, overtime, gross pay, pay rate | baseline cycle-level payroll signal |
+# | Employee history | hours versus trailing median, pay-rate change versus prior cycle | captures deviations from the employee's recent baseline |
+# | Facility-role baseline | pay rate versus facility-role median, overtime versus role norm | captures local peer anomalies |
 # | Timekeeping | missing punch, manual edit count, late entry | soft risk signals |
 # | Cross-facility | unusual facility, same-day multi-facility pattern | duplicate or allocation risk |
 # | Temporal | holiday cycle, vendor drift, staffing shock | seasonality and drift context |
@@ -826,6 +823,10 @@ residual_scored.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).select(
 # ### leakage-safe contract
 
 # %% [markdown]
+# In other words, these features are meant to separate ambiguous-but-benign
+# residual records from ambiguous-and-costly ones.
+
+# %% [markdown]
 # | contract_point | active_behavior |
 # | :--- | :--- |
 # | historical features | exclude the current and future pay periods |
@@ -838,18 +839,25 @@ residual_scored.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).select(
 # %% [markdown]
 # ## 7. Model Formulations
 #
-# This section compares only ML models on the residual universe.
+# This section compares alternative ML formulations on the same residual
+# universe. Hard rules are the fixed upstream gate; the question here is which
+# scoring objective produces the best review queue once obvious violations have
+# already been removed.
 #
-# Hard rules are the upstream gate. They are not a competing model in this
-# section.
+# The comparison includes probability-first models, dollar-first models,
+# relevance-ranking models, and the notebook's final active ranking blend. That
+# makes the trade-off explicit: should the queue prioritize issue likelihood,
+# financial exposure, severe-case recovery, or overall review value?
 
 # %% [markdown]
-# | Model | Training target | Queue score | Why include |
+# | Model | Training target | Queue score | Why it is included |
 # | --- | --- | --- | --- |
 # | Classifier | `y_issue` | `P(issue)` | baseline supervised model |
+# | Cost-sensitive classifier | `y_issue` with severity-aware weights | weighted `P(issue)` | emphasizes costly or severe residual errors |
 # | Regressor | `y_dollar` | predicted dollar impact | captures financial exposure |
 # | Expected-value model | issue + impact | `P(issue) x E(impact \| issue)` | strong traditional ML baseline |
 # | Learning-to-rank | `relevance_grade` | ranking score | directly optimizes residual queue order |
+# | Final active ranking | blended score | final anomaly score | combines strong ranking signals into the notebook default |
 
 # %% [markdown]
 # **Fair comparison rules**
@@ -859,6 +867,11 @@ residual_scored.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).select(
 # - same train and test splits
 # - same top-K evaluation budgets
 # - same leakage rules
+
+# In this run, the leading formulations are close rather than widely separated.
+# `expected_value` is the strongest overall default, `regressor` is most
+# competitive on severe recovery, and `classifier` remains the strongest pure
+# issue-probability model by PR-AUC.
 
 # %% [markdown]
 # ### formulation summary
@@ -1079,20 +1092,17 @@ main_results_summary
 # %% [markdown]
 # ## 8. Main Results: Residual Queue Evaluation
 #
-# All headline metrics in this section should be computed only on residual
-# records within facility x payroll cycle groups.
+# All headline metrics in this section are computed only on residual records
+# within facility x payroll cycle groups.
 #
-# Planned primary outputs:
+# The results are shown across five aligned views: residual dollars captured,
+# rule-missed severe recall, residual NDCG, reviewer yield, and incremental
+# utility. Looking at these metrics together keeps the model choice tied to
+# queue outcomes rather than a single score definition.
 #
-# 1. residual dollars caught versus percent residual reviewed
-# 2. rule-missed severe recall versus percent residual reviewed
-# 3. residual NDCG versus percent residual reviewed
-# 4. reviewer yield versus percent residual reviewed
-# 5. residual net utility versus percent residual reviewed
-#
-# In this run, the residual queue winner is not the pure ranker. The
-# expected-value formulation narrowly leads the active ranking on residual NDCG
-# and more clearly leads on residual dollars captured and incremental utility.
+# In this run, the residual queue winner is not the pure ranker.
+# `expected_value` narrowly leads the active ranking on residual NDCG and more
+# clearly leads on residual dollars captured and incremental utility.
 
 # %% [markdown]
 # The primary residual queue results are now shown in five aligned views so the
