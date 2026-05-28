@@ -122,8 +122,6 @@
 # ```
 # %%
 import polars as pl
-
-# %%
 import polars.selectors as pl_selectors
 from common.display import setup_notebook_html, setup_polars_display
 from common.execution import notebook_validation_mode
@@ -137,6 +135,7 @@ from common.plots import (
     rotated_x_labels,
     theme_minimal,
 )
+from IPython.display import display
 
 from payroll_anomaly_ranking.columns import MetricCol, PayrollCol, ReviewCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
@@ -973,11 +972,13 @@ evaluation.metrics.select(
 budget_diagnostics
 
 # %% [markdown]
-# The 1% and 3% budgets are operationally equivalent in this run because both
-# round to one reviewed employee-pay-cycle per facility-period group on average.
-# By 10%, the queue is much deeper: severe recall reaches 1.0, but reviewer
-# yield falls sharply and incremental utility turns negative, which indicates
-# the review team has moved beyond the high-yield residual tail.
+# The 1% and 3% budgets are not operationally equivalent in this run. The 3%
+# budget roughly doubles average review depth per facility-period group relative
+# to 1%, and the metric lift reflects that deeper queue access. By 10%, the
+# queue is much deeper: severe recall is nearly saturated, but reviewer yield
+# falls sharply and incremental utility drops materially versus the 3% to 5%
+# range, which indicates diminishing returns beyond the high-yield residual
+# tail.
 
 # %% [markdown]
 # ### model comparison
@@ -998,14 +999,18 @@ evaluation.model_comparison.select(
 
 # %%
 if backtest is not None:
-    backtest.select(
-        PayrollCol.PAY_PERIOD_INDEX,
-        MetricCol.RESIDUAL_NDCG_AT_K,
-        MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-        MetricCol.DOLLARS_CAPTURED_AT_K,
-        MetricCol.REVIEWER_YIELD_AT_K,
-        MetricCol.INCREMENTAL_UTILITY_AT_K,
-    ).sort(PayrollCol.PAY_PERIOD_INDEX).head(10)
+    display(
+        backtest.select(
+            PayrollCol.PAY_PERIOD_INDEX,
+            MetricCol.RESIDUAL_NDCG_AT_K,
+            MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+            MetricCol.DOLLARS_CAPTURED_AT_K,
+            MetricCol.REVIEWER_YIELD_AT_K,
+            MetricCol.INCREMENTAL_UTILITY_AT_K,
+        )
+        .sort(PayrollCol.PAY_PERIOD_INDEX)
+        .head(10),
+    )
 
 # %% [markdown]
 # ### winner summary
@@ -1059,9 +1064,9 @@ main_results_summary
 # ### severe-family plot interpretation
 #
 # The severe residual slice is concentrated rather than broad. The residual
-# label diagnostics above show 83 severe residual issues, and the family mix
-# table shows that `overtime_double_shift` is only 7.8% of residual issues but
-# carries a `0.8974` severe share and the highest average residual dollars.
+# label diagnostics above show 211 severe residual issues, and the family mix
+# table shows that `overtime_double_shift` is only 8.3% of residual issues but
+# carries a `0.9583` severe share and the highest average residual dollars.
 # `retro_rate_mismatch` and `cross_facility_allocation` contribute some severe
 # cases, but they are much smaller sources of severe volume.
 #
@@ -1187,14 +1192,16 @@ comparison_for_summary.select(
 
 # %%
 if backtest is not None:
-    backtest.select(
-        PayrollCol.PAY_PERIOD_INDEX,
-        MetricCol.RESIDUAL_NDCG_AT_K,
-        MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-        MetricCol.DOLLARS_CAPTURED_AT_K,
-        MetricCol.REVIEWER_YIELD_AT_K,
-        MetricCol.INCREMENTAL_UTILITY_AT_K,
-    ).sort(PayrollCol.PAY_PERIOD_INDEX)
+    display(
+        backtest.select(
+            PayrollCol.PAY_PERIOD_INDEX,
+            MetricCol.RESIDUAL_NDCG_AT_K,
+            MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+            MetricCol.DOLLARS_CAPTURED_AT_K,
+            MetricCol.REVIEWER_YIELD_AT_K,
+            MetricCol.INCREMENTAL_UTILITY_AT_K,
+        ).sort(PayrollCol.PAY_PERIOD_INDEX),
+    )
 
 # %% [markdown]
 # The main-results readout should be interpreted together with the similarity
@@ -1229,9 +1236,10 @@ if backtest is not None:
 # Should models be trained on all records or only residual records? The updated
 # holdout-only ablation now shows a real difference: training on all records is
 # slightly worse than specializing to residual records, while training on all
-# records with the hard-rule flag available recovers that gap and ends up
-# slightly ahead. That suggests the broad universe is useful only when the model
-# can explicitly adapt to the gate.
+# records with the hard-rule flag available recovers part of that gap without
+# overtaking the residual-only setup. That suggests the broad universe is only
+# modestly helpful when the model can explicitly adapt to the gate, and that the
+# residual-only training universe remains the strongest option in this run.
 #
 # **9.4 Validation split ablation**
 #
@@ -1246,12 +1254,14 @@ if backtest is not None:
 
 # %%
 if feature_ablation is not None:
-    feature_ablation.with_columns(
-        pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
-        pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
-        pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
-        pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
-        pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
+    display(
+        feature_ablation.with_columns(
+            pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
+            pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
+            pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
+            pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
+            pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
+        ),
     )
 
 # %% [markdown]
@@ -1259,8 +1269,10 @@ if feature_ablation is not None:
 
 # %%
 if label_ablation is not None:
-    label_ablation.with_columns(
-        pl.col("selection_value").round(4),
+    display(
+        label_ablation.with_columns(
+            pl.col("selection_value").round(4),
+        ),
     )
 
 # %% [markdown]
@@ -1268,13 +1280,15 @@ if label_ablation is not None:
 
 # %%
 if training_universe_ablation is not None:
-    training_universe_ablation.with_columns(
-        pl.col("train_hard_rule_share").round(4),
-        pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
-        pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
-        pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
-        pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
-        pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
+    display(
+        training_universe_ablation.with_columns(
+            pl.col("train_hard_rule_share").round(4),
+            pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
+            pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
+            pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
+            pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
+            pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
+        ),
     )
 
 # %% [markdown]
@@ -1282,61 +1296,64 @@ if training_universe_ablation is not None:
 
 # %%
 if backtest is not None:
-    pl.DataFrame(
-        {
-            "diagnostic": [
-                "evaluated pay periods",
-                "min residual ndcg",
-                "max residual ndcg",
-                "min severe recall",
-                "max severe recall",
-            ],
-            "value": [
-                float(backtest.height),
-                round(
-                    float(
-                        backtest.select(pl.min(MetricCol.RESIDUAL_NDCG_AT_K)).item()
-                        or 0.0,
+    display(
+        pl.DataFrame(
+            {
+                "diagnostic": [
+                    "evaluated pay periods",
+                    "min residual ndcg",
+                    "max residual ndcg",
+                    "min severe recall",
+                    "max severe recall",
+                ],
+                "value": [
+                    float(backtest.height),
+                    round(
+                        float(
+                            backtest.select(pl.min(MetricCol.RESIDUAL_NDCG_AT_K)).item()
+                            or 0.0,
+                        ),
+                        4,
                     ),
-                    4,
-                ),
-                round(
-                    float(
-                        backtest.select(pl.max(MetricCol.RESIDUAL_NDCG_AT_K)).item()
-                        or 0.0,
+                    round(
+                        float(
+                            backtest.select(pl.max(MetricCol.RESIDUAL_NDCG_AT_K)).item()
+                            or 0.0,
+                        ),
+                        4,
                     ),
-                    4,
-                ),
-                round(
-                    float(
-                        backtest.select(
-                            pl.min(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
-                        ).item()
-                        or 0.0,
+                    round(
+                        float(
+                            backtest.select(
+                                pl.min(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
+                            ).item()
+                            or 0.0,
+                        ),
+                        4,
                     ),
-                    4,
-                ),
-                round(
-                    float(
-                        backtest.select(
-                            pl.max(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
-                        ).item()
-                        or 0.0,
+                    round(
+                        float(
+                            backtest.select(
+                                pl.max(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
+                            ).item()
+                            or 0.0,
+                        ),
+                        4,
                     ),
-                    4,
-                ),
-            ],
-        },
+                ],
+            },
+        ),
     )
 
 # %% [markdown]
 # The ablation pattern answers a different question than the main comparison.
-# In this run, raw payroll alone is weak and utility-negative. Most of the lift
-# comes from adding timekeeping and soft-warning context, which materially
-# improves NDCG, severe recall, and business value. The training-universe
-# comparison stays nearly flat even on holdout periods, which suggests the hard
-# rule gate is functioning as a clean upstream filter rather than a source of
-# ambiguous examples the models still need to learn around.
+# In this run, raw payroll alone is weak and far below the best feature sets,
+# even though it remains utility-positive. Most of the lift comes from adding
+# timekeeping and soft-warning context, which materially improves NDCG, severe
+# recall, and business value. The training-universe comparison stays fairly
+# tight even on holdout periods, which suggests the hard-rule gate is
+# functioning as a clean upstream filter rather than a source of ambiguous
+# examples the models still need to learn around.
 
 # %% [markdown]
 # ## 10. Diagnostics, Explanations, and Final Recommendation
@@ -1351,10 +1368,12 @@ if backtest is not None:
 
 # %%
 if issue_type_model_performance is not None:
-    issue_type_model_performance.with_columns(
-        pl.col(MetricCol.RECALL_AT_K).round(4),
-        pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
-        pl.col(MetricCol.DOLLAR_CAPTURE_RATE).round(4),
+    display(
+        issue_type_model_performance.with_columns(
+            pl.col(MetricCol.RECALL_AT_K).round(4),
+            pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
+            pl.col(MetricCol.DOLLAR_CAPTURE_RATE).round(4),
+        ),
     )
 
 # %% [markdown]
@@ -1375,7 +1394,7 @@ model_similarity_diagnostics
 
 # %%
 if severe_miss_examples is not None:
-    severe_miss_examples
+    display(severe_miss_examples)
 
 # %% [markdown]
 # ### reviewer-facing queue examples
