@@ -18,5 +18,5 @@ The active notebook contract is single-notebook, not a notebook sequence. It foc
 ## Execution
 
 - Notebook helper imports continue to assume `uv run jupytext --run-path notebooks ...`.
-- Fast validation still uses `NOTEBOOK_FAST=1` and writes outputs under `/tmp`.
+- Fast validation still uses `NOTEBOOK_FAST=1` and writes outputs under the repo-local `tmp/` directory.
 - Full paired-output refresh for the active notebook uses `uv run jupytext --set-formats ipynb,py:percent --execute notebooks/employee_cycle_report.py`.

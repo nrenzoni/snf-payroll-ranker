@@ -1312,9 +1312,9 @@ def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
     assert (
         "notebooks/legacy/shift_level/08_snf_payroll_approval_case_studies.py" in readme
     )
-    assert "--run-path notebooks --output /tmp/notebook.fast.ipynb" in readme
+    assert "--run-path notebooks --output tmp/notebook.fast.ipynb" in readme
     assert (
-        "--to ipynb --execute --run-path notebooks --output /tmp/notebook-name.fast.ipynb"
+        "--to ipynb --execute --run-path notebooks --output tmp/notebook-name.fast.ipynb"
         in agent_instructions
     )
     assert "--set-formats ipynb,py:percent --execute" in agent_instructions

@@ -45,7 +45,7 @@ The active employee-pay-cycle notebook and notebook-owned diagnostics SHALL supp
 
 #### Scenario: Fast mode avoids paired output refresh
 - **WHEN** a fast notebook error check is run with `NOTEBOOK_FAST=1`
-- **THEN** Jupytext writes the executed notebook to a temporary `/tmp` output rather than creating or overwriting the paired `.ipynb` artifact
+- **THEN** Jupytext writes the executed notebook to a temporary repo-local `tmp/` output rather than creating or overwriting the paired `.ipynb` artifact
 
 #### Scenario: Full mode uses complete artifact generation
 - **WHEN** the active notebook is executed without fast mode for full evaluation or paired output refresh
@@ -63,7 +63,7 @@ Changed Jupytext notebook `.py` sources SHALL be validated with the fast noteboo
 
 #### Scenario: Fast validation runs after notebook source change
 - **WHEN** a notebook `.py` source file is changed
-- **THEN** the changed notebook is executed with `NOTEBOOK_FAST=1`, `uv run jupytext --to ipynb --execute --run-path notebooks`, and an output path under `/tmp`
+- **THEN** the changed notebook is executed with `NOTEBOOK_FAST=1`, `uv run jupytext --to ipynb --execute --run-path notebooks`, and an output path under the repo-local `tmp/` directory
 
 #### Scenario: Fast validation does not refresh paired notebook artifact
 - **WHEN** fast validation is run after a notebook source change
@@ -78,7 +78,7 @@ Full non-fast notebook execution SHALL be reserved for requested full rerenders,
 
 #### Scenario: Routine notebook source change does not imply full rerender
 - **WHEN** a notebook `.py` source changes and the user has not requested a full rerender or paired output refresh
-- **THEN** routine validation uses the fast `/tmp` execution path instead of updating paired `.ipynb` outputs
+- **THEN** routine validation uses the fast repo-local `tmp/` execution path instead of updating paired `.ipynb` outputs
 
 ### Requirement: Material notebook workloads support fast mode
 Notebook sources that perform material pipeline workloads SHALL provide a fast execution path when needed to keep routine notebook validation practical and representative.
