@@ -664,6 +664,17 @@ def test_employee_cycle_ablation_helpers_return_runtime_backed_outputs() -> None
         "all_records_with_gate_feature",
     } <= set(training_ablation.get_column("training_universe").to_list())
     assert {
+        "holdout_period_start",
+        "holdout_period_end",
+        "train_records",
+        "train_residual_records",
+        "train_hard_rule_share",
+    } <= set(training_ablation.columns)
+    assert (
+        training_ablation.get_column("holdout_period_end")
+        >= training_ablation.get_column("holdout_period_start")
+    ).all()
+    assert {
         "binary_issue",
         "dollar_impact",
         "graded_relevance",

@@ -18,6 +18,7 @@ from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.models import (
     EMPLOYEE_CYCLE_FEATURE_FAMILIES,
     score_employee_pay_cycles,
+    temporal_split,
 )
 
 
@@ -364,7 +365,7 @@ def employee_cycle_feature_ablation(
     cumulative_feature_sets = []
     selected: list[str] = []
     for feature_set, feature_columns in EMPLOYEE_CYCLE_FEATURE_FAMILIES.items():
-        selected.extend(str(column) for column in feature_columns)
+        selected.extend(feature_columns)
         cumulative_feature_sets.append((feature_set, tuple(dict.fromkeys(selected))))
 
     rows: list[dict[str, float | str]] = []
@@ -405,8 +406,12 @@ def employee_cycle_training_universe_ablation(
     review_budget: float | None = None,
 ) -> pl.DataFrame:
     budget = review_budget or _default_employee_cycle_ablation_budget(config)
+    split = temporal_split(payroll)
+    holdout_periods = (
+        split.test.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list()
+    )
     scenarios = [
-        ("all_records", "residual_only", False),
+        ("all_records", "all_records", False),
         ("residual_records_only", "residual_only", False),
         ("all_records_with_gate_feature", "all_records_with_gate_feature", True),
     ]
@@ -418,11 +423,31 @@ def employee_cycle_training_universe_ablation(
             training_universe=training_universe,
             include_hard_rule_flag_feature=include_gate_feature,
         ).scored
-        metrics = employee_cycle_grouped_metrics(scored, budget)
+        train_frame = _employee_cycle_ablation_training_frame(scored, training_universe)
+        holdout_scored = scored.filter(
+            pl.col(PayrollCol.PAY_PERIOD_INDEX).is_in(holdout_periods),
+        )
+        metrics = employee_cycle_grouped_metrics(holdout_scored, budget)
         rows.append(
             {
                 "training_universe": label,
                 "scoring_universe": "residual_only",
+                "holdout_period_start": float(
+                    min(holdout_periods) if holdout_periods else 0,
+                ),
+                "holdout_period_end": float(
+                    max(holdout_periods) if holdout_periods else 0,
+                ),
+                "train_records": float(train_frame.height),
+                "train_residual_records": float(
+                    train_frame.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1).height,
+                ),
+                "train_hard_rule_share": float(
+                    train_frame.select(
+                        pl.mean(PayrollCol.CRITICAL_HARD_RULE_FLAG),
+                    ).item()
+                    or 0.0,
+                ),
                 MetricCol.K: budget,
                 MetricCol.RESIDUAL_NDCG_AT_K: float(
                     metrics[MetricCol.RESIDUAL_NDCG_AT_K],
@@ -1194,6 +1219,25 @@ def _default_employee_cycle_ablation_budget(config: PayrollConfig) -> float:
     if 0.05 in review_budgets:
         return 0.05
     return review_budgets[0]
+
+
+def _employee_cycle_ablation_training_frame(
+    scored: pl.DataFrame,
+    training_universe: str,
+) -> pl.DataFrame:
+    train_periods = (
+        temporal_split(scored)
+        .train.get_column(PayrollCol.PAY_PERIOD_INDEX)
+        .unique()
+        .to_list()
+    )
+    train_frame = scored.filter(
+        pl.col(PayrollCol.PAY_PERIOD_INDEX).is_in(train_periods),
+    )
+    if training_universe in {"residual_only", "residual_records_only"}:
+        residual_only = train_frame.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
+        return residual_only if residual_only.height else train_frame
+    return train_frame
 
 
 def _employee_cycle_residual_ndcg_at_k(scored: pl.DataFrame) -> float:

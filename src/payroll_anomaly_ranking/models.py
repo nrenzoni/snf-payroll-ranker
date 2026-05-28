@@ -491,7 +491,7 @@ def score_employee_pay_cycles(
             ScoreCol.RANKING_SCORE,
             ScoreCol.FINAL_ANOMALY_SCORE,
         ),
-        feature_columns=tuple(str(column) for column in selected_feature_columns),
+        feature_columns=selected_feature_columns,
     )
 
 
@@ -718,7 +718,7 @@ def _employee_cycle_supervised_probability(
         train_target,
         sample_weight=sample_weight,
     )
-    return cast(np.ndarray, model.predict_proba(all_features)[:, 1])
+    return model.predict_proba(all_features)[:, 1]
 
 
 def _employee_cycle_supervised_regression(
@@ -745,9 +745,8 @@ def _employee_cycle_supervised_regression(
             train_target,
             sample_weight=sample_weight,
         )
-        prediction = cast(
-            np.ndarray,
-            model.predict(_employee_cycle_feature_matrix(payroll, feature_columns)),
+        prediction = model.predict(
+            _employee_cycle_feature_matrix(payroll, feature_columns),
         )
     if lower_bound is not None:
         prediction = np.maximum(prediction, lower_bound)

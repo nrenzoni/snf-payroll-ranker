@@ -1,6 +1,13 @@
 # Configuration file for jupyter-nbconvert.
 
-c = get_config()  # noqa
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+
+    def get_config() -> Any: ...
+
+
+c = get_config()
 
 # AI-friendly markdown export: hide code inputs and output prompts.
 c.TemplateExporter.exclude_input = True

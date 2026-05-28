@@ -44,13 +44,13 @@
 # - reviewer yield by review-budget percentage
 # - incremental utility by review-budget percentage
 #
-# **Working conclusion placeholder**
+# **Working conclusion**
 #
-# Learning-to-rank is expected to be strongest for top-of-queue severity
-# ordering, while the expected-value model is expected to remain highly
-# competitive for residual dollar recovery. The final recommendation should
-# depend on whether the review team prioritizes severe-risk coverage or
-# financial recovery.
+# In this run, the expected-value model is the strongest overall default for
+# residual payroll review. It leads the main comparison on residual NDCG,
+# residual dollars captured, and incremental utility. The regressor ties the
+# top severe-recall level, while the classifier remains the strongest pure
+# issue-probability signal by PR-AUC.
 
 # %% [markdown]
 # ## 1. Problem Framing: Residual Payroll Review After Hard Rules
@@ -191,6 +191,7 @@ def build_model_budget_metrics(
     rows: list[dict[str, float | str]] = []
     for model_name, score_col in [
         ("classifier", ScoreCol.CLASSIFICATION_SCORE),
+        ("cost_sensitive_classifier", ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE),
         ("regressor", ScoreCol.REGRESSION_SCORE),
         ("expected_value", ScoreCol.EXPECTED_VALUE_SCORE),
         ("learning_to_rank", ScoreCol.RANKING_SCORE),
@@ -319,6 +320,7 @@ def build_model_similarity_diagnostics(
     comparison_budget = 0.05 if 0.05 in review_budgets else review_budgets[0]
     model_scores = [
         ("classifier", ScoreCol.CLASSIFICATION_SCORE),
+        ("cost_sensitive_classifier", ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE),
         ("regressor", ScoreCol.REGRESSION_SCORE),
         ("expected_value", ScoreCol.EXPECTED_VALUE_SCORE),
         ("learning_to_rank", ScoreCol.RANKING_SCORE),
@@ -392,6 +394,18 @@ def build_model_similarity_diagnostics(
 
 residual_label_diagnostics = build_residual_label_diagnostics(residual_payroll)
 residual_family_mix = build_residual_family_mix(residual_payroll)
+
+
+def notebook_model_label(model_name: str) -> str:
+    return {
+        str(ScoreCol.CLASSIFICATION_SCORE): "classifier",
+        str(ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE): "cost_sensitive_classifier",
+        str(ScoreCol.REGRESSION_SCORE): "regressor",
+        str(ScoreCol.EXPECTED_VALUE_SCORE): "expected_value",
+        str(ScoreCol.RANKING_SCORE): "learning_to_rank",
+        "active_ranking": "final_active_ranking",
+        str(ScoreCol.ML_SCORE): "isolation_forest",
+    }.get(model_name, model_name)
 
 
 # %% [markdown]
@@ -691,6 +705,76 @@ review_queue_examples = build_employee_cycle_review_queue(
     scored,
     top_k=0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
 )
+comparison_for_summary = evaluation.model_comparison.with_columns(
+    pl.col("model").map_elements(notebook_model_label, return_dtype=pl.String),
+)
+budget_metrics_summary = evaluation.metrics.select(
+    pl.col(MetricCol.K)
+    .map_elements(format_review_budget_pct, return_dtype=pl.String)
+    .alias("review_budget_pct"),
+    MetricCol.RESIDUAL_NDCG_AT_K,
+    MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+    MetricCol.DOLLARS_CAPTURED_AT_K,
+    MetricCol.REVIEWER_YIELD_AT_K,
+    MetricCol.INCREMENTAL_UTILITY_AT_K,
+    MetricCol.PR_AUC,
+)
+main_results_summary = pl.DataFrame(
+    {
+        "objective": [
+            "best residual severity ordering",
+            "best residual dollar recovery",
+            "best residual utility",
+            "best overall default in this run",
+        ],
+        "winner": [
+            comparison_for_summary.top_k(
+                1,
+                by=MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+            )["model"][0],
+            comparison_for_summary.top_k(1, by=MetricCol.DOLLARS_CAPTURED_AT_K)[
+                "model"
+            ][0],
+            comparison_for_summary.top_k(1, by=MetricCol.INCREMENTAL_UTILITY_AT_K)[
+                "model"
+            ][0],
+            comparison_for_summary.top_k(
+                1,
+                by=[MetricCol.RESIDUAL_NDCG_AT_K, MetricCol.INCREMENTAL_UTILITY_AT_K],
+            )["model"][0],
+        ],
+    },
+)
+final_recommendation_summary = pl.DataFrame(
+    {
+        "objective": [
+            "best residual severity ordering",
+            "best residual dollar recovery",
+            "best calibrated residual risk",
+            "best production default",
+        ],
+        "recommended_model": [
+            comparison_for_summary.top_k(
+                1,
+                by=MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+            )["model"][0],
+            comparison_for_summary.top_k(1, by=MetricCol.DOLLARS_CAPTURED_AT_K)[
+                "model"
+            ][0],
+            comparison_for_summary.top_k(1, by=MetricCol.PR_AUC)["model"][0],
+            comparison_for_summary.top_k(
+                1,
+                by=[MetricCol.RESIDUAL_NDCG_AT_K, MetricCol.INCREMENTAL_UTILITY_AT_K],
+            )["model"][0],
+        ],
+        "why": [
+            "Highest severe residual recall at the active review budget.",
+            "Best recovery of residual dollar impact within the review budget.",
+            "Strongest residual issue-probability ranking among comparable models.",
+            "Best balance of queue quality and residual utility in this run.",
+        ],
+    },
+)
 
 # %% [markdown]
 # ### feature families
@@ -770,24 +854,28 @@ pl.DataFrame(
     {
         "model": [
             "classifier",
+            "cost_sensitive_classifier",
             "regressor",
             "expected_value",
             "learning_to_rank",
         ],
         "training_target": [
             str(PayrollCol.Y_ISSUE),
+            f"{PayrollCol.Y_ISSUE} with severity-aware weights",
             str(PayrollCol.Y_DOLLAR),
             "y_issue + estimated exposure",
             str(PayrollCol.RELEVANCE_GRADE),
         ],
         "score_column": [
             str(ScoreCol.CLASSIFICATION_SCORE),
+            str(ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE),
             str(ScoreCol.REGRESSION_SCORE),
             str(ScoreCol.EXPECTED_VALUE_SCORE),
             str(ScoreCol.RANKING_SCORE),
         ],
         "business_question": [
             "Which residual records are most likely to still contain a payroll issue?",
+            "Which residual issue records deserve extra weight when severity and dollars matter?",
             "Which residual records imply the largest unresolved dollar impact?",
             "Which residual records combine issue likelihood with financial exposure?",
             "Which residual records deserve the strongest top-of-queue priority?",
@@ -806,6 +894,7 @@ residual_scored.select(
     PayrollCol.Y_DOLLAR,
     PayrollCol.RELEVANCE_GRADE,
     ScoreCol.CLASSIFICATION_SCORE,
+    ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
     ScoreCol.REGRESSION_SCORE,
     ScoreCol.EXPECTED_VALUE_SCORE,
     ScoreCol.RANKING_SCORE,
@@ -824,7 +913,7 @@ pl.DataFrame(
             "review budgets",
             "temporal framing",
             "leakage control",
-            "deferred formulation",
+            "cost-sensitive coverage",
         ],
         "applied_setting": [
             "residual records only for notebook comparison outputs",
@@ -832,7 +921,7 @@ pl.DataFrame(
             ", ".join(format_review_budget_pct(k) for k in review_budget_percents),
             "same employee-cycle temporal split logic for all formulations",
             "evaluation labels remain excluded from feature columns",
-            "cost-sensitive classifier intentionally excluded from this pass",
+            "cost-sensitive classifier is included alongside the standard classifier",
         ],
     },
 )
@@ -869,6 +958,13 @@ evaluation.metrics.select(
 budget_diagnostics
 
 # %% [markdown]
+# The 1% and 3% budgets are operationally equivalent in this run because both
+# round to one reviewed employee-pay-cycle per facility-period group on average.
+# By 10%, the queue is much deeper: severe recall reaches 1.0, but reviewer
+# yield falls sharply and incremental utility turns negative, which indicates
+# the review team has moved beyond the high-yield residual tail.
+
+# %% [markdown]
 # ### model comparison
 
 # %%
@@ -899,34 +995,7 @@ backtest.select(
 # ### winner summary
 
 # %%
-comparison_for_summary = evaluation.model_comparison
-
-pl.DataFrame(
-    {
-        "objective": [
-            "best residual severity ordering",
-            "best residual dollar recovery",
-            "best residual utility",
-            "best overall default in this run",
-        ],
-        "winner": [
-            comparison_for_summary.top_k(
-                1,
-                by=MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-            )["model"][0],
-            comparison_for_summary.top_k(1, by=MetricCol.DOLLARS_CAPTURED_AT_K)[
-                "model"
-            ][0],
-            comparison_for_summary.top_k(1, by=MetricCol.INCREMENTAL_UTILITY_AT_K)[
-                "model"
-            ][0],
-            comparison_for_summary.top_k(
-                1,
-                by=[MetricCol.RESIDUAL_NDCG_AT_K, MetricCol.INCREMENTAL_UTILITY_AT_K],
-            )["model"][0],
-        ],
-    },
-)
+main_results_summary
 
 # %% [markdown]
 # ### residual dollars captured by review-budget percentage
@@ -973,25 +1042,18 @@ pl.DataFrame(
 # %% [markdown]
 # ### severe-family plot interpretation
 #
-# The current synthetic residual task contains multiple anomaly families, but
-# the severe slice is concentrated in the highest-dollar overtime and rate
-# correction regimes. In this run, most severe residual cases come from
-# `overtime_double_shift`, with a much smaller contribution from
-# `retro_rate_mismatch` and only a few severe `cross_facility_allocation` cases.
+# The severe residual slice is concentrated rather than broad. The residual
+# label diagnostics above show 83 severe residual issues, and the family mix
+# table shows that `overtime_double_shift` is only 7.8% of residual issues but
+# carries a `0.8974` severe share and the highest average residual dollars.
+# `retro_rate_mismatch` and `cross_facility_allocation` contribute some severe
+# cases, but they are much smaller sources of severe volume.
 #
-# That concentration matters for interpretation: severe recall is not a broad
-# context-heavy "urgent review" concept. It is mostly a high-payroll-loss
-# concept. Because the expected-value model combines issue likelihood with dollar
-# exposure, it has a natural advantage when the severe label is dominated by the
-# same families that also drive the largest residual dollars.
-#
-# The above two plots:
-#
-# - `expected_value` leading severe recall is explainable, not suspicious
-# - `regressor` remains competitive for the same reason
-# - `learning_to_rank` is useful, but it is not operating on a severe
-#   target that is distinct enough from dollar-heavy loss events to dominate the
-#   aggregate severe-recall curve
+# That concentration matters for interpretation: severe recall is closely tied
+# to high-dollar overtime and rate-correction regimes in this synthetic world.
+# That is why the expected-value and regression formulations stay so competitive
+# on severe recovery even when the active ranking is optimized for broader queue
+# quality.
 
 # %% [markdown]
 # ## 8. Main Results: Residual Queue Evaluation
@@ -1007,9 +1069,9 @@ pl.DataFrame(
 # 4. reviewer yield versus percent residual reviewed
 # 5. residual net utility versus percent residual reviewed
 #
-# The winner framing should stay specific: learning-to-rank may win top-of-queue
-# severity ordering, while expected-value may remain more competitive on dollar
-# recovery.
+# In this run, the residual queue winner is not the pure ranker. The
+# expected-value formulation narrowly leads the active ranking on residual NDCG
+# and more clearly leads on residual dollars captured and incremental utility.
 
 # %% [markdown]
 # The primary residual queue results are now shown in five aligned views so the
@@ -1084,7 +1146,7 @@ pl.DataFrame(
 # ### compact main-results table
 
 # %%
-evaluation.model_comparison.select(
+comparison_for_summary.select(
     "model",
     MetricCol.RESIDUAL_NDCG_AT_K,
     MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
@@ -1096,6 +1158,13 @@ evaluation.model_comparison.select(
     [MetricCol.RESIDUAL_NDCG_AT_K, MetricCol.INCREMENTAL_UTILITY_AT_K],
     descending=[True, True],
 )
+
+# %% [markdown]
+# The compact results table shows a tight top tier rather than a runaway winner.
+# `expected_value` is the best overall default, `regressor` ties the strongest
+# severe-recall level, and `classifier` remains the strongest PR-AUC model. The
+# practical trade-off is therefore business value versus pure issue-probability
+# ranking, not a simple strong-model versus weak-model split.
 
 # %% [markdown]
 # ### temporal stability context
@@ -1112,9 +1181,10 @@ backtest.select(
 
 # %% [markdown]
 # The main-results readout should be interpreted together with the similarity
-# diagnostics above. If the curves are close, that can reflect correlated model
-# scores or a residual queue that is already partly saturated at low budgets,
-# not necessarily that formulation choice is meaningless.
+# diagnostics above. The active ranking is extremely close to the pure ranker
+# and still highly correlated with the classifier, while the regressor is more
+# behaviorally distinct. That is why expected value can win aggregate business
+# metrics without producing a radically different queue ordering.
 
 # %% [markdown]
 # ## 9. Ablation Studies
@@ -1123,42 +1193,36 @@ backtest.select(
 #
 # **9.1 Feature ablation**
 #
-# Which feature families matter after hard rules remove obvious records?
-#
-# | Feature set | NDCG@5% | Rule-missed severe recall@5% | Residual dollars@5% |
-# | --- | ---: | ---: | ---: |
-# | Raw payroll only |  |  |  |
-# | + employee history |  |  |  |
-# | + facility-role baselines |  |  |  |
-# | + timekeeping signals |  |  |  |
-# | + temporal context |  |  |  |
+# Which feature families still matter after hard rules remove obvious records?
+# In the full run, raw payroll alone is weak, employee history and facility-role
+# baselines add only modest lift, and the biggest performance jump comes from
+# timekeeping and soft-warning context. Temporal robust-stat features do not add
+# further lift beyond that larger timekeeping improvement in this run.
 #
 # **9.2 Label ablation**
 #
-# Does the model winner change depending on how residual risk is defined?
-#
-# | Label | Best model | Interpretation |
-# | --- | --- | --- |
-# | binary issue | classifier | best for issue probability |
-# | dollar impact | regressor / EV | best for financial exposure |
-# | graded relevance | LTR | best for queue order |
-# | utility label | EV / LTR | best for business value |
-# | observed historical label | classifier | may inherit old review bias |
-# | latent true label | LTR / EV | better at missed residual risk |
+# Does the model winner change depending on how residual risk is defined? Yes,
+# but the changes are interpretable. The classifier remains the strongest pure
+# issue-probability signal, expected value wins the dollar- and utility-aware
+# views, and the active blended ranking performs best on graded queue-ordering
+# views built around latent residual truth.
 #
 # **9.3 Training universe ablation**
 #
-# Should models be trained on all records or only residual records?
-#
-# | Training universe | Scoring universe | Purpose |
-# | --- | --- | --- |
-# | all records | residual only | uses broader risk signal |
-# | residual records only | residual only | specialized ambiguous-case model |
-# | all records with hard-rule flag features | residual only | learns full context but adapts to the gate |
+# Should models be trained on all records or only residual records? The updated
+# holdout-only ablation now shows a real difference: training on all records is
+# slightly worse than specializing to residual records, while training on all
+# records with the hard-rule flag available recovers that gap and ends up
+# slightly ahead. That suggests the broad universe is useful only when the model
+# can explicitly adapt to the gate.
 #
 # **9.4 Validation split ablation**
 #
-# Does the residual model generalize to future cycles and unseen facilities?
+# Does the residual model generalize to future cycles and unseen facilities? The
+# temporal backtest still shows useful residual ranking value across many future
+# pay periods, but severe recall is episodic and varies substantially by period,
+# so the recommendation should be framed as strong but not uniform across every
+# holdout cycle.
 
 # %% [markdown]
 # ### 9.1 feature-family ablation
@@ -1185,6 +1249,7 @@ label_ablation.with_columns(
 
 # %%
 training_universe_ablation.with_columns(
+    pl.col("train_hard_rule_share").round(4),
     pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
     pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
     pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
@@ -1243,51 +1308,20 @@ pl.DataFrame(
 
 # %% [markdown]
 # The ablation pattern answers a different question than the main comparison.
-# It shows what each additional layer buys after hard rules have already removed
-# the obvious cases. In this residual setting, feature breadth and graded queue
-# targets matter more than raw issue probability alone when the review budget is
-# tight.
+# In this run, raw payroll alone is weak and utility-negative. Most of the lift
+# comes from adding timekeeping and soft-warning context, which materially
+# improves NDCG, severe recall, and business value. The training-universe
+# comparison stays nearly flat even on holdout periods, which suggests the hard
+# rule gate is functioning as a clean upstream filter rather than a source of
+# ambiguous examples the models still need to learn around.
 
 # %% [markdown]
 # ## 10. Diagnostics, Explanations, and Final Recommendation
 #
-# This section combines diagnostic plots, reviewer-facing explanation examples,
-# and the final production recommendation into one compact decision section.
-#
-# **Planned diagnostics**
-#
-# - issue-type performance heatmap
-# - top-K overlap heatmap
-# - severe misses table
-#
-# **Reviewer-facing explanation template**
-#
-# ```text
-# Priority: High
-# Residual risk type: subtle pay-rate or role mismatch
-# Expected dollar impact: $430
-# Issue probability: 0.62
-# Queue rank: 8 of 740
-#
-# Reason codes:
-# - Pay rate is 19% above facility-role median
-# - Employee changed job code this cycle
-# - Manual edit count is above facility baseline
-# - Employee rarely works this facility
-#
-# Recommended action:
-# Verify job code, rate authorization, and facility allocation.
-# ```
-#
-# **Final recommendation template**
-#
-# | Objective | Recommended model |
-# | --- | --- |
-# | Best residual severity ordering | LTR |
-# | Best residual dollar recovery | Expected-value model |
-# | Best calibrated residual risk | Classifier / EV |
-# | Best new-facility robustness | holdout winner |
-# | Best production default | LTR or EV, depending on objective |
+# This section brings together the residual-task diagnostics, reviewer-facing
+# examples, and the final recommendation. The goal is to explain not only which
+# model wins, but also why the winner is plausible and where the remaining
+# misses still come from.
 
 # %% [markdown]
 # ### issue-type performance by model
@@ -1304,6 +1338,13 @@ issue_type_model_performance.with_columns(
 
 # %%
 model_similarity_diagnostics
+
+# %% [markdown]
+# The overlap table shows a tight cluster at the top of the leaderboard. The
+# active ranking is extremely close to `learning_to_rank` and still highly
+# correlated with the classifier, while the regressor is more distinct. That is
+# why the recommendation can favor expected value on business metrics without
+# implying that the other top formulations are irrelevant.
 
 # %% [markdown]
 # ### severe residual miss examples
@@ -1337,48 +1378,14 @@ review_queue_examples.select(
 # ### final recommendation
 
 # %%
-pl.DataFrame(
-    {
-        "objective": [
-            "best residual severity ordering",
-            "best residual dollar recovery",
-            "best calibrated residual risk",
-            "best production default",
-        ],
-        "recommended_model": [
-            evaluation.model_comparison.top_k(
-                1,
-                by=MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-            )["model"][0],
-            evaluation.model_comparison.top_k(
-                1,
-                by=MetricCol.DOLLARS_CAPTURED_AT_K,
-            )["model"][0],
-            evaluation.model_comparison.top_k(
-                1,
-                by=MetricCol.PR_AUC,
-            )["model"][0],
-            evaluation.model_comparison.top_k(
-                1,
-                by=[MetricCol.RESIDUAL_NDCG_AT_K, MetricCol.INCREMENTAL_UTILITY_AT_K],
-            )["model"][0],
-        ],
-        "why": [
-            "Highest severe residual recall at the active review budget.",
-            "Best recovery of residual dollar impact within the review budget.",
-            "Strongest residual issue-probability ranking among comparable models.",
-            "Best balance of queue quality and residual utility in this run.",
-        ],
-    },
-)
+final_recommendation_summary
 
 # %% [markdown]
-# The final recommendation should remain objective-specific. If the payroll team
-# mainly wants to catch the most severe rule-missed cases near the top of the
-# queue, the graded ranking winner is the best default. If the team instead
-# optimizes for financial recovery, the expected-value path remains a credible
-# alternative and should stay in the comparison set rather than being discarded
-# as a weaker baseline.
+# The recommendation remains objective-specific, but this run supports
+# `expected_value` as the best production default. It provides the best balance
+# of queue quality and business value, while `regressor` remains the strongest
+# option when severe residual recovery is the primary objective and
+# `classifier` remains the cleanest issue-probability signal.
 
 # %% [markdown]
 # ## 11. Technical Appendix
