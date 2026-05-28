@@ -51,3 +51,9 @@ Python 3.13 payroll anomaly ranking pipeline using Polars, NumPy, scikit-learn, 
   - Evaluation, diagnostics, or queue simulation: `uv run pytest tests/integration/test_regression.py -k "evaluation or diagnostic or queue"`
   - Notebook contracts or dependency boundaries: `uv run pytest tests/integration/test_regression.py -k "notebook or plotting"`
 - Run full `uv run pytest` for large behavior changes, pipeline-wide changes, scenario/diagnostic changes, dependency/config changes, or when the user requests full validation.
+
+## Git
+
+- Use semantic commit messages following the conventional commit style (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, etc.).
+- Keep the subject line concise and descriptive.
+- Include detailed bullet points in the commit body for non-trivial changes, explaining the *what* and *why* where helpful.
