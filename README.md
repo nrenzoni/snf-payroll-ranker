@@ -7,6 +7,12 @@
 
 A privacy-safe machine learning project for ranking unusual payroll records using synthetic data, leakage-safe temporal validation, and an employee-pay-cycle scoring pipeline.
 
+---
+
+<img width="688" height="384" alt="payroll system graphic" src="https://github.com/user-attachments/assets/5e003709-1684-4d39-94f6-135ef62e4bf4" />
+
+---
+
 ![Pipeline Architecture](docs/assets/pipeline_architecture.svg)
 
 ## Highlights
