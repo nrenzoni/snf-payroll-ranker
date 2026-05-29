@@ -151,6 +151,8 @@ from payroll_anomaly_ranking.evaluation import (
 )
 from payroll_anomaly_ranking.explainability import build_employee_cycle_review_queue
 from payroll_anomaly_ranking.models import score_employee_pay_cycles
+from payroll_anomaly_ranking.presentation import synthetic_schema_dictionary
+from payroll_anomaly_ranking.scenarios import diagnostic_scenario_catalog
 
 # %%
 setup_notebook_html()
@@ -383,6 +385,536 @@ def build_model_similarity_diagnostics(
                 },
             )
     return pl.DataFrame(rows)
+
+
+def build_appendix_data_dictionary() -> pl.DataFrame:
+    base_dictionary = synthetic_schema_dictionary().with_columns(
+        pl.col("field_name").cast(pl.String),
+        pl.lit("base_synthetic_payroll").alias("section_role"),
+        pl.lit("schema_and_validation").alias("used_for"),
+        pl.when(pl.col("type_or_category") == "evaluation label")
+        .then(pl.lit("yes"))
+        .otherwise(pl.lit("no"))
+        .alias("evaluation_only"),
+    )
+    employee_cycle_rows = pl.DataFrame(
+        [
+            {
+                "field_name": str(PayrollCol.EMPLOYEE_PAY_CYCLE_ID),
+                "business_meaning": "Synthetic employee-pay-cycle identifier",
+                "type_or_category": "identifier",
+                "privacy_sensitivity": "Low; synthetic only",
+                "validation_expectation": "Required and non-null",
+                "section_role": "queue_item",
+                "used_for": "grouped ranking and review queue",
+                "evaluation_only": "no",
+            },
+            {
+                "field_name": str(PayrollCol.PAY_PERIOD_INDEX),
+                "business_meaning": "Synthetic payroll cycle index",
+                "type_or_category": "time index",
+                "privacy_sensitivity": "Low",
+                "validation_expectation": "Required and ordered for temporal evaluation",
+                "section_role": "queue_group",
+                "used_for": "temporal split and grouped ranking",
+                "evaluation_only": "no",
+            },
+            {
+                "field_name": str(PayrollCol.TOTAL_GROSS_PAY),
+                "business_meaning": "Employee-pay-cycle total gross pay",
+                "type_or_category": "numeric",
+                "privacy_sensitivity": "Medium synthetic compensation",
+                "validation_expectation": "Non-negative under normal cases",
+                "section_role": "cycle_rollup",
+                "used_for": "features, examples, and diagnostics",
+                "evaluation_only": "no",
+            },
+            {
+                "field_name": str(PayrollCol.TOTAL_EXPECTED_GROSS_PAY),
+                "business_meaning": "Expected employee-pay-cycle gross pay baseline",
+                "type_or_category": "numeric",
+                "privacy_sensitivity": "Medium synthetic compensation",
+                "validation_expectation": "Available for each cycle",
+                "section_role": "expected_pay_context",
+                "used_for": "gross-gap diagnostics and exposure context",
+                "evaluation_only": "no",
+            },
+            {
+                "field_name": str(PayrollCol.TOTAL_OVERTIME_HOURS),
+                "business_meaning": "Employee-pay-cycle total overtime hours",
+                "type_or_category": "numeric",
+                "privacy_sensitivity": "Medium",
+                "validation_expectation": "Non-negative",
+                "section_role": "cycle_rollup",
+                "used_for": "features and review context",
+                "evaluation_only": "no",
+            },
+            {
+                "field_name": str(PayrollCol.CRITICAL_HARD_RULE_FLAG),
+                "business_meaning": "Critical gate flag that removes obvious cycles before ML",
+                "type_or_category": "gate flag",
+                "privacy_sensitivity": "Low",
+                "validation_expectation": "Binary indicator",
+                "section_role": "gate",
+                "used_for": "defines the residual ML universe",
+                "evaluation_only": "no",
+            },
+            {
+                "field_name": str(PayrollCol.RESIDUAL_RECORD),
+                "business_meaning": "Indicator that the cycle survives the hard-rule gate",
+                "type_or_category": "gate flag",
+                "privacy_sensitivity": "Low",
+                "validation_expectation": "Binary indicator",
+                "section_role": "gate",
+                "used_for": "residual-only evaluation scope",
+                "evaluation_only": "no",
+            },
+            {
+                "field_name": str(PayrollCol.Y_ISSUE),
+                "business_meaning": "Latent residual issue truth after the hard-rule gate",
+                "type_or_category": "evaluation label",
+                "privacy_sensitivity": "Internal synthetic label",
+                "validation_expectation": "Binary indicator",
+                "section_role": "label",
+                "used_for": "classification targets and evaluation",
+                "evaluation_only": "yes",
+            },
+            {
+                "field_name": str(PayrollCol.Y_DOLLAR),
+                "business_meaning": "Residual dollar impact if the issue is not reviewed",
+                "type_or_category": "evaluation label",
+                "privacy_sensitivity": "Internal synthetic label",
+                "validation_expectation": "Non-negative for positive residual issues",
+                "section_role": "label",
+                "used_for": "regression targets and dollar capture evaluation",
+                "evaluation_only": "yes",
+            },
+            {
+                "field_name": str(PayrollCol.RULE_MISSED_SEVERE_ISSUE),
+                "business_meaning": "Severe residual issue that survives the hard-rule gate",
+                "type_or_category": "evaluation label",
+                "privacy_sensitivity": "Internal synthetic label",
+                "validation_expectation": "Binary indicator",
+                "section_role": "label",
+                "used_for": "severe recall evaluation",
+                "evaluation_only": "yes",
+            },
+            {
+                "field_name": str(PayrollCol.RELEVANCE_GRADE),
+                "business_meaning": "Residual review priority grade from 0 to 3",
+                "type_or_category": "graded label",
+                "privacy_sensitivity": "Internal synthetic label",
+                "validation_expectation": "Integer in [0, 3]",
+                "section_role": "label",
+                "used_for": "learning-to-rank target and NDCG evaluation",
+                "evaluation_only": "yes",
+            },
+            {
+                "field_name": str(PayrollCol.NET_UTILITY),
+                "business_meaning": "Residual business value net of review cost",
+                "type_or_category": "evaluation label",
+                "privacy_sensitivity": "Internal synthetic label",
+                "validation_expectation": "Signed numeric value",
+                "section_role": "label",
+                "used_for": "incremental utility evaluation",
+                "evaluation_only": "yes",
+            },
+            {
+                "field_name": str(ScoreCol.CLASSIFICATION_SCORE),
+                "business_meaning": "Predicted residual issue probability",
+                "type_or_category": "model score",
+                "privacy_sensitivity": "Low",
+                "validation_expectation": "Bounded to [0, 1] after scoring",
+                "section_role": "score",
+                "used_for": "classifier queue ordering",
+                "evaluation_only": "no",
+            },
+            {
+                "field_name": str(ScoreCol.EXPECTED_VALUE_SCORE),
+                "business_meaning": "Expected-value ranking score combining issue likelihood and exposure",
+                "type_or_category": "model score",
+                "privacy_sensitivity": "Low",
+                "validation_expectation": "Bounded to [0, 1] after scoring",
+                "section_role": "score",
+                "used_for": "dollar-aware queue ordering",
+                "evaluation_only": "no",
+            },
+            {
+                "field_name": str(ScoreCol.RANKING_SCORE),
+                "business_meaning": "Learning-to-rank score trained on graded residual priority",
+                "type_or_category": "model score",
+                "privacy_sensitivity": "Low",
+                "validation_expectation": "Bounded to [0, 1] after scoring",
+                "section_role": "score",
+                "used_for": "graded queue ordering",
+                "evaluation_only": "no",
+            },
+            {
+                "field_name": str(ScoreCol.FINAL_ANOMALY_SCORE),
+                "business_meaning": "Final active blended ranking score used for queue examples",
+                "type_or_category": "model score",
+                "privacy_sensitivity": "Low",
+                "validation_expectation": "Bounded to [0, 1] after scoring",
+                "section_role": "score",
+                "used_for": "active queue ordering",
+                "evaluation_only": "no",
+            },
+            {
+                "field_name": str(ScoreCol.ESTIMATED_EXPOSURE),
+                "business_meaning": "Estimated employee-pay-cycle exposure used for value-aware ranking",
+                "type_or_category": "derived score input",
+                "privacy_sensitivity": "Medium synthetic compensation",
+                "validation_expectation": "Non-negative",
+                "section_role": "score_context",
+                "used_for": "expected-value scoring and evaluation context",
+                "evaluation_only": "no",
+            },
+        ],
+    )
+    return (
+        pl.concat([base_dictionary, employee_cycle_rows], how="diagonal_relaxed")
+        .unique(subset=["field_name"], keep="first")
+        .sort(["section_role", "field_name"])
+    )
+
+
+def build_appendix_hard_rule_definitions() -> pl.DataFrame:
+    return pl.DataFrame(
+        [
+            {
+                "rule_name": "terminated_employee_paid",
+                "code_condition": "employment_status == terminated and gross_pay > 0",
+                "gate_effect": "critical_hard_rule_flag = 1",
+                "why_critical": "Obvious lifecycle violation removed before residual ranking",
+            },
+            {
+                "rule_name": "duplicate_signature",
+                "code_condition": "duplicate employee x shift_date x shift_type x facility x pay_code x gross_pay signature",
+                "gate_effect": "critical_hard_rule_flag = 1",
+                "why_critical": "Obvious duplicate payroll signature should not compete in ML ranking",
+            },
+            {
+                "rule_name": "nonpositive_active_pay",
+                "code_condition": "employment_status == active and gross_pay <= 0",
+                "gate_effect": "critical_hard_rule_flag = 1",
+                "why_critical": "Active paid cycle with nonpositive gross pay is treated as a hard failure",
+            },
+            {
+                "rule_name": "negative_net_pay",
+                "code_condition": "net_pay < 0",
+                "gate_effect": "critical_hard_rule_flag = 1",
+                "why_critical": "Negative net pay is too obvious for residual ranking",
+            },
+            {
+                "rule_name": "net_exceeds_gross",
+                "code_condition": "net_pay > gross_pay * 1.05",
+                "gate_effect": "critical_hard_rule_flag = 1",
+                "why_critical": "Implausible net-to-gross relationship is gated out upstream",
+            },
+            {
+                "rule_name": "physically_impossible_paid_hours",
+                "code_condition": "paid_hours > 24.0",
+                "gate_effect": "critical_hard_rule_flag = 1",
+                "why_critical": "Impossible within-day hours are removed before ML",
+            },
+            {
+                "rule_name": "paid_hours_missing_rate",
+                "code_condition": "paid_hours > 0 and pay_rate <= 0 or missing",
+                "gate_effect": "critical_hard_rule_flag = 1",
+                "why_critical": "Paid work without a valid rate is treated as a hard payroll defect",
+            },
+            {
+                "rule_name": "paid_minus_scheduled_exceeds_threshold",
+                "code_condition": "worked_hours - scheduled_hours > paid_vs_scheduled_threshold",
+                "gate_effect": "critical_hard_rule_flag = 1",
+                "why_critical": "Large schedule mismatch is handled as an upstream gate rather than residual ambiguity",
+            },
+        ],
+    )
+
+
+def build_appendix_metric_definitions() -> pl.DataFrame:
+    return pl.DataFrame(
+        [
+            {
+                "metric": str(MetricCol.RESIDUAL_NDCG_AT_K),
+                "scope": "residual only",
+                "aggregation": "mean across facility x pay_period groups",
+                "numerator_or_gain": "DCG of ranked relevance_grade values within each group budget",
+                "denominator_or_reference": "ideal DCG for the same group budget",
+                "zero_positive_behavior": "group contributes 0 when ideal DCG is 0",
+            },
+            {
+                "metric": str(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
+                "scope": "residual only",
+                "aggregation": "global over reviewed residual rows",
+                "numerator_or_gain": "reviewed rule_missed_severe_issue count",
+                "denominator_or_reference": "all rule_missed_severe_issue count in residual evaluation frame",
+                "zero_positive_behavior": "returns 0 when total severe count is 0",
+            },
+            {
+                "metric": str(MetricCol.DOLLARS_CAPTURED_AT_K),
+                "scope": "residual positives only",
+                "aggregation": "global sum over reviewed residual rows",
+                "numerator_or_gain": "sum of y_dollar on reviewed residual issue rows",
+                "denominator_or_reference": "reported directly; capture rate uses total residual y_dollar",
+                "zero_positive_behavior": "returns 0 when no residual dollars exist",
+            },
+            {
+                "metric": str(MetricCol.REVIEWER_YIELD_AT_K),
+                "scope": "residual only",
+                "aggregation": "global reviewed share",
+                "numerator_or_gain": "reviewed residual rows with y_issue == 1",
+                "denominator_or_reference": "all reviewed residual rows",
+                "zero_positive_behavior": "returns 0 when no rows are reviewed",
+            },
+            {
+                "metric": str(MetricCol.INCREMENTAL_UTILITY_AT_K),
+                "scope": "residual only",
+                "aggregation": "global sum over reviewed residual rows",
+                "numerator_or_gain": "sum of net_utility on reviewed rows",
+                "denominator_or_reference": "reported directly rather than normalized",
+                "zero_positive_behavior": "returns 0 when no rows are reviewed",
+            },
+            {
+                "metric": str(MetricCol.PRECISION_AT_K),
+                "scope": "residual only",
+                "aggregation": "mean across facility x pay_period groups",
+                "numerator_or_gain": "group true positives",
+                "denominator_or_reference": "group reviewed rows",
+                "zero_positive_behavior": "group denominator clipped to at least 1",
+            },
+            {
+                "metric": str(MetricCol.RECALL_AT_K),
+                "scope": "residual only",
+                "aggregation": "mean across facility x pay_period groups",
+                "numerator_or_gain": "group true positives",
+                "denominator_or_reference": "group residual positives",
+                "zero_positive_behavior": "group denominator clipped to at least 1",
+            },
+            {
+                "metric": str(MetricCol.PR_AUC),
+                "scope": "residual only",
+                "aggregation": "single residual-frame summary",
+                "numerator_or_gain": "average_precision_score over y_issue and final score",
+                "denominator_or_reference": "not a ratio table metric",
+                "zero_positive_behavior": "falls back to 0 on degenerate label cases",
+            },
+        ],
+    )
+
+
+def build_appendix_group_construction(
+    review_budgets: tuple[float, ...],
+) -> pl.DataFrame:
+    return pl.DataFrame(
+        [
+            {
+                "component": "ranking item",
+                "active_definition": str(PayrollCol.EMPLOYEE_PAY_CYCLE_ID),
+            },
+            {
+                "component": "ranking group",
+                "active_definition": f"{PayrollCol.FACILITY_ID} x {PayrollCol.PAY_PERIOD_INDEX}",
+            },
+            {
+                "component": "evaluation scope",
+                "active_definition": f"{PayrollCol.RESIDUAL_RECORD} == 1 only",
+            },
+            {
+                "component": "default budget framing",
+                "active_definition": ", ".join(
+                    format_review_budget_pct(budget) for budget in review_budgets
+                ),
+            },
+            {
+                "component": "percent budget conversion",
+                "active_definition": "ceil(group_size * budget) with minimum 1 reviewed row per non-empty group",
+            },
+            {
+                "component": "score ordering",
+                "active_definition": f"descending {ScoreCol.FINAL_ANOMALY_SCORE} within each group",
+            },
+        ],
+    )
+
+
+def build_appendix_zero_positive_policy() -> pl.DataFrame:
+    return pl.DataFrame(
+        [
+            {
+                "case": "group recall with zero residual positives",
+                "implemented_behavior": "group_anomalies denominator is clipped to at least 1",
+                "result": "group recall becomes 0 instead of undefined",
+            },
+            {
+                "case": "group NDCG with zero ideal gain",
+                "implemented_behavior": "if ideal DCG is 0, group NDCG is set to 0",
+                "result": "all-negative groups remain in the grouped average",
+            },
+            {
+                "case": "global severe recall with zero severe residual issues",
+                "implemented_behavior": "denominator uses max(total_severe, 1.0)",
+                "result": "reported severe recall is 0 instead of undefined",
+            },
+            {
+                "case": "PR-AUC on degenerate residual labels",
+                "implemented_behavior": "ValueError is caught and PR-AUC is set to 0",
+                "result": "notebook remains executable under degenerate slices",
+            },
+            {
+                "case": "tiny percent budgets on non-empty groups",
+                "implemented_behavior": "review budget count is clipped to a minimum of 1",
+                "result": "every non-empty facility-cycle group contributes at least one reviewed row",
+            },
+        ],
+    )
+
+
+def build_appendix_model_settings() -> pl.DataFrame:
+    return pl.DataFrame(
+        [
+            {
+                "model": "classifier",
+                "estimator_or_logic": "HistGradientBoostingClassifier",
+                "current_fixed_settings": "max_depth=3, random_state=config.seed",
+                "documented_future_tuning_space": "max_depth, learning_rate, max_leaf_nodes, min_samples_leaf",
+            },
+            {
+                "model": "cost_sensitive_classifier",
+                "estimator_or_logic": "HistGradientBoostingClassifier with sample weights",
+                "current_fixed_settings": "max_depth=3 plus issue-dollar-severity weighting",
+                "documented_future_tuning_space": "classifier settings plus weight multipliers",
+            },
+            {
+                "model": "regressor",
+                "estimator_or_logic": "HistGradientBoostingRegressor",
+                "current_fixed_settings": "max_depth=3, lower_bound=0.0, random_state=config.seed",
+                "documented_future_tuning_space": "max_depth, learning_rate, max_leaf_nodes, min_samples_leaf",
+            },
+            {
+                "model": "learning_to_rank proxy",
+                "estimator_or_logic": "HistGradientBoostingRegressor on relevance_grade",
+                "current_fixed_settings": "max_depth=3, lower_bound=0.0, upper_bound=3.0",
+                "documented_future_tuning_space": "same regressor settings plus alternative graded targets",
+            },
+            {
+                "model": "expected_value",
+                "estimator_or_logic": "minmax(estimated_exposure * clip(classification, 0.05, 1.0))",
+                "current_fixed_settings": "classification floor=0.05 before multiplication",
+                "documented_future_tuning_space": "classification floor, exposure formula, calibration strategy",
+            },
+            {
+                "model": "final_active_ranking",
+                "estimator_or_logic": "weighted blend",
+                "current_fixed_settings": "0.45 ranking + 0.15 classification + 0.15 cost_sensitive + 0.10 regression + 0.15 expected_value",
+                "documented_future_tuning_space": "blend weights selected on validation periods rather than fixed constants",
+            },
+            {
+                "model": "isolation_forest",
+                "estimator_or_logic": "IsolationForest",
+                "current_fixed_settings": "n_estimators=100, contamination=0.03, random_state=config.seed",
+                "documented_future_tuning_space": "n_estimators, contamination, max_samples",
+            },
+        ],
+    )
+
+
+def build_appendix_score_bucket_calibration(
+    scored_frame: pl.DataFrame,
+    bucket_count: int = 10,
+) -> pl.DataFrame:
+    residual_frame = scored_frame.filter(
+        pl.col(PayrollCol.RESIDUAL_RECORD) == 1,
+    ).with_columns(
+        pl.col(ScoreCol.FINAL_ANOMALY_SCORE)
+        .qcut(bucket_count, allow_duplicates=True)
+        .alias("score_bucket"),
+        (
+            pl.col(PayrollCol.TOTAL_GROSS_PAY)
+            - pl.col(PayrollCol.TOTAL_EXPECTED_GROSS_PAY)
+        ).alias("gross_gap"),
+    )
+    return (
+        residual_frame.group_by("score_bucket", maintain_order=True)
+        .agg(
+            pl.len().alias("records"),
+            pl.mean(ScoreCol.FINAL_ANOMALY_SCORE).round(4).alias("avg_score"),
+            pl.mean(PayrollCol.Y_ISSUE).round(4).alias("issue_rate"),
+            pl.mean(PayrollCol.Y_DOLLAR).round(2).alias("avg_residual_dollars"),
+            pl.mean("gross_gap").round(2).alias("avg_gross_gap"),
+            pl.mean(ScoreCol.ESTIMATED_EXPOSURE)
+            .round(2)
+            .alias("avg_estimated_exposure"),
+        )
+        .with_row_index("bucket_rank", offset=1)
+    )
+
+
+def build_appendix_stress_test_config(
+    config: PayrollConfig,
+    review_budgets: tuple[float, ...],
+    validation_mode: bool,
+) -> pl.DataFrame:
+    scenario_catalog = diagnostic_scenario_catalog()
+    scenario_rows = [
+        {
+            "artifact": "scenario_catalog",
+            "name": scenario.name,
+            "status": str(scenario.metadata.get("status", "unknown")),
+            "detail": str(scenario.metadata.get("description", "")),
+        }
+        for scenario in scenario_catalog.values()
+    ]
+    config_rows = [
+        {
+            "artifact": "runtime_config",
+            "name": "validation_mode",
+            "status": "enabled" if validation_mode else "disabled",
+            "detail": "Reduced workload for notebook execution checks"
+            if validation_mode
+            else "Full notebook research workload",
+        },
+        {
+            "artifact": "runtime_config",
+            "name": "facility_count",
+            "status": str(config.facility_count),
+            "detail": "Synthetic facility count for this notebook run",
+        },
+        {
+            "artifact": "runtime_config",
+            "name": "employee_count",
+            "status": str(config.employee_count),
+            "detail": "Synthetic employee population for this notebook run",
+        },
+        {
+            "artifact": "runtime_config",
+            "name": "pay_periods",
+            "status": str(config.pay_periods),
+            "detail": "Synthetic payroll cycles used for temporal evaluation",
+        },
+        {
+            "artifact": "runtime_config",
+            "name": "review_budget_percents",
+            "status": ", ".join(
+                format_review_budget_pct(budget) for budget in review_budgets
+            ),
+            "detail": "Grouped review budgets for the residual ranking study",
+        },
+        {
+            "artifact": "runtime_config",
+            "name": "reference_window_periods",
+            "status": str(config.reference_window_periods),
+            "detail": "Prior periods used for scoring-time context",
+        },
+        {
+            "artifact": "runtime_config",
+            "name": "bootstrap_samples",
+            "status": str(config.bootstrap_samples),
+            "detail": "Configured uncertainty bootstrap count available in project config",
+        },
+    ]
+    return pl.DataFrame(config_rows + scenario_rows)
 
 
 residual_label_diagnostics = build_residual_label_diagnostics(residual_payroll)
@@ -809,6 +1341,18 @@ final_recommendation_summary = pl.DataFrame(
             "Best balance of queue quality and residual utility in this run.",
         ],
     },
+)
+appendix_data_dictionary = build_appendix_data_dictionary()
+appendix_hard_rule_definitions = build_appendix_hard_rule_definitions()
+appendix_metric_definitions = build_appendix_metric_definitions()
+appendix_group_construction = build_appendix_group_construction(review_budget_percents)
+appendix_zero_positive_policy = build_appendix_zero_positive_policy()
+appendix_model_settings = build_appendix_model_settings()
+appendix_score_bucket_calibration = build_appendix_score_bucket_calibration(scored)
+appendix_stress_test_config = build_appendix_stress_test_config(
+    sim_config,
+    review_budget_percents,
+    validation_mode,
 )
 
 # %% [markdown]
@@ -1403,15 +1947,109 @@ final_recommendation_summary
 
 # %% [markdown]
 # ## 11. Technical Appendix
-#
-# Appendix sections planned for the active notebook:
-#
-# - A. Data dictionary
-# - B. Hard rule definitions
-# - C. Metric definitions
-# - D. Ranking group construction
-# - E. Handling zero-positive residual groups
-# - F. Hyperparameter search space
-# - G. Additional ablation tables
-# - H. Additional calibration plots
-# - I. Stress-test configurations
+
+# %% [markdown]
+# ### A. data dictionary
+
+# %%
+appendix_data_dictionary
+
+# %% [markdown]
+# ### B. hard rule definitions
+
+# %%
+appendix_hard_rule_definitions
+
+# %% [markdown]
+# ### C. metric definitions
+
+# %%
+appendix_metric_definitions
+
+# %% [markdown]
+# ### D. ranking group construction
+
+# %%
+appendix_group_construction
+
+# %% [markdown]
+# ### E. handling zero-positive residual groups
+
+# %%
+appendix_zero_positive_policy
+
+# %% [markdown]
+# ### F. model settings and documented tuning space
+
+# %%
+appendix_model_settings
+
+# %% [markdown]
+# ### G. additional ablation tables
+
+# %%
+if feature_ablation is not None:
+    display(feature_ablation)
+
+# %%
+if training_universe_ablation is not None:
+    display(training_universe_ablation)
+
+# %%
+if label_ablation is not None:
+    display(label_ablation)
+
+# %%
+if backtest is not None:
+    display(backtest)
+
+# %% [markdown]
+# ### H. score-bucket calibration diagnostics
+
+# %%
+appendix_score_bucket_calibration
+
+# %%
+(
+    ggplot(
+        appendix_score_bucket_calibration,
+        aes(x="bucket_rank", y="issue_rate"),
+    )
+    + geom_line()
+    + geom_point()
+    + theme_minimal()
+    + labs(x="Score bucket", y="Residual issue rate")
+    + ggtitle("Residual Issue Rate by Final-Score Bucket")
+)
+
+# %%
+(
+    ggplot(
+        appendix_score_bucket_calibration,
+        aes(x="bucket_rank", y="avg_residual_dollars"),
+    )
+    + geom_line()
+    + geom_point()
+    + theme_minimal()
+    + labs(x="Score bucket", y="Average residual dollars")
+    + ggtitle("Residual Dollars by Final-Score Bucket")
+)
+
+# %%
+(
+    ggplot(
+        appendix_score_bucket_calibration,
+        aes(x="bucket_rank", y="avg_gross_gap"),
+    )
+    + geom_line()
+    + geom_point()
+    + theme_minimal()
+    + labs(x="Score bucket", y="Average gross gap")
+    + ggtitle("Gross Gap by Final-Score Bucket")
+)
+
+# %% [markdown]
+# ### I. stress-test configurations
+
+# %%
+appendix_stress_test_config
