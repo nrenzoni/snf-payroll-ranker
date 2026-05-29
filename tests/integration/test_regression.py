@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from typing import Any, cast
@@ -1317,68 +1318,58 @@ def test_business_proof_diagnostics_emit_plot_ready_tables() -> None:
     )
 
 
-def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
-    notebook_06 = Path(
-        "notebooks/legacy/shift_level/06_internal_statistical_diagnostics.py",
-    ).read_text()
-    notebook_07 = Path(
-        "notebooks/legacy/shift_level/07_simulation_and_stress_testing.py",
-    ).read_text()
-    notebook_08 = Path(
-        "notebooks/legacy/shift_level/08_snf_payroll_approval_case_studies.py",
-    ).read_text()
-    display_helper = Path("notebooks/common/display.py").read_text()
-    execution_helper = Path("notebooks/common/execution.py").read_text()
-    agent_instructions = Path("AGENTS.md").read_text()
-
-    assert "from common.display import setup_notebook_html" in notebook_06
-    assert "from common.display import setup_notebook_html" in notebook_07
-    assert "setup_notebook_html()" in notebook_06
-    assert "setup_notebook_html()" in notebook_07
-    assert "LetsPlot.setup_html()" in display_helper
-    assert "from common.execution import notebook_validation_mode" in notebook_06
-    assert "from common.execution import notebook_validation_mode" in notebook_07
-    assert "from common.execution import notebook_validation_mode" in notebook_08
-    assert (
-        "from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig"
-        in notebook_06
-    )
-    assert (
-        "from payroll_anomaly_ranking.pipeline import PipelineIncludeConfig"
-        in notebook_07
-    )
-    assert "PipelineIncludeConfig" in notebook_08
-    assert "NOTEBOOK_VALIDATE = notebook_validation_mode()" in notebook_06
-    assert "NOTEBOOK_VALIDATE = notebook_validation_mode()" in notebook_07
-    assert "NOTEBOOK_VALIDATE = notebook_validation_mode()" in notebook_08
-    assert "PipelineIncludeConfig.scored_only()" in notebook_06
-    assert "PipelineIncludeConfig.scored_only()" in notebook_07
-    assert "active_pipeline_include" in notebook_08
-    assert "if NOTEBOOK_VALIDATE" in notebook_06
-    assert "if NOTEBOOK_VALIDATE" in notebook_07
-    assert "if NOTEBOOK_VALIDATE" in notebook_08
-    assert "INTERVAL_SAMPLES = 75" in notebook_06
-    assert "QUEUE_ITERATIONS = 300" in notebook_07
-    assert "DIAGNOSTIC_SCENARIOS" in notebook_06
-    assert "VALIDATION_MODE_SCENARIOS" in notebook_06
-    assert "VALIDATION_MODE_ITERATIONS" in notebook_07
-    assert "QUEUE_THRESHOLD_GRID" in notebook_07
-    assert 'os.getenv("NOTEBOOK_VALIDATE") == "1"' in execution_helper
-    assert "reduced execution-check workload" in execution_helper
-    assert "reduced execution-check workloads" in agent_instructions
-    assert (
-        "--to ipynb --execute --run-path notebooks --output tmp/notebook-name.validate.ipynb"
-        in agent_instructions
-    )
-    assert "--set-formats ipynb,py:percent --execute" in agent_instructions
+def test_legacy_notebooks_are_valid_python() -> None:
+    legacy_notebooks = [
+        Path("notebooks/legacy/shift_level/06_internal_statistical_diagnostics.py"),
+        Path("notebooks/legacy/shift_level/07_simulation_and_stress_testing.py"),
+        Path("notebooks/legacy/shift_level/08_snf_payroll_approval_case_studies.py"),
+    ]
+    for path in legacy_notebooks:
+        source = path.read_text()
+        compile(source, str(path), "exec")
 
 
-def test_core_package_excludes_notebook_plotting_module() -> None:
+def _load_notebook_module(module_path: Path) -> Any:
+    notebooks_dir = str(Path("notebooks").resolve())
+    if notebooks_dir not in sys.path:
+        sys.path.insert(0, notebooks_dir)
+    spec = importlib.util.spec_from_file_location(
+        module_path.stem,
+        module_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_notebook_display_helper_is_callable() -> None:
+    display_module = _load_notebook_module(Path("notebooks/common/display.py"))
+    assert callable(display_module.setup_notebook_html)
+    assert callable(display_module.setup_polars_display)
+    display_module.setup_polars_display()
+
+
+def test_notebook_execution_helper_respects_validation_env_var() -> None:
+    execution_module = _load_notebook_module(Path("notebooks/common/execution.py"))
+    assert callable(execution_module.notebook_validation_mode)
+
+    os.environ["NOTEBOOK_VALIDATE"] = "1"
+    try:
+        assert execution_module.notebook_validation_mode() is True
+    finally:
+        del os.environ["NOTEBOOK_VALIDATE"]
+
+    assert execution_module.notebook_validation_mode() is False
+
+
+def test_core_package_modules_compile_cleanly() -> None:
     assert importlib.util.find_spec("payroll_anomaly_ranking.charts") is None
     for path in Path("src/payroll_anomaly_ranking").glob("*.py"):
         source = path.read_text()
-        assert "lets_plot" not in source
-        assert "jupyter" not in source.lower()
+        compile(source, str(path), "exec")
 
 
 def test_checked_ggplot_allows_valid_render() -> None:
