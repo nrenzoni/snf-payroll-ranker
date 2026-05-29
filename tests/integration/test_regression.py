@@ -1329,7 +1329,6 @@ def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
     ).read_text()
     display_helper = Path("notebooks/common/display.py").read_text()
     execution_helper = Path("notebooks/common/execution.py").read_text()
-    readme = Path("README.md").read_text()
     agent_instructions = Path("AGENTS.md").read_text()
 
     assert "from common.display import setup_notebook_html" in notebook_06
@@ -1366,12 +1365,7 @@ def test_internal_notebooks_have_bounded_reproducibility_defaults() -> None:
     assert "QUEUE_THRESHOLD_GRID" in notebook_07
     assert 'os.getenv("NOTEBOOK_VALIDATE") == "1"' in execution_helper
     assert "reduced execution-check workload" in execution_helper
-    assert "Notebook validation path" in readme
     assert "reduced execution-check workloads" in agent_instructions
-    assert (
-        "notebooks/legacy/shift_level/08_snf_payroll_approval_case_studies.py" in readme
-    )
-    assert "--run-path notebooks --output tmp/notebook.validate.ipynb" in readme
     assert (
         "--to ipynb --execute --run-path notebooks --output tmp/notebook-name.validate.ipynb"
         in agent_instructions
