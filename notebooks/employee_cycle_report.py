@@ -17,6 +17,10 @@
 # # Residual ML Ranking for SNF Payroll Loss Prevention
 
 # %%
+# %load_ext autoreload
+# %autoreload 2
+
+# %%
 import polars as pl
 import polars.selectors as pl_selectors
 from common.display import setup_notebook_html, setup_polars_display
