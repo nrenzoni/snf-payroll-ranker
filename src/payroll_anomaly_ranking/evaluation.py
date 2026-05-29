@@ -1554,25 +1554,55 @@ def _employee_cycle_ablation_training_frame(
 def _employee_cycle_residual_ndcg_at_k(scored: pl.DataFrame) -> float:
     if scored.height == 0:
         return 0.0
-    values: list[float] = []
-    for _, group in scored.group_by(
-        [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
-    ):
-        relevances: list[float] = (
-            group.sort("_employee_cycle_group_rank")
-            .get_column(
-                PayrollCol.RELEVANCE_GRADE,
+    group_columns = [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX]
+    ranked = scored.with_columns(
+        ((2.0 ** pl.col(PayrollCol.RELEVANCE_GRADE).cast(pl.Float64)) - 1.0).alias(
+            "_dcg_gain",
+        ),
+        (pl.col("_employee_cycle_group_rank") + 1)
+        .cast(pl.Float64)
+        .log(base=2.0)
+        .alias("_dcg_discount"),
+        pl.col(PayrollCol.RELEVANCE_GRADE)
+        .rank("ordinal", descending=True)
+        .over(group_columns)
+        .alias("_employee_cycle_ideal_rank"),
+    ).with_columns(
+        (pl.col("_employee_cycle_ideal_rank") + 1)
+        .cast(pl.Float64)
+        .log(base=2.0)
+        .alias("_ideal_dcg_discount"),
+    )
+    ndcg_by_group = (
+        ranked.group_by(
+            [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+        )
+        .agg(
+            pl.when(
+                pl.col("_employee_cycle_group_rank")
+                <= pl.col("_employee_cycle_group_budget_count"),
             )
-            .cast(pl.Float64)
-            .to_list()
+            .then(pl.col("_dcg_gain") / pl.col("_dcg_discount"))
+            .otherwise(0.0)
+            .sum()
+            .alias("_actual_dcg"),
+            pl.when(
+                pl.col("_employee_cycle_ideal_rank")
+                <= pl.col("_employee_cycle_group_budget_count"),
+            )
+            .then(pl.col("_dcg_gain") / pl.col("_ideal_dcg_discount"))
+            .otherwise(0.0)
+            .sum()
+            .alias("_ideal_dcg"),
         )
-        budget_count = int(
-            group.select(pl.max("_employee_cycle_group_budget_count")).item() or 0,
+        .with_columns(
+            pl.when(pl.col("_ideal_dcg") > 0.0)
+            .then(pl.col("_actual_dcg") / pl.col("_ideal_dcg"))
+            .otherwise(0.0)
+            .alias("_group_ndcg"),
         )
-        actual = _dcg(relevances[:budget_count])
-        ideal = _dcg(sorted(relevances, reverse=True)[:budget_count])
-        values.append(0.0 if ideal == 0 else actual / ideal)
-    return (sum(values) / len(values)) if values else 0.0
+    )
+    return float(ndcg_by_group.select(pl.mean("_group_ndcg")).item() or 0.0)
 
 
 def _employee_cycle_group_budget_count_expr(budget: float) -> pl.Expr:
