@@ -61,6 +61,7 @@ from payroll_anomaly_ranking.features import (
 from payroll_anomaly_ranking.models import (
     _feature_matrix,
     score_employee_pay_cycles,
+    score_featured_employee_pay_cycles,
     score_payroll,
 )
 from payroll_anomaly_ranking.pipeline import (
@@ -557,6 +558,39 @@ def test_employee_cycle_scoring_returns_formulation_columns() -> None:
         ScoreCol.FINAL_ANOMALY_SCORE,
     )
     assert len(results.feature_columns) > 0
+
+
+def test_employee_cycle_featured_scoring_matches_direct_scoring() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    payroll = generate_employee_pay_cycles(config).payroll
+    featured = build_employee_cycle_features(payroll)
+
+    direct = score_employee_pay_cycles(payroll, config)
+    featured_results = score_featured_employee_pay_cycles(featured, config)
+
+    assert direct.feature_columns == featured_results.feature_columns
+    assert direct.score_columns == featured_results.score_columns
+    assert direct.scored.select(
+        PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+        ScoreCol.CLASSIFICATION_SCORE,
+        ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
+        ScoreCol.REGRESSION_SCORE,
+        ScoreCol.EXPECTED_VALUE_SCORE,
+        ScoreCol.RANKING_SCORE,
+        ScoreCol.FINAL_ANOMALY_SCORE,
+        ScoreCol.PAY_PERIOD_RANK,
+    ).equals(
+        featured_results.scored.select(
+            PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+            ScoreCol.CLASSIFICATION_SCORE,
+            ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
+            ScoreCol.REGRESSION_SCORE,
+            ScoreCol.EXPECTED_VALUE_SCORE,
+            ScoreCol.RANKING_SCORE,
+            ScoreCol.FINAL_ANOMALY_SCORE,
+            ScoreCol.PAY_PERIOD_RANK,
+        ),
+    )
 
 
 def test_employee_cycle_formulations_are_not_collapsed_onto_one_signal() -> None:

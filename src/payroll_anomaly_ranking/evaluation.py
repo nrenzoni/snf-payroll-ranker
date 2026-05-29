@@ -15,9 +15,10 @@ from payroll_anomaly_ranking.columns import (
     ScoreCol,
 )
 from payroll_anomaly_ranking.config import PayrollConfig
+from payroll_anomaly_ranking.features import build_employee_cycle_features
 from payroll_anomaly_ranking.models import (
     EMPLOYEE_CYCLE_FEATURE_FAMILIES,
-    score_employee_pay_cycles,
+    score_featured_employee_pay_cycles,
     temporal_split,
 )
 
@@ -362,6 +363,7 @@ def employee_cycle_feature_ablation(
     review_budget: float | None = None,
 ) -> pl.DataFrame:
     budget = review_budget or _default_employee_cycle_ablation_budget(config)
+    featured = build_employee_cycle_features(payroll)
     cumulative_feature_sets = []
     selected: list[str] = []
     for feature_set, feature_columns in EMPLOYEE_CYCLE_FEATURE_FAMILIES.items():
@@ -370,8 +372,8 @@ def employee_cycle_feature_ablation(
 
     rows: list[dict[str, float | str]] = []
     for feature_set, feature_columns in cumulative_feature_sets:
-        scored = score_employee_pay_cycles(
-            payroll,
+        scored = score_featured_employee_pay_cycles(
+            featured,
             config,
             feature_columns=feature_columns,
         ).scored
@@ -406,6 +408,7 @@ def employee_cycle_training_universe_ablation(
     review_budget: float | None = None,
 ) -> pl.DataFrame:
     budget = review_budget or _default_employee_cycle_ablation_budget(config)
+    featured = build_employee_cycle_features(payroll)
     split = temporal_split(payroll)
     holdout_periods = (
         split.test.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list()
@@ -417,8 +420,8 @@ def employee_cycle_training_universe_ablation(
     ]
     rows: list[dict[str, float | str]] = []
     for label, training_universe, include_gate_feature in scenarios:
-        scored = score_employee_pay_cycles(
-            payroll,
+        scored = score_featured_employee_pay_cycles(
+            featured,
             config,
             training_universe=training_universe,
             include_hard_rule_flag_feature=include_gate_feature,

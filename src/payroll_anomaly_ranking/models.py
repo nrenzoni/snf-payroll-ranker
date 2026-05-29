@@ -407,6 +407,23 @@ def score_employee_pay_cycles(
     include_hard_rule_flag_feature: bool = False,
 ) -> EmployeeCycleScoringResults:
     featured = build_employee_cycle_features(payroll)
+    return score_featured_employee_pay_cycles(
+        featured,
+        config,
+        feature_columns=feature_columns,
+        training_universe=training_universe,
+        include_hard_rule_flag_feature=include_hard_rule_flag_feature,
+    )
+
+
+def score_featured_employee_pay_cycles(
+    featured: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+    *,
+    feature_columns: tuple[str, ...] | None = None,
+    training_universe: str = "all_records",
+    include_hard_rule_flag_feature: bool = False,
+) -> EmployeeCycleScoringResults:
     if PayrollCol.RECORD_ID not in featured.columns:
         featured = featured.with_row_index(name=PayrollCol.RECORD_ID)
     selected_feature_columns = _employee_cycle_selected_feature_columns(
