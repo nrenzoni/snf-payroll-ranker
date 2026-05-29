@@ -123,6 +123,7 @@ from common.plots import (
     aes,
     geom_line,
     geom_point,
+    gggrid,
     ggplot,
     ggtitle,
     labs,
@@ -398,6 +399,29 @@ def notebook_model_label(model_name: str) -> str:
         "active_ranking": "final_active_ranking",
         str(ScoreCol.ML_SCORE): "isolation_forest",
     }.get(model_name, model_name)
+
+
+def build_model_budget_plot(
+    metric_col: str,
+    title: str,
+    y_label: str,
+) -> object:
+    return (
+        ggplot(
+            model_budget_metrics,
+            aes(
+                x="review_budget_label",
+                y=metric_col,
+                color="model",
+            ),
+        )
+        + geom_line()
+        + geom_point()
+        + theme_minimal()
+        + rotated_x_labels()
+        + labs(x="Residual queue reviewed", y=y_label, color="Model")
+        + ggtitle(title)
+    )
 
 
 # %% [markdown]
@@ -867,7 +891,7 @@ residual_scored.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).select(
 # - same train and test splits
 # - same top-K evaluation budgets
 # - same leakage rules
-
+#
 # In this run, the leading formulations are close rather than widely separated.
 # `expected_value` is the strongest overall default, `regressor` is most
 # competitive on severe recovery, and `classifier` remains the strongest pure
@@ -1032,48 +1056,6 @@ if backtest is not None:
 main_results_summary
 
 # %% [markdown]
-# ### residual dollars captured by review-budget percentage
-
-# %%
-(
-    ggplot(
-        model_budget_metrics,
-        aes(
-            x="review_budget_label",
-            y=MetricCol.DOLLARS_CAPTURED_AT_K,
-            color="model",
-        ),
-    )
-    + geom_line()
-    + geom_point()
-    + theme_minimal()
-    + rotated_x_labels()
-    + labs(x="Residual queue reviewed", y="Residual dollars captured", color="Model")
-    + ggtitle("Residual Dollars Captured by Review-Budget Percentage")
-)
-
-# %% [markdown]
-# ### severe recall by review-budget percentage
-
-# %%
-(
-    ggplot(
-        model_budget_metrics,
-        aes(
-            x="review_budget_label",
-            y=MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-            color="model",
-        ),
-    )
-    + geom_line()
-    + geom_point()
-    + theme_minimal()
-    + rotated_x_labels()
-    + labs(x="Residual queue reviewed", y="Rule-missed severe recall", color="Model")
-    + ggtitle("Residual Severe-Issue Recall by Review-Budget Percentage")
-)
-
-# %% [markdown]
 # ### severe-family plot interpretation
 #
 # The severe residual slice is concentrated rather than broad. The residual
@@ -1111,66 +1093,44 @@ main_results_summary
 # only 1% to 10% of each facility-cycle residual queue.
 
 # %% [markdown]
-# ### residual NDCG by review-budget percentage
+# ### main-results dashboard
 
 # %%
-(
-    ggplot(
-        model_budget_metrics,
-        aes(
-            x="review_budget_label",
-            y=MetricCol.RESIDUAL_NDCG_AT_K,
-            color="model",
+gggrid(
+    [
+        build_model_budget_plot(
+            MetricCol.RESIDUAL_NDCG_AT_K,
+            "Residual NDCG by\nReview-Budget Percentage",
+            "Residual NDCG",
         ),
-    )
-    + geom_line()
-    + geom_point()
-    + theme_minimal()
-    + rotated_x_labels()
-    + labs(x="Residual queue reviewed", y="Residual NDCG", color="Model")
-    + ggtitle("Residual NDCG by Review-Budget Percentage")
+        build_model_budget_plot(
+            MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+            "Residual Severe-Issue Recall by\nReview-Budget Percentage",
+            "Rule-missed severe recall",
+        ),
+        build_model_budget_plot(
+            MetricCol.DOLLARS_CAPTURED_AT_K,
+            "Residual Dollars Captured by\nReview-Budget Percentage",
+            "Residual dollars captured",
+        ),
+        build_model_budget_plot(
+            MetricCol.INCREMENTAL_UTILITY_AT_K,
+            "Residual Utility by\nReview-Budget Percentage",
+            "Incremental utility",
+        ),
+    ],
+    ncol=2,
+    guides="collect",
 )
 
 # %% [markdown]
 # ### reviewer yield by review-budget percentage
 
 # %%
-(
-    ggplot(
-        model_budget_metrics,
-        aes(
-            x="review_budget_label",
-            y=MetricCol.REVIEWER_YIELD_AT_K,
-            color="model",
-        ),
-    )
-    + geom_line()
-    + geom_point()
-    + theme_minimal()
-    + rotated_x_labels()
-    + labs(x="Residual queue reviewed", y="Reviewer yield", color="Model")
-    + ggtitle("Reviewer Yield by Review-Budget Percentage")
-)
-
-# %% [markdown]
-# ### incremental utility by review-budget percentage
-
-# %%
-(
-    ggplot(
-        model_budget_metrics,
-        aes(
-            x="review_budget_label",
-            y=MetricCol.INCREMENTAL_UTILITY_AT_K,
-            color="model",
-        ),
-    )
-    + geom_line()
-    + geom_point()
-    + theme_minimal()
-    + rotated_x_labels()
-    + labs(x="Residual queue reviewed", y="Incremental utility", color="Model")
-    + ggtitle("Residual Utility by Review-Budget Percentage")
+build_model_budget_plot(
+    MetricCol.REVIEWER_YIELD_AT_K,
+    "Reviewer Yield by Review-Budget Percentage",
+    "Reviewer yield",
 )
 
 # %% [markdown]
