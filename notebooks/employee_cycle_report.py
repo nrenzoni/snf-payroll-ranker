@@ -27,13 +27,18 @@ from common.display import setup_notebook_html, setup_polars_display
 from common.execution import notebook_validation_mode
 from common.plots import (
     aes,
+    coord_flip,
+    geom_bar,
     geom_line,
     geom_point,
+    geom_segment,
+    geom_tile,
     gggrid,
     ggplot,
     ggtitle,
     labs,
     rotated_x_labels,
+    scale_fill_gradient,
     theme_minimal,
 )
 from IPython.display import display
@@ -70,6 +75,184 @@ validation_mode = notebook_validation_mode()
 # %%
 def format_review_budget_pct(budget: float) -> str:
     return f"{budget:.0%}" if budget <= 1 else str(int(budget))
+
+
+def build_residual_issue_rate_plot(facility_issue_rate: pl.DataFrame) -> object:
+    plot_data = facility_issue_rate.with_columns(
+        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
+        pl.col("residual_issue_rate").round(4),
+    ).sort("residual_issue_rate")
+    return (
+        ggplot(
+            plot_data,
+            aes(x="facility_id", y="residual_issue_rate"),
+        )
+        + geom_bar(stat="identity", fill="#2563eb")
+        + coord_flip()
+        + theme_minimal()
+        + labs(
+            x="Facility",
+            y="Residual issue rate",
+        )
+        + ggtitle("Residual Issue Rate by Facility")
+    )
+
+
+def build_severe_residual_heatmap(severe_counts: pl.DataFrame) -> object:
+    plot_data = severe_counts.with_columns(
+        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
+        pl.col(PayrollCol.PAY_PERIOD_INDEX).alias("pay_period"),
+    )
+    return (
+        ggplot(
+            plot_data,
+            aes(
+                x="pay_period",
+                y="facility_id",
+                fill="severe_residual_issues",
+            ),
+        )
+        + geom_tile()
+        + theme_minimal()
+        + labs(
+            x="Pay period",
+            y="Facility",
+            fill="Severe issues",
+        )
+        + scale_fill_gradient(low="#f8fafc", high="#b91c1c")
+        + ggtitle("Severe Residual Issues by Facility-Cycle")
+    )
+
+
+def build_issue_type_mix_plot(issue_type_mix: pl.DataFrame) -> object:
+    plot_data = issue_type_mix.with_columns(
+        pl.col(PayrollCol.ANOMALY_CATEGORY).cast(pl.String).alias("anomaly_category"),
+    ).sort([PayrollCol.ANOMALY_CATEGORY, "population"])
+    return (
+        ggplot(
+            plot_data,
+            aes(
+                x="anomaly_category",
+                y="records",
+                fill="population",
+            ),
+        )
+        + geom_bar(stat="identity", position="dodge")
+        + coord_flip()
+        + theme_minimal()
+        + labs(
+            x="Anomaly family",
+            y="Records",
+            fill="Population",
+        )
+        + ggtitle("Issue-Type Mix Across Hard-Rule and Residual Populations")
+    )
+
+
+def bootstrap_metric_title(metric_name: str) -> str:
+    return {
+        str(MetricCol.RESIDUAL_NDCG_AT_K): "Residual NDCG",
+        str(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K): "Severe Recall",
+        str(MetricCol.DOLLARS_CAPTURED_AT_K): "Dollars Captured",
+        str(MetricCol.REVIEWER_YIELD_AT_K): "Reviewer Yield",
+        str(MetricCol.INCREMENTAL_UTILITY_AT_K): "Incremental Utility",
+    }.get(metric_name, metric_name)
+
+
+def build_bootstrap_interval_plot(
+    bootstrap_results: pl.DataFrame,
+    metric_name: str,
+    budget: float,
+) -> object:
+    plot_data = (
+        bootstrap_results.filter(
+            (pl.col("summary_type") == "model_metric")
+            & (pl.col("budget") == budget)
+            & (pl.col("metric") == metric_name),
+        )
+        .select("model", "point_estimate", "lower_95", "upper_95")
+        .sort("point_estimate")
+    )
+    return (
+        ggplot(
+            plot_data,
+            aes(x="model", y="point_estimate", color="model"),
+        )
+        + geom_segment(
+            aes(
+                x="model",
+                xend="model",
+                y="lower_95",
+                yend="upper_95",
+            ),
+            size=1.1,
+            alpha=0.7,
+        )
+        + geom_point(size=3)
+        + coord_flip()
+        + theme_minimal()
+        + labs(
+            x="Model",
+            y="Point estimate with 95% interval",
+            color="Model",
+        )
+        + ggtitle(
+            f"{bootstrap_metric_title(metric_name)} at {format_review_budget_pct(budget)} Review",
+        )
+    )
+
+
+def build_similarity_matrix(
+    similarity_diagnostics: pl.DataFrame,
+    value_col: str,
+) -> pl.DataFrame:
+    models = sorted(
+        {
+            *similarity_diagnostics.get_column("model_a").to_list(),
+            *similarity_diagnostics.get_column("model_b").to_list(),
+        },
+    )
+    pair_values = {
+        frozenset((row["model_a"], row["model_b"])): float(row[value_col] or 0.0)
+        for row in similarity_diagnostics.select(
+            "model_a",
+            "model_b",
+            value_col,
+        ).to_dicts()
+    }
+    rows: list[dict[str, float | str]] = []
+    for left_model in models:
+        for right_model in models:
+            rows.append(
+                {
+                    "model_x": left_model,
+                    "model_y": right_model,
+                    value_col: 1.0
+                    if left_model == right_model
+                    else pair_values.get(frozenset((left_model, right_model)), 0.0),
+                },
+            )
+    return pl.DataFrame(rows)
+
+
+def build_similarity_heatmap(
+    similarity_diagnostics: pl.DataFrame,
+    value_col: str,
+    title: str,
+) -> object:
+    plot_data = build_similarity_matrix(similarity_diagnostics, value_col)
+    return (
+        ggplot(
+            plot_data,
+            aes(x="model_x", y="model_y", fill=value_col),
+        )
+        + geom_tile()
+        + theme_minimal()
+        + rotated_x_labels()
+        + scale_fill_gradient(low="#f8fafc", high="#0f766e")
+        + labs(x="Model", y="Model", fill="Value")
+        + ggtitle(title)
+    )
 
 
 # %% [markdown]
@@ -348,19 +531,21 @@ funnel.with_columns(
 # ### residual issue rate by facility
 
 # %%
-residual_diagnostics["facility_residual_issue_rate"].head(10)
+build_residual_issue_rate_plot(residual_diagnostics["facility_residual_issue_rate"])
 
 # %% [markdown]
 # ### severe residual issues by facility-cycle
 
 # %%
-residual_diagnostics["facility_cycle_residual_severe_counts"].head(10)
+build_severe_residual_heatmap(
+    residual_diagnostics["facility_cycle_residual_severe_counts"],
+)
 
 # %% [markdown]
 # ### issue-type mix
 
 # %%
-residual_diagnostics["issue_type_mix"]
+build_issue_type_mix_plot(residual_diagnostics["issue_type_mix"])
 
 # %% [markdown]
 # ### top residual dollar records
@@ -792,8 +977,8 @@ bootstrap_summary = bootstrap_residual_model_comparison(
         "learning_to_rank": ScoreCol.RANKING_SCORE,
         "final_active_ranking": ScoreCol.FINAL_ANOMALY_SCORE,
     },
-    budgets=review_budget_percents,
-    n_bootstrap=50 if validation_mode else 500,
+    budgets=(0.05,),
+    n_bootstrap=10 if validation_mode else 500,
     seed=sim_config.seed,
 )
 
@@ -1081,19 +1266,31 @@ comparison_for_summary.select(
 # impact is visible alongside the interval.
 
 # %%
-bootstrap_summary.filter(pl.col("budget") == 0.05).select(
-    "summary_type",
-    "model",
-    "comparison",
-    "metric",
-    "point_estimate",
-    "lower_95",
-    "upper_95",
-    "interval_method",
-    "sensitivity_min",
-    "sensitivity_max",
-    "sensitivity_range",
-    "sensitivity_method",
+gggrid(
+    [
+        build_bootstrap_interval_plot(
+            bootstrap_summary,
+            MetricCol.RESIDUAL_NDCG_AT_K,
+            0.05,
+        ),
+        build_bootstrap_interval_plot(
+            bootstrap_summary,
+            MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+            0.05,
+        ),
+        build_bootstrap_interval_plot(
+            bootstrap_summary,
+            MetricCol.DOLLARS_CAPTURED_AT_K,
+            0.05,
+        ),
+        build_bootstrap_interval_plot(
+            bootstrap_summary,
+            MetricCol.INCREMENTAL_UTILITY_AT_K,
+            0.05,
+        ),
+    ],
+    ncol=2,
+    guides="collect",
 )
 
 # %% [markdown]
@@ -1124,7 +1321,26 @@ residual_scored.select(
 # ### model similarity diagnostics
 
 # %%
-model_similarity_diagnostics
+gggrid(
+    [
+        build_similarity_heatmap(
+            model_similarity_diagnostics,
+            "score_correlation",
+            "Model Score Correlation",
+        ),
+        build_similarity_heatmap(
+            model_similarity_diagnostics,
+            "top_1_overlap",
+            "Model Overlap at 1% Review",
+        ),
+        build_similarity_heatmap(
+            model_similarity_diagnostics,
+            f"top_{format_review_budget_pct(0.05 if 0.05 in review_budget_percents else review_budget_percents[0])}_overlap",
+            "Model Overlap at Active Review Budget",
+        ),
+    ],
+    ncol=2,
+)
 
 # %% [markdown]
 # The overlap table shows a tight cluster at the top of the leaderboard. The
