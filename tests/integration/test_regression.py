@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 import polars as pl
 import pytest
 
@@ -40,6 +41,8 @@ from payroll_anomaly_ranking.diagnostics import (
     top_subgroup_diagnostics,
 )
 from payroll_anomaly_ranking.evaluation import (
+    _bootstrap_group_rows,
+    _bootstrap_sample_groups,
     bootstrap_residual_model_comparison,
     employee_cycle_feature_ablation,
     employee_cycle_issue_type_model_performance,
@@ -838,10 +841,23 @@ def test_bootstrap_residual_model_comparison_returns_combined_summary() -> None:
         "upper_95",
         "samples",
         "method",
+        "interval_method",
+        "sensitivity_samples",
+        "sensitivity_min",
+        "sensitivity_max",
+        "sensitivity_range",
+        "sensitivity_method",
     } <= set(summary.columns)
     assert {"model_metric", "pairwise_delta"} <= set(
         summary.get_column("summary_type").unique().to_list(),
     )
+    assert set(summary.get_column("metric").unique().to_list()) == {
+        MetricCol.RESIDUAL_NDCG_AT_K,
+        MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+        MetricCol.REVIEWER_YIELD_AT_K,
+        MetricCol.DOLLARS_CAPTURED_AT_K,
+        MetricCol.INCREMENTAL_UTILITY_AT_K,
+    }
     assert (
         summary.filter(pl.col("summary_type") == "pairwise_delta")
         .get_column("comparison")
@@ -855,6 +871,67 @@ def test_bootstrap_residual_model_comparison_returns_combined_summary() -> None:
             [15] * summary.filter(pl.col("summary_type") == "model_metric").height,
         )
     ).all()
+    assert (summary.get_column("interval_method") == "percentile").all()
+    sensitivity_metrics = summary.filter(
+        pl.col("metric").is_in(
+            [
+                MetricCol.DOLLARS_CAPTURED_AT_K,
+                MetricCol.INCREMENTAL_UTILITY_AT_K,
+            ],
+        ),
+    )
+    assert sensitivity_metrics.height > 0
+    assert (
+        sensitivity_metrics.get_column("sensitivity_method").drop_nulls().unique()
+        == pl.Series(["leave_one_facility_cycle_out"], dtype=pl.String)
+    ).all()
+    assert (
+        sensitivity_metrics.get_column("sensitivity_samples").drop_nulls() > 0
+    ).all()
+    non_sensitivity_metrics = summary.filter(
+        ~pl.col("metric").is_in(
+            [
+                MetricCol.DOLLARS_CAPTURED_AT_K,
+                MetricCol.INCREMENTAL_UTILITY_AT_K,
+            ],
+        ),
+    )
+    assert (
+        non_sensitivity_metrics.get_column("sensitivity_method").drop_nulls().is_empty()
+    )
+
+
+def test_bootstrap_sample_groups_resamples_whole_facility_cycles() -> None:
+    scored = pl.DataFrame(
+        {
+            PayrollCol.FACILITY_ID: ["A", "A", "A", "B", "B", "B"],
+            PayrollCol.PAY_PERIOD_INDEX: [1, 1, 2, 1, 1, 2],
+            PayrollCol.EMPLOYEE_PAY_CYCLE_ID: ["a1", "a2", "a3", "b1", "b2", "b3"],
+            PayrollCol.RESIDUAL_RECORD: [1, 1, 1, 1, 1, 1],
+            PayrollCol.Y_ISSUE: [1, 0, 1, 0, 1, 0],
+            PayrollCol.Y_DOLLAR: [10.0, 0.0, 20.0, 0.0, 5.0, 0.0],
+            PayrollCol.RELEVANCE_GRADE: [3, 0, 2, 0, 1, 0],
+            PayrollCol.RULE_MISSED_SEVERE_ISSUE: [1, 0, 0, 0, 1, 0],
+            PayrollCol.NET_UTILITY: [8.0, -1.0, 12.0, -1.0, 4.0, -1.0],
+            ScoreCol.CLASSIFICATION_SCORE: [0.9, 0.1, 0.8, 0.2, 0.7, 0.3],
+            ScoreCol.FINAL_ANOMALY_SCORE: [0.9, 0.1, 0.8, 0.2, 0.7, 0.3],
+        },
+    )
+
+    group_rows = _bootstrap_group_rows(scored)
+    sampled = _bootstrap_sample_groups(scored, group_rows, np.random.default_rng(3))
+    sampled_group_sizes = sampled.group_by(
+        [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+    ).len()
+    original_group_sizes = set(
+        scored.group_by([PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX])
+        .len()
+        .get_column("len")
+        .to_list(),
+    )
+
+    assert sampled_group_sizes.height == len(group_rows)
+    assert set(sampled_group_sizes.get_column("len").to_list()) <= original_group_sizes
 
 
 def test_employee_cycle_review_queue_uses_cycle_fields() -> None:

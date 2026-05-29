@@ -43,6 +43,20 @@ class RollingOriginResults:
     stability_summary: pl.DataFrame
 
 
+BOOTSTRAP_METRICS = (
+    MetricCol.RESIDUAL_NDCG_AT_K,
+    MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+    MetricCol.REVIEWER_YIELD_AT_K,
+    MetricCol.DOLLARS_CAPTURED_AT_K,
+    MetricCol.INCREMENTAL_UTILITY_AT_K,
+)
+
+SENSITIVITY_METRICS = (
+    MetricCol.DOLLARS_CAPTURED_AT_K,
+    MetricCol.INCREMENTAL_UTILITY_AT_K,
+)
+
+
 def precision_recall_at_k(scored: pl.DataFrame, k: int) -> dict[str, float]:
     top = (
         scored.sort(
@@ -384,11 +398,17 @@ def bootstrap_residual_model_comparison(
     bootstrap_metrics = pl.DataFrame(bootstrap_metric_rows, infer_schema_length=None)
     point_deltas = _expected_value_pairwise_rows(point_metrics)
     bootstrap_deltas = _expected_value_pairwise_rows(bootstrap_metrics)
+    point_sensitivity = _cluster_leave_one_out_rows(
+        residual_scored,
+        score_cols,
+        budgets,
+    )
+    delta_sensitivity = _expected_value_pairwise_rows(point_sensitivity)
 
     return pl.concat(
         [
-            _bootstrap_summary(point_metrics, bootstrap_metrics),
-            _bootstrap_summary(point_deltas, bootstrap_deltas),
+            _bootstrap_summary(point_metrics, bootstrap_metrics, point_sensitivity),
+            _bootstrap_summary(point_deltas, bootstrap_deltas, delta_sensitivity),
         ],
         how="vertical_relaxed",
     ).sort(["summary_type", "budget", "metric", "model"])
@@ -1352,6 +1372,7 @@ def _residual_model_metric_rows(
     score_cols: dict[str, str],
     budgets: tuple[float, ...],
     bootstrap_index: int = -1,
+    dropped_group_id: str | None = None,
 ) -> list[dict[str, float | int | str | None]]:
     rows: list[dict[str, float | int | str | None]] = []
     for model_name, score_col in score_cols.items():
@@ -1369,7 +1390,11 @@ def _residual_model_metric_rows(
                 pr_auc=pr_auc,
             )
             for metric_name, metric_value in metrics.items():
-                if metric_name == MetricCol.K or isinstance(metric_value, str):
+                if (
+                    metric_name == MetricCol.K
+                    or isinstance(metric_value, str)
+                    or metric_name not in BOOTSTRAP_METRICS
+                ):
                     continue
                 rows.append(
                     {
@@ -1382,6 +1407,7 @@ def _residual_model_metric_rows(
                         "metric": str(metric_name),
                         "value": float(metric_value),
                         "bootstrap_index": bootstrap_index,
+                        "dropped_group_id": dropped_group_id,
                     },
                 )
     return rows
@@ -1421,12 +1447,14 @@ def _expected_value_pairwise_rows(metrics: pl.DataFrame) -> pl.DataFrame:
         pl.col("metric"),
         (pl.col("reference_value") - pl.col("value")).alias("value"),
         pl.col("bootstrap_index"),
+        pl.col("dropped_group_id"),
     )
 
 
 def _bootstrap_summary(
     point_values: pl.DataFrame,
     bootstrap_values: pl.DataFrame,
+    sensitivity_values: pl.DataFrame,
 ) -> pl.DataFrame:
     if point_values.is_empty():
         return _empty_bootstrap_model_comparison()
@@ -1443,24 +1471,144 @@ def _bootstrap_summary(
         *summary_keys,
         pl.col("value").alias("point_estimate"),
     )
+    point_estimates = _normalize_bootstrap_summary_keys(point_estimates)
+    bootstrap_values = _normalize_bootstrap_summary_keys(bootstrap_values)
+    sensitivity_summary = _normalize_bootstrap_summary_keys(
+        _sensitivity_summary(sensitivity_values, summary_keys),
+    )
     if bootstrap_values.is_empty():
-        return point_estimates.with_columns(
+        return point_estimates.join(
+            sensitivity_summary,
+            on=summary_keys,
+            how="left",
+        ).with_columns(
             pl.col("point_estimate").alias("mean"),
             pl.col("point_estimate").alias("lower_95"),
             pl.col("point_estimate").alias("upper_95"),
             pl.lit(0, dtype=pl.Int64).alias("samples"),
             pl.lit("clustered_group_bootstrap").alias("method"),
+            pl.lit("percentile").alias("interval_method"),
         )
-    return point_estimates.join(
-        bootstrap_values.group_by(summary_keys).agg(
-            pl.mean("value").alias("mean"),
-            pl.col("value").quantile(0.025).alias("lower_95"),
-            pl.col("value").quantile(0.975).alias("upper_95"),
-            pl.len().alias("samples"),
-        ),
-        on=summary_keys,
-        how="left",
-    ).with_columns(pl.lit("clustered_group_bootstrap").alias("method"))
+    return (
+        point_estimates.join(
+            bootstrap_values.group_by(summary_keys).agg(
+                pl.mean("value").alias("mean"),
+                pl.col("value").quantile(0.025).alias("lower_95"),
+                pl.col("value").quantile(0.975).alias("upper_95"),
+                pl.len().alias("samples"),
+            ),
+            on=summary_keys,
+            how="left",
+        )
+        .join(
+            sensitivity_summary,
+            on=summary_keys,
+            how="left",
+        )
+        .with_columns(
+            pl.lit("clustered_group_bootstrap").alias("method"),
+            pl.lit("percentile").alias("interval_method"),
+        )
+    )
+
+
+def _cluster_leave_one_out_rows(
+    residual_scored: pl.DataFrame,
+    score_cols: dict[str, str],
+    budgets: tuple[float, ...],
+) -> pl.DataFrame:
+    if residual_scored.is_empty() or not score_cols or not budgets:
+        return _empty_bootstrap_long_values()
+    sensitivity_rows: list[dict[str, float | int | str | None]] = []
+    group_ids = (
+        residual_scored.select(_bootstrap_group_id_expr().alias("group_id"))
+        .get_column("group_id")
+        .unique()
+        .to_list()
+    )
+    for group_id in group_ids:
+        dropped = residual_scored.filter(_bootstrap_group_id_expr() != str(group_id))
+        if dropped.is_empty():
+            continue
+        sensitivity_rows.extend(
+            _residual_model_metric_rows(
+                dropped,
+                score_cols,
+                budgets,
+                dropped_group_id=str(group_id),
+            ),
+        )
+    if not sensitivity_rows:
+        return _empty_bootstrap_long_values()
+    return pl.DataFrame(sensitivity_rows, infer_schema_length=None)
+
+
+def _sensitivity_summary(
+    sensitivity_values: pl.DataFrame,
+    summary_keys: list[str],
+) -> pl.DataFrame:
+    if sensitivity_values.is_empty():
+        return _empty_sensitivity_summary()
+    nullable_summary_keys = ["reference_model", "challenger_model", "comparison"]
+    return (
+        sensitivity_values.filter(pl.col("metric").is_in(SENSITIVITY_METRICS))
+        .with_columns(
+            [
+                pl.col(column).fill_null("__bootstrap_null__").alias(column)
+                for column in nullable_summary_keys
+            ],
+        )
+        .group_by(summary_keys)
+        .agg(
+            pl.len().alias("sensitivity_samples"),
+            pl.min("value").alias("sensitivity_min"),
+            pl.max("value").alias("sensitivity_max"),
+        )
+        .with_columns(
+            (pl.col("sensitivity_max") - pl.col("sensitivity_min")).alias(
+                "sensitivity_range",
+            ),
+            *[
+                pl.when(pl.col(column) == "__bootstrap_null__")
+                .then(None)
+                .otherwise(pl.col(column))
+                .alias(column)
+                for column in nullable_summary_keys
+            ],
+            pl.lit("leave_one_facility_cycle_out").alias("sensitivity_method"),
+        )
+    )
+
+
+def _normalize_bootstrap_summary_keys(frame: pl.DataFrame) -> pl.DataFrame:
+    nullable_summary_keys = ["reference_model", "challenger_model", "comparison"]
+    present_keys = [
+        column for column in nullable_summary_keys if column in frame.columns
+    ]
+    if not present_keys:
+        return frame
+    return frame.with_columns(
+        [pl.col(column).cast(pl.String).alias(column) for column in present_keys],
+    )
+
+
+def _empty_sensitivity_summary() -> pl.DataFrame:
+    return pl.DataFrame(
+        schema={
+            "summary_type": pl.String,
+            "model": pl.String,
+            "reference_model": pl.String,
+            "challenger_model": pl.String,
+            "comparison": pl.String,
+            "budget": pl.Float64,
+            "metric": pl.String,
+            "sensitivity_samples": pl.Int64,
+            "sensitivity_min": pl.Float64,
+            "sensitivity_max": pl.Float64,
+            "sensitivity_range": pl.Float64,
+            "sensitivity_method": pl.String,
+        },
+    )
 
 
 def _empty_bootstrap_long_values() -> pl.DataFrame:
@@ -1475,6 +1623,7 @@ def _empty_bootstrap_long_values() -> pl.DataFrame:
             "metric": pl.String,
             "value": pl.Float64,
             "bootstrap_index": pl.Int64,
+            "dropped_group_id": pl.String,
         },
     )
 
@@ -1495,6 +1644,12 @@ def _empty_bootstrap_model_comparison() -> pl.DataFrame:
             "upper_95": pl.Float64,
             "samples": pl.Int64,
             "method": pl.String,
+            "interval_method": pl.String,
+            "sensitivity_samples": pl.Int64,
+            "sensitivity_min": pl.Float64,
+            "sensitivity_max": pl.Float64,
+            "sensitivity_range": pl.Float64,
+            "sensitivity_method": pl.String,
         },
     )
 

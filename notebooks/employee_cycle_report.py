@@ -1073,9 +1073,28 @@ comparison_for_summary.select(
 
 # %% [markdown]
 # ### clustered bootstrap summary at 5% budget
+#
+# Residual NDCG, rule-missed severe recall, and reviewer yield use clustered
+# percentile intervals over facility x payroll cycle resamples. Residual dollars
+# captured and incremental utility use the same percentile intervals plus a
+# leave-one-facility-cycle-out sensitivity summary so concentrated business
+# impact is visible alongside the interval.
 
 # %%
-bootstrap_summary.filter(pl.col("budget") == 0.05)
+bootstrap_summary.filter(pl.col("budget") == 0.05).select(
+    "summary_type",
+    "model",
+    "comparison",
+    "metric",
+    "point_estimate",
+    "lower_95",
+    "upper_95",
+    "interval_method",
+    "sensitivity_min",
+    "sensitivity_max",
+    "sensitivity_range",
+    "sensitivity_method",
+)
 
 # %% [markdown]
 # ### decision summary
