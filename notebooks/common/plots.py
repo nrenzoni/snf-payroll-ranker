@@ -74,23 +74,24 @@ class CheckedPlot:
         raw_data = plot_dict.get("data")
         df_str: str | None = None
 
-        if raw_data is not None:
-            if hasattr(raw_data, "select") and callable(
-                getattr(raw_data, "select"),
-            ):  # Polars DataFrame
-                filtered_df = raw_data.select(active_cols)
-                df_str = str(filtered_df)
-            elif hasattr(raw_data, "filter") and hasattr(
-                raw_data,
-                "to_string",
-            ):  # Pandas DataFrame
-                filtered_df = raw_data[active_cols]
-                df_str = filtered_df.to_string(index=False)
+        if raw_data is None:
+            raise Exception("no data to render")
+
+        if hasattr(raw_data, "select") and callable(
+            getattr(raw_data, "select"),
+        ):  # Polars DataFrame
+            filtered_df = raw_data.select(active_cols)
+            df_str = str(filtered_df)
+        elif hasattr(raw_data, "filter") and hasattr(
+            raw_data,
+            "to_string",
+        ):  # Pandas DataFrame
+            filtered_df = raw_data[active_cols]
+            df_str = filtered_df.to_string(index=False)
+        else:
+            raise Exception("raw_data must be polars or pandas DataFrame")
 
         title = plot_dict.get("ggtitle", {}).get("text", "ggplot Output")
-
-        if df_str is None:
-            return f"=== Plot: {title} ===\n(data not available)"
 
         return f"=== DataFrame for: {title} ===\n{df_str}"
 
