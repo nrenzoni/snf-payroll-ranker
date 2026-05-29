@@ -1,19 +1,13 @@
 # Notebooks
 
-This directory is split into active notebook infrastructure and deprecated notebook reference material.
+This directory contains the notebook infrastructure for the project.
 
-## Active
+## Primary Notebook
 
 - `common/`: shared notebook helpers that remain usable for future active notebooks.
 - `employee_cycle_report.py`: the single active public reporting notebook for the repository. It covers the residual employee-pay-cycle workflow end to end, including the main narrative and technical appendix.
 
 The active notebook contract is single-notebook, not a notebook sequence. It focuses on employee-pay-cycle records that remain after critical hard rules remove obvious payroll problems.
-
-## Legacy
-
-- `legacy/shift_level/`: deprecated shift-level SNF notebooks retained for historical reference only.
-- These notebooks are not the active project direction and should not define current runtime, research, or production claims.
-- Older split-notebook reporting narratives are also historical reference only and are not the current acceptance contract.
 
 ## Execution
 

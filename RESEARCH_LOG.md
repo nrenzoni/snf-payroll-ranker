@@ -6,7 +6,6 @@
 - Employee-pay-cycle is the active modeling grain for future runtime, evaluation, and production-promotion work.
 - Phase 1 is production-oriented research: compare formulations, validate failure modes, and only promote methods or library components that earn production candidacy.
 - Lower-level shift, schedule, and timeclock information may still be generated or engineered as supporting context, but they are no longer the canonical active row contract.
-- The older shift-level SNF hybrid workflow remains in the repository only as deprecated historical reference and should not define active runtime, active research, or active production claims.
 
 ## SNF Shift-Level Payroll Domain Assumptions
 

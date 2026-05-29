@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the active high-level architecture direction for the payroll ranking library and records the status of older deprecated shift-level material.
+This document describes the high-level architecture direction for the payroll ranking library.
 
 ## 1. System Context
 
@@ -41,8 +41,7 @@ The active output is not a fraud or misconduct label. It is a reusable employee-
 │  Output Layer                                                        │
 │  ├── Grouped ranking metrics and validation artifacts               │
 │  ├── Production-candidacy reporting                                 │
-│  ├── Optional application-layer review queues built later           │
-│  └── Documentation of promoted vs deprecated paths                  │
+│  └── Optional application-layer review queues built later           │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -71,8 +70,6 @@ The active scoring architecture is formulation-oriented rather than tied to one 
 | **Expected Value** | What is the expected loss if ignored? | probability × conditional impact |
 | **Learning to Rank** | Which employee-pay-cycle rows should be reviewed first within a queue? | group-relative priority score |
 
-Deprecated shift-level hybrid scoring remains only as historical reference and does not define the active architecture.
-
 ## 5. Temporal Safety
 
 Leakage prevention is enforced at multiple layers:
@@ -83,15 +80,11 @@ Leakage prevention is enforced at multiple layers:
 - **Rolling-origin evaluation** stays aligned with later production retraining cadence.
 - **Label isolation** continues to separate evaluation truth from active features and operational outputs.
 
-## 6. Legacy Reference Status
-
-Earlier shift-level SNF approval architecture, hybrid scoring logic, and business-proof notebooks remain in the repository only as deprecated historical reference. They are useful for recovering ideas or comparing previous assumptions, but they are not the active modeling grain, active runtime path, or active production plan.
-
-## 7. Spec-Driven Development
+## 6. Spec-Driven Development
 
 Non-trivial behavior changes follow a propose / apply / archive cycle using an internal OpenSpec-like workflow. Design documents, spec artifacts, and archived changes live under `openspec/`. This ensures that feature additions, scoring changes, and evaluation criteria are traceable and versioned alongside code.
 
-## 8. Deployment Path
+## 7. Deployment Path
 
 *Deployment path: TBD.*
 
