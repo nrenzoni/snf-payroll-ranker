@@ -53,6 +53,56 @@ class CheckedPlot:
         _raise_for_render_errors(html)
         return html
 
+    def __repr__(self) -> str:
+        plot_dict = self.as_dict()
+
+        mapping = plot_dict.get("mapping", {})
+        active_cols = [val for key, val in mapping.items() if isinstance(val, str)]
+
+        # Extract columns from all layers
+        layers = plot_dict.get("layers", [])
+        for layer in layers:
+            layer_mapping = layer.get("mapping", {})
+            layer_cols = [
+                val for key, val in layer_mapping.items() if isinstance(val, str)
+            ]
+            active_cols.extend(layer_cols)
+
+        # Deduplicate columns, preserve ordering
+        active_cols = list(dict.fromkeys(active_cols))
+
+        raw_data = plot_dict.get("data")
+        df_str: str | None = None
+
+        if raw_data is not None:
+            if hasattr(raw_data, "select") and callable(
+                getattr(raw_data, "select"),
+            ):  # Polars DataFrame
+                filtered_df = raw_data.select(active_cols)
+                df_str = str(filtered_df)
+            elif hasattr(raw_data, "filter") and hasattr(
+                raw_data,
+                "to_string",
+            ):  # Pandas DataFrame
+                filtered_df = raw_data[active_cols]
+                df_str = filtered_df.to_string(index=False)
+
+        title = plot_dict.get("ggtitle", {}).get("text", "ggplot Output")
+
+        if df_str is None:
+            return f"=== Plot: {title} ===\n(data not available)"
+
+        return f"=== DataFrame for: {title} ===\n{df_str}"
+
+    def _repr_mimebundle_(self, include=None, exclude=None) -> dict[str, Any]:
+        html_content = self._plot._repr_html_()
+        _raise_for_render_errors(html_content)
+
+        return {
+            "text/plain": repr(self),
+            "text/html": html_content,
+        }
+
     def show(self, *args: Any, **kwargs: Any) -> Any:
         self.to_html()
         return self._plot.show(*args, **kwargs)
