@@ -40,6 +40,7 @@ from payroll_anomaly_ranking.diagnostics import (
     top_subgroup_diagnostics,
 )
 from payroll_anomaly_ranking.evaluation import (
+    bootstrap_residual_model_comparison,
     employee_cycle_feature_ablation,
     employee_cycle_issue_type_model_performance,
     employee_cycle_label_ablation,
@@ -796,6 +797,64 @@ def test_employee_cycle_evaluation_supports_percent_review_budgets() -> None:
     ).all()
     assert (evaluation.metrics.get_column(MetricCol.REVIEW_VOLUME) > 0).all()
     assert queue.height > 0
+
+
+def test_bootstrap_residual_model_comparison_returns_combined_summary() -> None:
+    config = PayrollConfig(
+        facility_count=12,
+        employee_count=180,
+        pay_periods=12,
+        employee_cycle_review_budget_percents=(0.05, 0.10),
+        seed=7,
+    )
+    payroll = generate_employee_pay_cycles(config).payroll
+    scored = score_employee_pay_cycles(payroll, config).scored
+
+    summary = bootstrap_residual_model_comparison(
+        scored,
+        score_cols={
+            "classifier": ScoreCol.CLASSIFICATION_SCORE,
+            "regressor": ScoreCol.REGRESSION_SCORE,
+            "expected_value": ScoreCol.EXPECTED_VALUE_SCORE,
+            "learning_to_rank": ScoreCol.RANKING_SCORE,
+        },
+        budgets=(0.05, 0.10),
+        n_bootstrap=15,
+        seed=11,
+    )
+
+    assert summary.height > 0
+    assert {
+        "summary_type",
+        "model",
+        "reference_model",
+        "challenger_model",
+        "comparison",
+        "budget",
+        "metric",
+        "point_estimate",
+        "mean",
+        "lower_95",
+        "upper_95",
+        "samples",
+        "method",
+    } <= set(summary.columns)
+    assert {"model_metric", "pairwise_delta"} <= set(
+        summary.get_column("summary_type").unique().to_list(),
+    )
+    assert (
+        summary.filter(pl.col("summary_type") == "pairwise_delta")
+        .get_column("comparison")
+        .drop_nulls()
+        .str.contains("expected_value_vs_")
+        .all()
+    )
+    assert (
+        summary.filter(pl.col("summary_type") == "model_metric").get_column("samples")
+        == pl.Series(
+            [15] * summary.filter(pl.col("summary_type") == "model_metric").height,
+        )
+    ).all()
 
 
 def test_employee_cycle_review_queue_uses_cycle_fields() -> None:

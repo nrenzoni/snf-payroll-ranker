@@ -42,6 +42,7 @@ from payroll_anomaly_ranking.data import (
     generate_employee_pay_cycles,
 )
 from payroll_anomaly_ranking.evaluation import (
+    bootstrap_residual_model_comparison,
     employee_cycle_backtest_by_period,
     employee_cycle_feature_ablation,
     employee_cycle_grouped_metrics,
@@ -776,6 +777,22 @@ comparison_for_summary = evaluation.model_comparison.with_columns(
     pl.col("model").map_elements(notebook_model_label, return_dtype=pl.String),
 )
 
+# %%
+bootstrap_summary = bootstrap_residual_model_comparison(
+    scored,
+    score_cols={
+        "classifier": ScoreCol.CLASSIFICATION_SCORE,
+        "cost_sensitive_classifier": ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
+        "regressor": ScoreCol.REGRESSION_SCORE,
+        "expected_value": ScoreCol.EXPECTED_VALUE_SCORE,
+        "learning_to_rank": ScoreCol.RANKING_SCORE,
+        "final_active_ranking": ScoreCol.FINAL_ANOMALY_SCORE,
+    },
+    budgets=review_budget_percents,
+    n_bootstrap=50 if validation_mode else 500,
+    seed=sim_config.seed,
+)
+
 # %% [markdown]
 # ### formulation summary
 
@@ -1049,6 +1066,12 @@ comparison_for_summary.select(
 # PR-AUC is useful for understanding issue-probability quality, but it is not
 # the primary model-selection metric because reviewers consume a ranked residual
 # queue under fixed capacity.
+
+# %% [markdown]
+# ### clustered bootstrap summary at 5% budget
+
+# %%
+bootstrap_summary.filter(pl.col("budget") == 0.05)
 
 # %% [markdown]
 # ### decision summary

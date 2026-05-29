@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+import numpy as np
 import polars as pl
 from sklearn.metrics import average_precision_score
 
@@ -185,35 +186,24 @@ def employee_cycle_grouped_metrics(
     scored: pl.DataFrame,
     k: float,
 ) -> dict[str, float | str]:
-    ranked = _employee_cycle_group_ranked(_employee_cycle_residual_frame(scored), k)
-    if ranked.height == 0:
-        return {
-            MetricCol.K: k,
-            MetricCol.PRECISION_AT_K: 0.0,
-            MetricCol.RECALL_AT_K: 0.0,
-            MetricCol.F1_AT_K: 0.0,
-            MetricCol.RESIDUAL_NDCG_AT_K: 0.0,
-            MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: 0.0,
-            MetricCol.REVIEWER_YIELD_AT_K: 0.0,
-            MetricCol.DOLLARS_CAPTURED_AT_K: 0.0,
-            MetricCol.EXPOSURE_CAPTURED_AT_K: 0.0,
-            MetricCol.EXPOSURE_PER_REVIEW: 0.0,
-            MetricCol.NET_UTILITY_CAPTURED_AT_K: 0.0,
-            MetricCol.INCREMENTAL_UTILITY_AT_K: 0.0,
-            MetricCol.UTILITY_PER_REVIEW: 0.0,
-            MetricCol.REVIEW_VOLUME: 0.0,
-            MetricCol.NATIVE_REVIEW_BURDEN: 0.0,
-            MetricCol.DOLLAR_CAPTURE_RATE: 0.0,
-            MetricCol.AVERAGE_ANOMALY_RANK: 0.0,
-            MetricCol.MEAN_RECIPROCAL_RANK: 0.0,
-            MetricCol.PR_AUC: 0.0,
-            "group_count": 0.0,
-            "aggregation_scheme": "mean_across_facility_pay_cycle_groups",
-            "review_budget_type": _employee_cycle_review_budget_type(k),
-        }
-    reviewed = ranked.filter(pl.col("_employee_cycle_in_budget"))
+    ranked = _employee_cycle_group_ranked(_employee_cycle_residual_frame(scored))
+    return _employee_cycle_grouped_metrics_from_ranked(ranked, k)
+
+
+def _employee_cycle_grouped_metrics_from_ranked(
+    ranked: pl.DataFrame,
+    budget: float,
+    *,
+    pr_auc: float | None = None,
+) -> dict[str, float | str]:
+    ranked_with_budget = _employee_cycle_group_budgeted(ranked, budget)
+    if ranked_with_budget.height == 0:
+        return _empty_employee_cycle_grouped_metrics(budget)
+    reviewed = ranked_with_budget.filter(pl.col("_employee_cycle_in_budget"))
     group_metrics = (
-        ranked.group_by([PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX])
+        ranked_with_budget.group_by(
+            [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+        )
         .agg(
             pl.len().alias("group_records"),
             pl.sum(PayrollCol.Y_ISSUE).alias("group_anomalies"),
@@ -250,7 +240,7 @@ def employee_cycle_grouped_metrics(
         )
     )
     total_dollars = float(
-        ranked.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
+        ranked_with_budget.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
         .select(pl.sum(PayrollCol.Y_DOLLAR))
         .item()
         or 0.0,
@@ -264,26 +254,20 @@ def employee_cycle_grouped_metrics(
     exposure = float(reviewed.select(pl.sum(ScoreCol.ESTIMATED_EXPOSURE)).item() or 0.0)
     utility = float(reviewed.select(pl.sum(PayrollCol.NET_UTILITY)).item() or 0.0)
     total_severe = (
-        ranked.select(pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE)).item() or 0
+        ranked_with_budget.select(pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE)).item()
+        or 0
     )
     reviewed_severe = (
         reviewed.select(pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE)).item() or 0
     )
-    try:
-        pr_auc = float(
-            average_precision_score(
-                ranked.get_column(PayrollCol.Y_ISSUE).to_numpy(),
-                ranked.get_column(ScoreCol.FINAL_ANOMALY_SCORE).to_numpy(),
-            ),
-        )
-    except ValueError:
-        pr_auc = 0.0
+    if pr_auc is None:
+        pr_auc = _employee_cycle_pr_auc(ranked_with_budget)
     reviewer_yield = reviewed.filter(pl.col(PayrollCol.Y_ISSUE) == 1).height / max(
         reviewed.height,
         1,
     )
     return {
-        MetricCol.K: k,
+        MetricCol.K: budget,
         MetricCol.PRECISION_AT_K: float(
             group_metrics.select(pl.mean("group_precision")).item() or 0.0,
         ),
@@ -294,7 +278,9 @@ def employee_cycle_grouped_metrics(
             float(group_metrics.select(pl.mean("group_precision")).item() or 0.0),
             float(group_metrics.select(pl.mean("group_recall")).item() or 0.0),
         ),
-        MetricCol.RESIDUAL_NDCG_AT_K: _employee_cycle_residual_ndcg_at_k(ranked),
+        MetricCol.RESIDUAL_NDCG_AT_K: _employee_cycle_residual_ndcg_at_k(
+            ranked_with_budget,
+        ),
         MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(reviewed_severe)
         / max(
             float(total_severe),
@@ -321,7 +307,7 @@ def employee_cycle_grouped_metrics(
         MetricCol.PR_AUC: pr_auc,
         "group_count": float(group_metrics.height),
         "aggregation_scheme": "mean_across_facility_pay_cycle_groups",
-        "review_budget_type": _employee_cycle_review_budget_type(k),
+        "review_budget_type": _employee_cycle_review_budget_type(budget),
     }
 
 
@@ -355,6 +341,57 @@ def employee_cycle_model_comparison(
             },
         )
     return pl.DataFrame(rows)
+
+
+def bootstrap_residual_model_comparison(
+    scored: pl.DataFrame,
+    score_cols: dict[str, str],
+    budgets: tuple[float, ...],
+    n_bootstrap: int = 500,
+    seed: int = 42,
+) -> pl.DataFrame:
+    residual_scored = _employee_cycle_residual_frame(scored)
+    if residual_scored.is_empty() or not score_cols or not budgets:
+        return _empty_bootstrap_model_comparison()
+
+    bootstrap_groups = _bootstrap_group_rows(residual_scored)
+    point_metric_rows = _residual_model_metric_rows(
+        residual_scored,
+        score_cols,
+        budgets,
+    )
+    if not point_metric_rows:
+        return _empty_bootstrap_model_comparison()
+
+    bootstrap_metric_rows: list[dict[str, float | int | str | None]] = []
+    rng = np.random.default_rng(seed)
+    for bootstrap_index in range(n_bootstrap):
+        bootstrap_sample = _bootstrap_sample_groups(
+            residual_scored,
+            bootstrap_groups,
+            rng,
+        )
+        bootstrap_metric_rows.extend(
+            _residual_model_metric_rows(
+                bootstrap_sample,
+                score_cols,
+                budgets,
+                bootstrap_index=bootstrap_index,
+            ),
+        )
+
+    point_metrics = pl.DataFrame(point_metric_rows, infer_schema_length=None)
+    bootstrap_metrics = pl.DataFrame(bootstrap_metric_rows, infer_schema_length=None)
+    point_deltas = _expected_value_pairwise_rows(point_metrics)
+    bootstrap_deltas = _expected_value_pairwise_rows(bootstrap_metrics)
+
+    return pl.concat(
+        [
+            _bootstrap_summary(point_metrics, bootstrap_metrics),
+            _bootstrap_summary(point_deltas, bootstrap_deltas),
+        ],
+        how="vertical_relaxed",
+    ).sort(["summary_type", "budget", "metric", "model"])
 
 
 def employee_cycle_feature_ablation(
@@ -1189,6 +1226,277 @@ def _employee_cycle_model_scores(scored: pl.DataFrame) -> list[tuple[str, str]]:
         for model_name, score_name in model_scores
         if score_name in scored.columns
     ]
+
+
+def _empty_employee_cycle_grouped_metrics(budget: float) -> dict[str, float | str]:
+    return {
+        MetricCol.K: budget,
+        MetricCol.PRECISION_AT_K: 0.0,
+        MetricCol.RECALL_AT_K: 0.0,
+        MetricCol.F1_AT_K: 0.0,
+        MetricCol.RESIDUAL_NDCG_AT_K: 0.0,
+        MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: 0.0,
+        MetricCol.REVIEWER_YIELD_AT_K: 0.0,
+        MetricCol.DOLLARS_CAPTURED_AT_K: 0.0,
+        MetricCol.EXPOSURE_CAPTURED_AT_K: 0.0,
+        MetricCol.EXPOSURE_PER_REVIEW: 0.0,
+        MetricCol.NET_UTILITY_CAPTURED_AT_K: 0.0,
+        MetricCol.INCREMENTAL_UTILITY_AT_K: 0.0,
+        MetricCol.UTILITY_PER_REVIEW: 0.0,
+        MetricCol.REVIEW_VOLUME: 0.0,
+        MetricCol.NATIVE_REVIEW_BURDEN: 0.0,
+        MetricCol.DOLLAR_CAPTURE_RATE: 0.0,
+        MetricCol.AVERAGE_ANOMALY_RANK: 0.0,
+        MetricCol.MEAN_RECIPROCAL_RANK: 0.0,
+        MetricCol.PR_AUC: 0.0,
+        "group_count": 0.0,
+        "aggregation_scheme": "mean_across_facility_pay_cycle_groups",
+        "review_budget_type": _employee_cycle_review_budget_type(budget),
+    }
+
+
+def _employee_cycle_group_budgeted(ranked: pl.DataFrame, budget: float) -> pl.DataFrame:
+    if ranked.height == 0:
+        return ranked.with_columns(
+            pl.lit(0, dtype=pl.Int64).alias("_employee_cycle_group_budget_count"),
+            pl.lit(False).alias("_employee_cycle_in_budget"),
+        )
+    return ranked.with_columns(
+        _employee_cycle_group_budget_count_expr(budget).alias(
+            "_employee_cycle_group_budget_count",
+        ),
+    ).with_columns(
+        (
+            pl.col("_employee_cycle_group_rank")
+            <= pl.col("_employee_cycle_group_budget_count")
+        ).alias("_employee_cycle_in_budget"),
+    )
+
+
+def _employee_cycle_pr_auc(scored: pl.DataFrame) -> float:
+    try:
+        return float(
+            average_precision_score(
+                scored.get_column(PayrollCol.Y_ISSUE).to_numpy(),
+                scored.get_column(ScoreCol.FINAL_ANOMALY_SCORE).to_numpy(),
+            ),
+        )
+    except ValueError:
+        return 0.0
+
+
+def _bootstrap_group_id_expr() -> pl.Expr:
+    return pl.concat_str(
+        [
+            pl.col(PayrollCol.FACILITY_ID).cast(pl.String),
+            pl.lit("_"),
+            pl.col(PayrollCol.PAY_PERIOD_INDEX).cast(pl.String),
+        ],
+    )
+
+
+def _bootstrap_group_rows(scored: pl.DataFrame) -> list[list[int]]:
+    indexed = scored.with_row_index("_bootstrap_row_index")
+    groups = indexed.group_by(
+        [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+    ).agg(
+        pl.col("_bootstrap_row_index"),
+    )
+    return [
+        [int(row_index) for row_index in row["_bootstrap_row_index"]]
+        for row in groups.to_dicts()
+    ]
+
+
+def _bootstrap_sample_groups(
+    scored: pl.DataFrame,
+    group_rows: list[list[int]],
+    rng: np.random.Generator,
+) -> pl.DataFrame:
+    if not group_rows:
+        return scored.clear()
+    sampled_group_indices = rng.integers(len(group_rows), size=len(group_rows))
+    sampled_row_indices = [
+        row_index
+        for group_index in sampled_group_indices
+        for row_index in group_rows[int(group_index)]
+    ]
+    sampled_draw_ids = [
+        draw_id
+        for draw_id, group_index in enumerate(sampled_group_indices)
+        for _ in group_rows[int(group_index)]
+    ]
+    return (
+        scored[sampled_row_indices]
+        .with_columns(
+            pl.Series("_bootstrap_draw_id", sampled_draw_ids, dtype=pl.Int64),
+        )
+        .with_columns(
+            pl.concat_str(
+                [
+                    pl.lit("bootstrap_group_"),
+                    pl.col("_bootstrap_draw_id").cast(pl.String),
+                ],
+            ).alias(PayrollCol.FACILITY_ID),
+            (pl.col("_bootstrap_draw_id") + 1)
+            .cast(pl.Int64)
+            .alias(
+                PayrollCol.PAY_PERIOD_INDEX,
+            ),
+        )
+    )
+
+
+def _residual_model_metric_rows(
+    scored: pl.DataFrame,
+    score_cols: dict[str, str],
+    budgets: tuple[float, ...],
+    bootstrap_index: int = -1,
+) -> list[dict[str, float | int | str | None]]:
+    rows: list[dict[str, float | int | str | None]] = []
+    for model_name, score_col in score_cols.items():
+        if score_col not in scored.columns:
+            continue
+        scored_for_model = scored.with_columns(
+            pl.col(score_col).alias(ScoreCol.FINAL_ANOMALY_SCORE),
+        )
+        ranked = _employee_cycle_group_ranked(scored_for_model)
+        pr_auc = _employee_cycle_pr_auc(ranked)
+        for budget in budgets:
+            metrics = _employee_cycle_grouped_metrics_from_ranked(
+                ranked,
+                budget,
+                pr_auc=pr_auc,
+            )
+            for metric_name, metric_value in metrics.items():
+                if metric_name == MetricCol.K or isinstance(metric_value, str):
+                    continue
+                rows.append(
+                    {
+                        "summary_type": "model_metric",
+                        "model": model_name,
+                        "reference_model": None,
+                        "challenger_model": None,
+                        "comparison": None,
+                        "budget": float(budget),
+                        "metric": str(metric_name),
+                        "value": float(metric_value),
+                        "bootstrap_index": bootstrap_index,
+                    },
+                )
+    return rows
+
+
+def _expected_value_pairwise_rows(metrics: pl.DataFrame) -> pl.DataFrame:
+    if (
+        metrics.is_empty()
+        or "expected_value" not in metrics.get_column("model").to_list()
+    ):
+        return _empty_bootstrap_long_values()
+    id_columns = [
+        "budget",
+        "metric",
+        "bootstrap_index",
+    ]
+    baseline = metrics.filter(pl.col("model") == "expected_value").select(
+        *id_columns,
+        pl.col("value").alias("reference_value"),
+    )
+    challengers = metrics.filter(pl.col("model") != "expected_value")
+    if challengers.is_empty():
+        return _empty_bootstrap_long_values()
+    return challengers.join(
+        baseline,
+        on=id_columns,
+        how="inner",
+    ).select(
+        pl.lit("pairwise_delta").alias("summary_type"),
+        pl.concat_str([pl.lit("expected_value_vs_"), pl.col("model")]).alias("model"),
+        pl.lit("expected_value").alias("reference_model"),
+        pl.col("model").alias("challenger_model"),
+        pl.concat_str([pl.lit("expected_value_vs_"), pl.col("model")]).alias(
+            "comparison",
+        ),
+        pl.col("budget"),
+        pl.col("metric"),
+        (pl.col("reference_value") - pl.col("value")).alias("value"),
+        pl.col("bootstrap_index"),
+    )
+
+
+def _bootstrap_summary(
+    point_values: pl.DataFrame,
+    bootstrap_values: pl.DataFrame,
+) -> pl.DataFrame:
+    if point_values.is_empty():
+        return _empty_bootstrap_model_comparison()
+    summary_keys = [
+        "summary_type",
+        "model",
+        "reference_model",
+        "challenger_model",
+        "comparison",
+        "budget",
+        "metric",
+    ]
+    point_estimates = point_values.select(
+        *summary_keys,
+        pl.col("value").alias("point_estimate"),
+    )
+    if bootstrap_values.is_empty():
+        return point_estimates.with_columns(
+            pl.col("point_estimate").alias("mean"),
+            pl.col("point_estimate").alias("lower_95"),
+            pl.col("point_estimate").alias("upper_95"),
+            pl.lit(0, dtype=pl.Int64).alias("samples"),
+            pl.lit("clustered_group_bootstrap").alias("method"),
+        )
+    return point_estimates.join(
+        bootstrap_values.group_by(summary_keys).agg(
+            pl.mean("value").alias("mean"),
+            pl.col("value").quantile(0.025).alias("lower_95"),
+            pl.col("value").quantile(0.975).alias("upper_95"),
+            pl.len().alias("samples"),
+        ),
+        on=summary_keys,
+        how="left",
+    ).with_columns(pl.lit("clustered_group_bootstrap").alias("method"))
+
+
+def _empty_bootstrap_long_values() -> pl.DataFrame:
+    return pl.DataFrame(
+        schema={
+            "summary_type": pl.String,
+            "model": pl.String,
+            "reference_model": pl.String,
+            "challenger_model": pl.String,
+            "comparison": pl.String,
+            "budget": pl.Float64,
+            "metric": pl.String,
+            "value": pl.Float64,
+            "bootstrap_index": pl.Int64,
+        },
+    )
+
+
+def _empty_bootstrap_model_comparison() -> pl.DataFrame:
+    return pl.DataFrame(
+        schema={
+            "summary_type": pl.String,
+            "model": pl.String,
+            "reference_model": pl.String,
+            "challenger_model": pl.String,
+            "comparison": pl.String,
+            "budget": pl.Float64,
+            "metric": pl.String,
+            "point_estimate": pl.Float64,
+            "mean": pl.Float64,
+            "lower_95": pl.Float64,
+            "upper_95": pl.Float64,
+            "samples": pl.Int64,
+            "method": pl.String,
+        },
+    )
 
 
 def _label_ablation_row(
