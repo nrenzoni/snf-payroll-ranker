@@ -9,9 +9,10 @@ if TYPE_CHECKING:
 
 c = get_config()
 
-# AI-friendly markdown export: hide code inputs and output prompts.
-c.TemplateExporter.exclude_input = True
+# AI-friendly markdown export: keep code cells, hide input/output prompts.
+c.TemplateExporter.exclude_input = False
 c.TemplateExporter.exclude_output_prompt = True
+c.TemplateExporter.exclude_input_prompt = True
 
 # Prefer text/plain and images; omit text/html for cleaner AI review.
 c.NbConvertBase.display_data_priority = [
