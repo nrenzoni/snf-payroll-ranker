@@ -1,4 +1,16 @@
 # ---
+# title: "SNF Payroll Ranker"
+# format:
+#   html:
+#     page-layout: full
+#     code-fold: true
+#     code-tools: true
+#     html-table-processing: none
+#     include-in-header:
+#         text: |
+#         <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+#         <script>mermaid.initialize({startOnLoad:true});</script>
+# jupyter: python3
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
@@ -13,10 +25,9 @@
 #     name: python3
 # ---
 
-# %% [markdown]
-# # SNF Payroll Ranker
-
 # %%
+# | eval: false
+# | echo: false
 # %load_ext autoreload
 # %autoreload 2
 
