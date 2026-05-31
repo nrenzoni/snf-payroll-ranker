@@ -1,6 +1,6 @@
 # Decision Log
 
-This log records significant technical decisions made during the design and evolution of the SNF Payroll Anomaly Ranking pipeline. Each entry follows the context / decision / consequences structure.
+This log records significant technical decisions made during the design and evolution of the SNF Payroll Ranker pipeline. Each entry follows the context / decision / consequences structure.
 
 ---
 

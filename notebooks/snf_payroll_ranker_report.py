@@ -14,7 +14,7 @@
 # ---
 
 # %% [markdown]
-# # Residual ML Ranking for SNF Payroll Loss Prevention
+# # SNF Payroll Ranker
 
 # %%
 # %load_ext autoreload
@@ -258,11 +258,11 @@ def build_similarity_heatmap(
 # %% [markdown]
 # ## 0. Executive Summary
 #
-# This notebook evaluates ML methods for the second stage of an SNF payroll
-# review workflow.
+# This notebook presents the SNF Payroll Ranker: an ML workflow for the second
+# stage of SNF payroll review prioritization.
 #
 # Critical hard rules first remove obvious payroll violations. The remaining
-# records form a residual queue of ambiguous payroll-loss risks. The modeling
+# records form a residual queue of ambiguous payroll risks. The modeling
 # question is:
 #
 # > Among payroll records not caught by hard rules, which ML formulation best
@@ -293,8 +293,8 @@ def build_similarity_heatmap(
 #
 # **Production interpretation**
 #
-# For residual payroll loss prevention, expected-value scoring is the most
-# practical default when the business objective is financial recovery.
+# For residual payroll review prioritization, expected-value scoring is the
+# most practical default when the business objective is financial recovery.
 # Learning-to-rank remains useful when top-of-queue relevance ordering is the
 # primary goal.
 

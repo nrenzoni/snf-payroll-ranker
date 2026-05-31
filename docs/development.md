@@ -29,18 +29,18 @@ Expected generated artifacts include:
 
 ## Notebook Workflow
 
-The active public notebook is `notebooks/employee_cycle_report.py`.
+The active public notebook is `notebooks/snf_payroll_ranker_report.py`.
 
 Validation path with reduced workload and repo-local output under `tmp/`:
 
 ```bash
-NOTEBOOK_VALIDATE=1 uv run jupytext --to ipynb --execute --run-path notebooks --output tmp/employee-cycle-report.validate.ipynb notebooks/employee_cycle_report.py
+NOTEBOOK_VALIDATE=1 uv run jupytext --to ipynb --execute --run-path notebooks --output tmp/snf-payroll-ranker-report.validate.ipynb notebooks/snf_payroll_ranker_report.py
 ```
 
 Full paired-output refresh:
 
 ```bash
-uv run jupytext --set-formats ipynb,py:percent --execute notebooks/employee_cycle_report.py
+uv run jupytext --set-formats ipynb,py:percent --execute notebooks/snf_payroll_ranker_report.py
 ```
 
 Notebook-only plotting helpers live under `notebooks/common/`. The runtime package under `src/` stays free of Jupyter and Lets-Plot dependencies.
