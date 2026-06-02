@@ -433,6 +433,9 @@ scenario_benchmark = run_employee_cycle_scenario_benchmark(
     sim_config,
     seeds=(sim_config.seed,),
 )
+benchmark_recommendation_budget = (
+    0.05 if 0.05 in review_budget_percents else review_budget_percents[0]
+)
 
 
 # %% [markdown]
@@ -560,6 +563,11 @@ funnel.with_columns(
 #
 # Before comparing models, the notebook checks whether the residual-ranking task
 # changes meaningfully across the DGP suite.
+#
+# `Label-bias strength` measures the gap in observed-correction rates between
+# higher-signal residual positives and lower-signal residual positives. Larger
+# values mean historical review behavior is more selectively concentrated on the
+# obvious end of the residual queue.
 
 # %%
 scenario_benchmark.scenario_summary.select(
@@ -1113,7 +1121,8 @@ pl.DataFrame(
 # Each DGP scenario is evaluated over multiple random seeds. Seeds estimate
 # random-draw stability within the same payroll-generating process. They do not
 # fix structural DGP bias. Structural robustness is assessed by comparing across
-# DGP scenarios.
+# DGP scenarios. The current rendered notebook keeps that design but runs an
+# interim one-seed holdout benchmark for faster iteration.
 
 
 # %%
@@ -1311,9 +1320,9 @@ if backtest is not None:
 # The expected-value model wins because the residual task is heavily financial:
 # high-priority records are not merely likely to be wrong, but costly when
 # ignored. The learning-to-rank model is competitive on graded relevance, but
-# expected-value better balances issue probability and dollar impact in this
-# synthetic run. For payroll loss prevention, direct business-value scoring can
-# matter as much as ranking-specific objectives.
+# expected-value better balances issue probability and dollar impact in the
+# holdout benchmark. For payroll loss prevention, direct business-value scoring
+# can matter as much as ranking-specific objectives.
 
 # %% [markdown]
 # The severe residual tail is concentrated rather than broad. `overtime_double_shift`
@@ -1542,18 +1551,25 @@ final_recommendation_summary = pl.DataFrame(
             "best production default",
         ],
         "recommended_model": [
-            winner_map.filter(pl.col("objective") == "severity_ordering")["winner"][0],
-            winner_map.filter(pl.col("objective") == "dollar_recovery")["winner"][0],
+            winner_map.filter(
+                (pl.col("objective") == "severity_ordering")
+                & (pl.col(MetricCol.K) == benchmark_recommendation_budget),
+            )["winner"][0],
+            winner_map.filter(
+                (pl.col("objective") == "dollar_recovery")
+                & (pl.col(MetricCol.K) == benchmark_recommendation_budget),
+            )["winner"][0],
             comparison_for_summary.top_k(1, by=MetricCol.PR_AUC)["model"][0],
-            winner_map.filter(pl.col("objective") == "incremental_utility")["winner"][
-                0
-            ],
+            winner_map.filter(
+                (pl.col("objective") == "incremental_utility")
+                & (pl.col(MetricCol.K) == benchmark_recommendation_budget),
+            )["winner"][0],
         ],
         "why": [
-            "Strongest aggregate severity ordering across scenario-seed benchmark units.",
-            "Best aggregate recovery of residual dollar impact across DGP scenarios.",
+            "Strongest aggregate severity ordering across scenario-seed holdout benchmark units.",
+            "Best aggregate recovery of residual dollar impact across DGP scenarios at the active benchmark budget.",
             "Strongest residual issue-probability ranking among comparable models.",
-            "Most robust default for incremental utility across the scenario benchmark.",
+            "Most robust default for incremental utility across the holdout scenario benchmark.",
         ],
     },
 )

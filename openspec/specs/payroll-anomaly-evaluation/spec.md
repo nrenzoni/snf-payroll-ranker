@@ -122,6 +122,7 @@ The system SHALL aggregate employee-pay-cycle residual ranking results across DG
 - **WHEN** the scenario-based benchmark runs for the active employee-pay-cycle notebook
 - **THEN** the outputs include aggregated summaries by scenario, seed, model, review-budget percentage, and metric
 - **AND** those summaries preserve the underlying percent-budget grouped ranking metric definitions used by the employee-cycle evaluation runtime
+- **AND** those summaries are computed on temporally held-out scored rows rather than on the same rows used to fit supervised residual-ranking models
 
 ### Requirement: Winner summaries are objective-specific
 The system SHALL summarize model winners separately by operating objective rather than forcing one universal winner across all review-budget metrics.

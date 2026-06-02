@@ -77,6 +77,10 @@ The primary employee-pay-cycle notebook SHALL show compact evidence that the res
 - **THEN** the notebook includes a compact cross-scenario summary table covering residual issue rate, severe issue rate, residual dollars, dominant issue family, and label-bias strength
 - **AND** any retained detailed sanity plots are explicitly framed as baseline illustrative examples rather than the main experimental evidence
 
+#### Scenario: Main benchmark is described as holdout evidence
+- **WHEN** a reviewer reads the main scenario-based benchmark section
+- **THEN** the notebook describes those benchmark summaries as temporally held-out scenario-seed evidence rather than same-sample model-fit results
+
 ### Requirement: Scenario-based executive summary and main study framing
 The active employee-pay-cycle notebook SHALL present its executive summary and section 8 conclusions as aggregated DGP scenario-based benchmark findings rather than single-run main results.
 

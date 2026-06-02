@@ -30,6 +30,7 @@ from payroll_anomaly_ranking.scenarios import (
     DriftPlan,
     ScenarioGeneratorControls,
     ScenarioSpec,
+    TargetedAnomalyControl,
 )
 
 
@@ -140,14 +141,15 @@ def generate_payroll(
 ) -> GeneratedPayroll:
     policy = SNFPayPolicyConfig()
     validate_snf_config(config, policy)
+    _validate_supported_scenario_controls(scenario)
     rng = np.random.default_rng(config.seed + (scenario.seed_offset if scenario else 0))
     facilities = generate_facilities(config, rng, scenario=scenario)
     employees = generate_employees(config, facilities, rng, scenario=scenario)
     schedules = generate_schedules(config, facilities, employees, rng)
     timeclock = generate_timeclock(schedules, facilities, config, policy, rng, scenario)
     payroll = generate_payroll_lines(timeclock, policy, rng)
-    payroll, labels = inject_anomalies(payroll, config, scenario, policy, rng)
     payroll = apply_scenario_perturbations(payroll, scenario)
+    payroll, labels = inject_anomalies(payroll, config, scenario, policy, rng)
     facility_rollups = facility_pay_period_rollups(payroll)
     employee_rollups = employee_pay_period_rollups(payroll)
     _validate_rollups(payroll, facility_rollups)
@@ -160,7 +162,10 @@ def generate_payroll(
         timeclock=timeclock,
         facility_rollups=facility_rollups,
         employee_rollups=employee_rollups,
-        metadata=scenario_metadata(scenario),
+        metadata={
+            **scenario_metadata(scenario),
+            "seed": config.seed + (scenario.seed_offset if scenario else 0),
+        },
     )
 
 
@@ -212,6 +217,14 @@ def generate_employees(
     if facilities is None:
         facilities = generate_facilities(config, rng, scenario=scenario)
     controls = _scenario_generator_controls(scenario)
+    facility_profiles = {
+        str(row[PayrollCol.FACILITY_ID]): row
+        for row in facilities.select(
+            PayrollCol.FACILITY_ID,
+            PayrollCol.PAYROLL_MATURITY,
+            PayrollCol.STAFFING_PRESSURE,
+        ).to_dicts()
+    }
     facility_ids = facilities.get_column(PayrollCol.FACILITY_ID).to_numpy()
     roles = np.array(list(SNFRole))
     role_probabilities = np.array(
@@ -232,17 +245,22 @@ def generate_employees(
             if terminated
             else None
         )
+        facility_id = str(rng.choice(facility_ids))
+        facility_profile = facility_profiles[facility_id]
+        adjusted_mean_rate = mean_rate * _facility_rate_multiplier(
+            facility_profile,
+            controls,
+        )
         base_rate = float(
             np.clip(
                 rng.normal(
-                    mean_rate,
+                    adjusted_mean_rate,
                     sd_rate * controls.base_rate_variation_multiplier,
                 ),
                 14.0,
                 75.0,
             ),
         )
-        facility_id = str(rng.choice(facility_ids))
         rows.append(
             {
                 PayrollCol.EMPLOYEE_ID: f"SYN-SNF-E{idx:05d}",
@@ -312,7 +330,22 @@ def generate_schedules(
             pressure = float(emp[PayrollCol.STAFFING_PRESSURE])
             base_count = rng.poisson(config.shifts_per_employee_per_period * pressure)
             shift_count = max(2, min(base_count, 14))
-            days = rng.choice(np.arange(14), size=shift_count, replace=shift_count > 14)
+            valid_days = [
+                day
+                for day in range(14)
+                if _day_within_employment_window(
+                    pay_period_start + timedelta(days=day),
+                    cast(date, emp[PayrollCol.HIRE_DATE]),
+                    cast(date | None, emp[PayrollCol.TERMINATION_DATE]),
+                )
+            ]
+            if not valid_days:
+                continue
+            days = rng.choice(
+                np.array(valid_days),
+                size=min(shift_count, len(valid_days)),
+                replace=shift_count > len(valid_days),
+            )
             for day in sorted(int(value) for value in days):
                 shift_type = ShiftType(rng.choice(shifts, p=role_shift_prob))
                 start_hour, end_hour, scheduled_hours = SHIFT_WINDOWS[shift_type]
@@ -523,8 +556,18 @@ def inject_anomalies(
     target_count = _scenario_target_count(scenario, rows)
     anomaly_plan = _scenario_anomaly_plan(scenario)
     labels: list[dict[str, object]] = []
+    used_indices: set[int] = set()
+    targeted_count = _apply_targeted_anomaly_controls(
+        rows,
+        used_indices,
+        labels,
+        scenario,
+        family,
+        policy,
+        rng,
+    )
+    target_count = max(target_count - targeted_count, 0)
     if family == ScenarioFamily.BASELINE and _scenario_label_override(scenario) is None:
-        used_indices: set[int] = set()
         for category, count in _baseline_anomaly_plan(target_count, rng, anomaly_plan):
             candidates = [
                 idx
@@ -572,7 +615,7 @@ def inject_anomalies(
         pl.col(PayrollCol.SCENARIO_STATUS).fill_null("baseline"),
     )
     updated = _simulate_observed_corrections(updated, rng, scenario)
-    return updated, pl.DataFrame(labels, infer_schema_length=None)
+    return updated, _label_rows_from_payroll(updated)
 
 
 def apply_scenario_perturbations(
@@ -715,6 +758,10 @@ def _apply_change_point(
     payroll: pl.DataFrame,
     change_point: ChangePointEvent,
 ) -> pl.DataFrame:
+    if change_point.field != PayrollCol.GROSS_PAY or change_point.pay_code is not None:
+        raise ValueError(
+            "Only gross-pay change points without pay_code overrides are supported",
+        )
     scope = _scenario_scope_expr(
         change_point.start_period,
         change_point.end_period,
@@ -730,26 +777,11 @@ def _apply_change_point(
         .otherwise(pl.col(change_point.field))
         .alias(change_point.field),
     )
-    if change_point.field == PayrollCol.GROSS_PAY:
-        updated = updated.with_columns(
-            (pl.col(PayrollCol.GROSS_PAY) - pl.col(PayrollCol.DEDUCTIONS))
-            .round(2)
-            .alias(PayrollCol.NET_PAY),
-        )
-    elif change_point.field == PayrollCol.OVERTIME_HOURS:
-        updated = updated.with_columns(
-            (pl.col(PayrollCol.REGULAR_HOURS) + pl.col(PayrollCol.OVERTIME_HOURS))
-            .round(2)
-            .alias(PayrollCol.PAID_HOURS),
-        )
-    if change_point.pay_code is not None:
-        updated = updated.with_columns(
-            pl.when(scope)
-            .then(pl.lit(change_point.pay_code))
-            .otherwise(pl.col(PayrollCol.PAY_CODE))
-            .alias(PayrollCol.PAY_CODE),
-        )
-    return updated
+    return updated.with_columns(
+        (pl.col(PayrollCol.GROSS_PAY) - pl.col(PayrollCol.DEDUCTIONS))
+        .round(2)
+        .alias(PayrollCol.NET_PAY),
+    )
 
 
 def _scenario_scope_expr(
@@ -803,25 +835,40 @@ def generate_employee_pay_cycles(
 
 
 def scenario_metadata(scenario: ScenarioSpec | None) -> dict[str, object]:
-    family = _scenario_family(scenario)
-    catalog = [
-        "baseline-operations",
-        "high-timekeeping-noise",
-        "high-facility-heterogeneity",
-        "heavy-dollar-tail",
-        "subtle-residual-issues",
-        "biased-historical-corrections",
-        "diversified-severe-issues",
-        "temporal-payroll-drift",
-    ]
+    if scenario is None:
+        return {
+            "name": "default",
+            "scenario_family": ScenarioFamily.BASELINE,
+            "implemented_scenarios": [
+                "baseline-operations",
+                "high-timekeeping-noise",
+                "high-facility-heterogeneity",
+                "heavy-dollar-tail",
+                "subtle-residual-issues",
+                "biased-historical-corrections",
+                "diversified-severe-issues",
+                "temporal-payroll-drift",
+            ],
+            "future_scenarios": {
+                key.value: value for key, value in FUTURE_SCENARIOS.items()
+            },
+            "policy_assumptions": "Synthetic configurable policy; not legal or payroll advice.",
+            "controls_applied": False,
+        }
     return {
-        "name": scenario.name if scenario is not None else "default",
-        "scenario_family": family,
-        "implemented_scenarios": catalog,
+        **scenario.to_metadata(),
+        "name": scenario.name,
+        "scenario_family": _scenario_family(scenario),
         "future_scenarios": {
             key.value: value for key, value in FUTURE_SCENARIOS.items()
         },
         "policy_assumptions": "Synthetic configurable policy; not legal or payroll advice.",
+        "controls_applied": bool(
+            scenario.anomaly_plan
+            or scenario.drift_plans
+            or scenario.change_points
+            or scenario.generator_controls,
+        ),
     }
 
 
@@ -1051,7 +1098,10 @@ def _employee_cycle_rule_missed_severe_issue_expr() -> pl.Expr:
 def _employee_cycle_net_utility_expr() -> pl.Expr:
     review_cost = 18.0
     recovery_rate = 0.65
-    recovered_value = pl.col(PayrollCol.Y_DOLLAR) * recovery_rate
+    recovered_value = pl.max_horizontal(
+        pl.col(PayrollCol.Y_DOLLAR) * recovery_rate,
+        1.0,
+    )
     return (
         pl.when(pl.col(PayrollCol.Y_ISSUE) == 1)
         .then((recovered_value - review_cost).round(2))
@@ -1515,16 +1565,10 @@ def _scenario_family(scenario: ScenarioSpec | None) -> ScenarioFamily:
         "regime",
     )
     if metadata_value is not None:
-        value = metadata_value
-    elif scenario.anomaly_plan is not None and scenario.anomaly_plan.category_weights:
-        value = " ".join(sorted(scenario.anomaly_plan.category_weights))
-    else:
-        value = scenario.name
-    text = str(value).replace("-", "_")
-    if "premium" in text or "differential" in text:
-        return ScenarioFamily.PREMIUM_MISMATCH
-    if "overtime" in text or "double_shift" in text:
-        return ScenarioFamily.OVERTIME_STAFFING_PRESSURE
+        try:
+            return ScenarioFamily(str(metadata_value))
+        except ValueError:
+            return ScenarioFamily.BASELINE
     return ScenarioFamily.BASELINE
 
 
@@ -1553,7 +1597,7 @@ def _scenario_target_count(
     else:
         target = min(max(40, len(rows) // 90), max(len(rows) // 10, 1))
     return min(
-        max(int(round(target * controls.residual_target_multiplier)), 1),
+        max(round(target * controls.residual_target_multiplier), 1),
         len(rows),
     )
 
@@ -1897,14 +1941,36 @@ def _scenario_anomaly_plan(scenario: ScenarioSpec | None) -> AnomalyPlan:
     return scenario.anomaly_plan
 
 
+def _validate_supported_scenario_controls(scenario: ScenarioSpec | None) -> None:
+    if scenario is None:
+        return
+    for drift_plan in scenario.drift_plans:
+        if drift_plan.pay_code_mix_shift:
+            raise ValueError("pay_code_mix_shift is not supported in the active DGP")
+        if drift_plan.multiplier_noise != 0.0:
+            raise ValueError("multiplier_noise is not supported in the active DGP")
+    for change_point in scenario.change_points:
+        if change_point.field != PayrollCol.GROSS_PAY:
+            raise ValueError(
+                "Only gross-pay change points are supported in the active DGP",
+            )
+        if change_point.pay_code is not None:
+            raise ValueError(
+                "pay_code overrides are not supported in active change-point events",
+            )
+
+
 def _apply_scenario_anomaly_scaling(
     row: dict[str, object],
     category: SNFAnomalyCategory,
     scenario: ScenarioSpec | None,
+    severity_overrides: dict[str, float] | None = None,
 ) -> None:
     controls = _scenario_generator_controls(scenario)
     anomaly_plan = _scenario_anomaly_plan(scenario)
     severity_multiplier = anomaly_plan.severity_multipliers.get(str(category), 1.0)
+    if severity_overrides is not None:
+        severity_multiplier *= severity_overrides.get(str(category), 1.0)
     multiplier = controls.anomaly_dollar_multiplier * severity_multiplier
     if multiplier == 1.0:
         return
@@ -1919,6 +1985,156 @@ def _apply_scenario_anomaly_scaling(
         _row_float(row, PayrollCol.NET_PAY) + gross_delta,
         2,
     )
+
+
+def _apply_targeted_anomaly_controls(
+    rows: list[dict[str, object]],
+    used_indices: set[int],
+    labels: list[dict[str, object]],
+    scenario: ScenarioSpec | None,
+    family: ScenarioFamily,
+    policy: SNFPayPolicyConfig,
+    rng: np.random.Generator,
+) -> int:
+    anomaly_plan = _scenario_anomaly_plan(scenario)
+    applied = 0
+    for control in anomaly_plan.targeted_controls:
+        candidate_indices = [
+            idx
+            for idx, row in enumerate(rows)
+            if idx not in used_indices and _targeted_scope_match(row, control)
+        ]
+        if not candidate_indices:
+            continue
+        requested = control.target_count
+        if requested is None:
+            requested = max(
+                1,
+                round(len(candidate_indices) * 0.05 * control.propensity_multiplier),
+            )
+        plan = _targeted_anomaly_plan(
+            min(requested, len(candidate_indices)),
+            control.category_weights,
+            family,
+            rng,
+        )
+        for category_name, category_count in plan:
+            category = _resolved_target_category(category_name, family)
+            label_override = category_name if str(category) != category_name else None
+            available = [idx for idx in candidate_indices if idx not in used_indices]
+            if not available:
+                continue
+            selected = rng.choice(
+                available,
+                min(category_count, len(available)),
+                replace=False,
+            )
+            for raw_idx in selected:
+                idx = int(raw_idx)
+                used_indices.add(idx)
+                row = rows[idx]
+                _apply_shift_anomaly(row, category, family, policy, rng)
+                _apply_scenario_anomaly_scaling(
+                    row,
+                    category,
+                    scenario,
+                    severity_overrides=control.severity_multipliers,
+                )
+                if label_override is not None:
+                    row[PayrollCol.ANOMALY_CATEGORY] = label_override
+                labels.append(_anomaly_label_row(row, family))
+                rows[idx] = row
+                applied += 1
+    return applied
+
+
+def _targeted_anomaly_plan(
+    target_count: int,
+    category_weights: dict[str, float],
+    family: ScenarioFamily,
+    rng: np.random.Generator,
+) -> list[tuple[str, int]]:
+    if not category_weights:
+        return [(str(_scenario_default_category(family)), target_count)]
+    names = list(category_weights)
+    weights = np.array(list(category_weights.values()), dtype=float)
+    if float(weights.sum()) <= 0:
+        return [(names[0], target_count)]
+    counts = rng.multinomial(target_count, weights / weights.sum())
+    return [
+        (name, int(count))
+        for name, count in zip(names, counts, strict=True)
+        if count > 0
+    ]
+
+
+def _targeted_scope_match(
+    row: dict[str, object],
+    control: TargetedAnomalyControl,
+) -> bool:
+    period = _row_int(row, PayrollCol.PAY_PERIOD_INDEX)
+    if control.start_period is not None and period < control.start_period:
+        return False
+    if control.end_period is not None and period > control.end_period:
+        return False
+    for column, value in control.subgroup_filters.items():
+        row_value = row.get(column)
+        if isinstance(value, list | tuple | set):
+            if row_value not in value:
+                return False
+        elif row_value != value:
+            return False
+    return True
+
+
+def _resolved_target_category(
+    category_name: str,
+    family: ScenarioFamily,
+) -> SNFAnomalyCategory:
+    try:
+        return SNFAnomalyCategory(category_name)
+    except ValueError:
+        return _scenario_default_category(family)
+
+
+def _label_rows_from_payroll(payroll: pl.DataFrame) -> pl.DataFrame:
+    return payroll.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).select(
+        PayrollCol.RECORD_ID,
+        PayrollCol.SHIFT_ID,
+        PayrollCol.ANOMALY_CATEGORY,
+        PayrollCol.ANOMALY_DOLLARS,
+        PayrollCol.SCENARIO_FAMILY,
+    )
+
+
+def _day_within_employment_window(
+    shift_date: date,
+    hire_date: date,
+    termination_date: date | None,
+) -> bool:
+    if shift_date < hire_date:
+        return False
+    if termination_date is not None and shift_date > termination_date:
+        return False
+    return True
+
+
+def _facility_rate_multiplier(
+    facility_profile: dict[str, object],
+    controls: ScenarioGeneratorControls,
+) -> float:
+    pressure = float(
+        cast(
+            float | int | str,
+            facility_profile[PayrollCol.STAFFING_PRESSURE],
+        ),
+    )
+    maturity = str(facility_profile[PayrollCol.PAYROLL_MATURITY])
+    maturity_multiplier = {"low": 1.04, "medium": 1.0, "high": 0.97}[maturity]
+    pressure_multiplier = (
+        1.0 + (pressure - 1.0) * 0.30 * controls.facility_heterogeneity_multiplier
+    )
+    return max(0.85, min(1.25, maturity_multiplier * pressure_multiplier))
 
 
 def _validate_rollups(payroll: pl.DataFrame, rollups: pl.DataFrame) -> None:

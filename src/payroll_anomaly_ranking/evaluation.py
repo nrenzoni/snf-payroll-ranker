@@ -190,7 +190,9 @@ def evaluate_employee_cycle_scores(
         category_error_analysis=category,
         uncertainty_bucket_metrics=pl.DataFrame(),
         risk_coverage_analysis=pl.DataFrame(),
-        expected_gross_pay_interval_metrics=pl.DataFrame(),
+        expected_gross_pay_interval_metrics=expected_gross_pay_interval_evaluation(
+            scored,
+        ),
         threshold_baseline_metrics=pl.DataFrame(),
         production_candidacy=production,
     )
@@ -849,13 +851,20 @@ def expected_gross_pay_interval_evaluation(scored: pl.DataFrame) -> pl.DataFrame
     }
     if not required <= set(scored.columns):
         return pl.DataFrame()
+    actual_gross_col = _actual_gross_column(scored)
     normal = scored.filter(pl.col(PayrollCol.IS_ANOMALY) == 0)
     anomalies = scored.filter(pl.col(PayrollCol.IS_ANOMALY) == 1)
     return pl.DataFrame(
         [
             {
-                MetricCol.NORMAL_INTERVAL_COVERAGE: _interval_coverage(normal),
-                MetricCol.ANOMALY_EXCEEDS_P90_RATE: _exceeds_p90_rate(anomalies),
+                MetricCol.NORMAL_INTERVAL_COVERAGE: _interval_coverage(
+                    normal,
+                    actual_gross_col,
+                ),
+                MetricCol.ANOMALY_EXCEEDS_P90_RATE: _exceeds_p90_rate(
+                    anomalies,
+                    actual_gross_col,
+                ),
                 AggregateCol.AVG_INTERVAL_WIDTH: float(
                     scored.select(
                         pl.mean(ScoreCol.EXPECTED_GROSS_PAY_INTERVAL_WIDTH),
@@ -1403,9 +1412,9 @@ def _residual_model_metric_rows(
                         "reference_model": None,
                         "challenger_model": None,
                         "comparison": None,
-                        "budget": float(budget),
-                        "metric": str(metric_name),
-                        "value": float(metric_value),
+                        "budget": budget,
+                        "metric": metric_name,
+                        "value": metric_value,
                         "bootstrap_index": bootstrap_index,
                         "dropped_group_id": dropped_group_id,
                     },
@@ -1831,25 +1840,31 @@ def _recall(all_rows: pl.DataFrame, selected: pl.DataFrame) -> float:
     return selected.filter(pl.col(PayrollCol.IS_ANOMALY) == 1).height / total
 
 
-def _interval_coverage(frame: pl.DataFrame) -> float:
+def _interval_coverage(frame: pl.DataFrame, gross_col: str) -> float:
     if frame.height == 0:
         return 0.0
     covered = frame.filter(
-        (pl.col(PayrollCol.GROSS_PAY) >= pl.col(ScoreCol.EXPECTED_GROSS_PAY_P10))
-        & (pl.col(PayrollCol.GROSS_PAY) <= pl.col(ScoreCol.EXPECTED_GROSS_PAY_P90)),
+        (pl.col(gross_col) >= pl.col(ScoreCol.EXPECTED_GROSS_PAY_P10))
+        & (pl.col(gross_col) <= pl.col(ScoreCol.EXPECTED_GROSS_PAY_P90)),
     ).height
     return covered / frame.height
 
 
-def _exceeds_p90_rate(frame: pl.DataFrame) -> float:
+def _exceeds_p90_rate(frame: pl.DataFrame, gross_col: str) -> float:
     if frame.height == 0:
         return 0.0
     return (
         frame.filter(
-            pl.col(PayrollCol.GROSS_PAY) > pl.col(ScoreCol.EXPECTED_GROSS_PAY_P90),
+            pl.col(gross_col) > pl.col(ScoreCol.EXPECTED_GROSS_PAY_P90),
         ).height
         / frame.height
     )
+
+
+def _actual_gross_column(frame: pl.DataFrame) -> str:
+    if PayrollCol.GROSS_PAY in frame.columns:
+        return str(PayrollCol.GROSS_PAY)
+    return str(PayrollCol.TOTAL_GROSS_PAY)
 
 
 def _mean_adjacent_overlap(queue_sets: list[set[int]]) -> float:

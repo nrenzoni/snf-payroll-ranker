@@ -8,7 +8,10 @@ from payroll_anomaly_ranking.columns import MetricCol, PayrollCol, ScoreCol
 from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.data import generate_employee_pay_cycles
 from payroll_anomaly_ranking.evaluation import employee_cycle_grouped_metrics
-from payroll_anomaly_ranking.models import score_employee_pay_cycles
+from payroll_anomaly_ranking.models import (
+    score_employee_pay_cycles_holdout,
+    temporal_split,
+)
 from payroll_anomaly_ranking.scenarios import (
     ScenarioSpec,
     implemented_dgp_scenario_catalog,
@@ -81,8 +84,12 @@ def run_employee_cycle_scenario_benchmark(
         for seed in seeds:
             seed_config = replace(config, seed=seed)
             generated = generate_employee_pay_cycles(seed_config, scenario=scenario)
-            scoring_results = score_employee_pay_cycles(generated.payroll, seed_config)
+            scoring_results = score_employee_pay_cycles_holdout(
+                generated.payroll,
+                seed_config,
+            )
             scored = scoring_results.scored
+            split = temporal_split(generated.payroll)
             scenario_seed_rows.append(
                 {
                     "scenario": scenario_name,
@@ -94,8 +101,17 @@ def run_employee_cycle_scenario_benchmark(
                     "review_budgets": ", ".join(
                         _format_review_budget_pct(budget) for budget in review_budgets
                     ),
-                    "records": generated.payroll.height,
-                    "residual_records": generated.payroll.filter(
+                    "train_records": split.train.height + split.validation.height,
+                    "test_records": split.test.height,
+                    "test_periods": ", ".join(
+                        str(period)
+                        for period in sorted(
+                            split.test.get_column(PayrollCol.PAY_PERIOD_INDEX)
+                            .unique()
+                            .to_list(),
+                        )
+                    ),
+                    "test_residual_records": split.test.filter(
                         pl.col(PayrollCol.RESIDUAL_RECORD) == 1,
                     ).height,
                 },
@@ -163,13 +179,7 @@ def _scenario_summary_row(
             .select(PayrollCol.ANOMALY_CATEGORY)
             .item(),
         )
-    label_bias_strength = 0.0
-    observed_positive = residual.filter(pl.col(PayrollCol.OBSERVED_CORRECTION) == 1)
-    if positive_residual.height:
-        label_bias_strength = round(
-            observed_positive.height / positive_residual.height,
-            4,
-        )
+    label_bias_strength = _label_bias_strength(residual)
     return {
         "scenario": scenario_name,
         "display_name": str(scenario.metadata.get("display_name", scenario.name)),
@@ -192,6 +202,33 @@ def _scenario_summary_row(
         "dominant_issue_family": dominant_issue_family,
         "label_bias_strength": label_bias_strength,
     }
+
+
+def _label_bias_strength(residual: pl.DataFrame) -> float:
+    positive_residual = residual.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
+    if positive_residual.height < 2:
+        return 0.0
+    high_signal_threshold = float(
+        positive_residual.select(pl.col(PayrollCol.Y_DOLLAR).quantile(0.75)).item()
+        or 0.0,
+    )
+    high_signal = positive_residual.filter(
+        (pl.col(PayrollCol.Y_DOLLAR) >= high_signal_threshold)
+        | (pl.col(PayrollCol.PAYROLL_MATURITY) == "low"),
+    )
+    low_signal = positive_residual.filter(
+        (pl.col(PayrollCol.Y_DOLLAR) < high_signal_threshold)
+        & (pl.col(PayrollCol.PAYROLL_MATURITY) != "low"),
+    )
+    if high_signal.is_empty() or low_signal.is_empty():
+        return 0.0
+    high_signal_rate = float(
+        high_signal.select(pl.mean(PayrollCol.OBSERVED_CORRECTION)).item() or 0.0,
+    )
+    low_signal_rate = float(
+        low_signal.select(pl.mean(PayrollCol.OBSERVED_CORRECTION)).item() or 0.0,
+    )
+    return round(high_signal_rate - low_signal_rate, 4)
 
 
 def _metric_unit_rows(

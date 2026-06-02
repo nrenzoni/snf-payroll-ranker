@@ -66,8 +66,10 @@ from payroll_anomaly_ranking.features import (
 from payroll_anomaly_ranking.models import (
     _feature_matrix,
     score_employee_pay_cycles,
+    score_employee_pay_cycles_holdout,
     score_featured_employee_pay_cycles,
     score_payroll,
+    temporal_split,
 )
 from payroll_anomaly_ranking.pipeline import (
     PipelineArtifactNotGeneratedError,
@@ -81,6 +83,9 @@ from payroll_anomaly_ranking.queue_simulation import (
     summarize_queue_simulation,
 )
 from payroll_anomaly_ranking.rules import add_rule_flags
+from payroll_anomaly_ranking.scenario_benchmark import (
+    run_employee_cycle_scenario_benchmark,
+)
 from payroll_anomaly_ranking.scenarios import (
     AnomalyPlan,
     ChangePointEvent,
@@ -1001,6 +1006,105 @@ def test_diagnostic_scenario_presets_reproducible_and_metadata_rich() -> None:
         assert generated_a.payroll.equals(generated_b.payroll), name
         assert generated_a.labels.equals(generated_b.labels), name
         assert scenario.to_metadata()["name"] == name
+
+
+def test_employee_cycle_holdout_scoring_uses_test_periods_only() -> None:
+    config = PayrollConfig(employee_count=90, pay_periods=10, review_budgets=(5, 10))
+    generated = generate_employee_pay_cycles(config)
+    split = temporal_split(generated.payroll)
+
+    scored = score_employee_pay_cycles_holdout(generated.payroll, config).scored
+
+    assert scored.height == split.test.height
+    assert set(
+        scored.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list(),
+    ) == set(
+        split.test.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list(),
+    )
+    assert not set(
+        scored.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list(),
+    ) & set(
+        split.train.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list(),
+    )
+
+
+def test_generate_schedules_respects_hire_and_termination_dates() -> None:
+    config = PayrollConfig(employee_count=120, pay_periods=10, review_budgets=(5, 10))
+    payroll = generate_payroll(config).payroll
+
+    assert payroll.select(
+        (pl.col(PayrollCol.SHIFT_DATE) >= pl.col(PayrollCol.HIRE_DATE)).all(),
+    ).item()
+    assert payroll.select(
+        pl.when(pl.col(PayrollCol.TERMINATION_DATE).is_not_null())
+        .then(pl.col(PayrollCol.SHIFT_DATE) <= pl.col(PayrollCol.TERMINATION_DATE))
+        .otherwise(True)
+        .all(),
+    ).item()
+
+
+def test_scenario_metadata_preserves_seed_and_controls() -> None:
+    config = PayrollConfig(
+        employee_count=80,
+        pay_periods=10,
+        review_budgets=(5, 10),
+        seed=77,
+    )
+    scenario = ScenarioSpec(
+        name="controlled_shift",
+        drift_plans=(
+            DriftPlan(
+                start_period=6,
+                subgroup_filters={PayrollCol.DEPARTMENT: "Nursing"},
+                overtime_multiplier=1.2,
+            ),
+        ),
+    )
+
+    results = run_pipeline(config, scenario=scenario)
+
+    assert results.scenario_metadata["name"] == "controlled_shift"
+    assert results.scenario_metadata["seed"] == 77
+    assert results.scenario_metadata["controls_applied"] is True
+    assert "drift_plans" in results.scenario_metadata
+
+
+def test_unsupported_drift_controls_fail_fast() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    scenario = ScenarioSpec(
+        name="unsupported_noise",
+        drift_plans=(
+            DriftPlan(
+                start_period=6,
+                pay_code_mix_shift={"SNF_RARE": 1.0},
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="pay_code_mix_shift"):
+        generate_payroll(config, scenario=scenario)
+
+
+def test_scenario_benchmark_uses_holdout_units() -> None:
+    config = PayrollConfig(
+        employee_count=90,
+        pay_periods=10,
+        employee_cycle_review_budget_percents=(0.05,),
+    )
+
+    benchmark = run_employee_cycle_scenario_benchmark(
+        config,
+        scenarios=diagnostic_scenario_presets(("baseline",)),
+        seeds=(42,),
+    )
+
+    assert benchmark.scenario_seed_design.select("test_records").item() > 0
+    assert benchmark.metric_units.get_column("unit").n_unique() == 1
+    assert benchmark.metric_units.get_column(
+        "review_budget_label",
+    ).unique().to_list() == [
+        "5%",
+    ]
 
 
 def test_targeted_anomaly_controls_concentrate_configured_scope() -> None:

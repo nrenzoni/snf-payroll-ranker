@@ -486,19 +486,22 @@ def expected_pay_calibration(
     }
     if not required <= set(scored.columns):
         return pl.DataFrame()
+    gross_col = PayrollCol.GROSS_PAY
+    if PayrollCol.GROSS_PAY not in scored.columns:
+        gross_col = PayrollCol.TOTAL_GROSS_PAY
     frame = scored.with_columns(
         (
-            (pl.col(PayrollCol.GROSS_PAY) >= pl.col(ScoreCol.EXPECTED_GROSS_PAY_P10))
-            & (pl.col(PayrollCol.GROSS_PAY) <= pl.col(ScoreCol.EXPECTED_GROSS_PAY_P90))
+            (pl.col(gross_col) >= pl.col(ScoreCol.EXPECTED_GROSS_PAY_P10))
+            & (pl.col(gross_col) <= pl.col(ScoreCol.EXPECTED_GROSS_PAY_P90))
         ).alias("covered"),
         (
             pl.col(ScoreCol.EXPECTED_GROSS_PAY_P90)
             - pl.col(ScoreCol.EXPECTED_GROSS_PAY_P10)
         ).alias("interval_width"),
-        (pl.col(PayrollCol.GROSS_PAY) - pl.col(ScoreCol.EXPECTED_GROSS_PAY_P90))
+        (pl.col(gross_col) - pl.col(ScoreCol.EXPECTED_GROSS_PAY_P90))
         .clip(0, None)
         .alias("excess_over_p90"),
-        (pl.col(PayrollCol.GROSS_PAY) - pl.col(ScoreCol.EXPECTED_GROSS_PAY_P50)).alias(
+        (pl.col(gross_col) - pl.col(ScoreCol.EXPECTED_GROSS_PAY_P50)).alias(
             "residual",
         ),
     )

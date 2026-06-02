@@ -189,6 +189,10 @@ The system SHALL generate synthetic payroll datasets with controlled temporal dr
 - **WHEN** drift or change-point controls are enabled
 - **THEN** later pay periods include reproducible shifts in payroll, workforce, pay-code, department, or anomaly behavior suitable for temporal diagnostic analysis
 
+#### Scenario: Unsupported active change-point controls fail fast
+- **WHEN** the active employee-pay-cycle generator receives an unsupported change-point field or pay-code override
+- **THEN** generation fails with a clear validation error rather than silently applying an inconsistent payroll mutation
+
 ### Requirement: Anomaly-mix scenario controls
 The system SHALL support configurable anomaly mixes across synthetic payroll scenarios.
 
@@ -243,6 +247,10 @@ The system SHALL support targeted SNF anomaly generation controls for implemente
 #### Scenario: Anomaly injection preserves realistic source context
 - **WHEN** implemented SNF anomalies are injected
 - **THEN** the generator modifies schedule, timeclock, pay-code, premium, or hours context consistently enough for features and explanations to detect the issue without relying on labels
+
+#### Scenario: Unsupported drift knobs fail fast
+- **WHEN** unsupported active-generator controls such as pay-code-mix or multiplier-noise settings are supplied
+- **THEN** generation fails with a clear validation error rather than silently ignoring those controls
 
 ### Requirement: Plot-calibrated internal diagnostic scenarios
 The system SHALL generate internal diagnostic scenarios calibrated to produce informative plots without excessive runtime.

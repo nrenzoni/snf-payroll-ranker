@@ -416,6 +416,24 @@ def score_employee_pay_cycles(
     )
 
 
+def score_employee_pay_cycles_holdout(
+    payroll: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+    *,
+    feature_columns: tuple[str, ...] | None = None,
+    training_universe: str = "all_records",
+    include_hard_rule_flag_feature: bool = False,
+) -> EmployeeCycleScoringResults:
+    featured = build_employee_cycle_features(payroll)
+    return score_featured_employee_pay_cycles_holdout(
+        featured,
+        config,
+        feature_columns=feature_columns,
+        training_universe=training_universe,
+        include_hard_rule_flag_feature=include_hard_rule_flag_feature,
+    )
+
+
 def score_featured_employee_pay_cycles(
     featured: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
@@ -431,46 +449,114 @@ def score_featured_employee_pay_cycles(
         include_hard_rule_flag_feature=include_hard_rule_flag_feature,
     )
     train_frame = _employee_cycle_training_frame(featured, training_universe)
-    ml_raw = _employee_cycle_ml_scores(
+    scored = _score_employee_cycle_frame(
         featured,
+        train_frame,
         config,
         feature_columns=selected_feature_columns,
+    )
+    return EmployeeCycleScoringResults(
+        scored=scored,
+        score_columns=(
+            ScoreCol.CLASSIFICATION_SCORE,
+            ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
+            ScoreCol.REGRESSION_SCORE,
+            ScoreCol.EXPECTED_VALUE_SCORE,
+            ScoreCol.RANKING_SCORE,
+            ScoreCol.FINAL_ANOMALY_SCORE,
+        ),
+        feature_columns=selected_feature_columns,
+    )
+
+
+def score_featured_employee_pay_cycles_holdout(
+    featured: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+    *,
+    feature_columns: tuple[str, ...] | None = None,
+    training_universe: str = "all_records",
+    include_hard_rule_flag_feature: bool = False,
+) -> EmployeeCycleScoringResults:
+    if PayrollCol.RECORD_ID not in featured.columns:
+        featured = featured.with_row_index(name=PayrollCol.RECORD_ID)
+    selected_feature_columns = _employee_cycle_selected_feature_columns(
+        feature_columns,
+        include_hard_rule_flag_feature=include_hard_rule_flag_feature,
+    )
+    split = temporal_split(featured)
+    train_reference = pl.concat(
+        [split.train, split.validation],
+        how="vertical_relaxed",
+    )
+    train_frame = _employee_cycle_training_frame(train_reference, training_universe)
+    test_frame = split.test if split.test.height else featured
+    scored = _score_employee_cycle_frame(
+        test_frame,
+        train_frame,
+        config,
+        feature_columns=selected_feature_columns,
+    )
+    return EmployeeCycleScoringResults(
+        scored=scored,
+        score_columns=(
+            ScoreCol.CLASSIFICATION_SCORE,
+            ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
+            ScoreCol.REGRESSION_SCORE,
+            ScoreCol.EXPECTED_VALUE_SCORE,
+            ScoreCol.RANKING_SCORE,
+            ScoreCol.FINAL_ANOMALY_SCORE,
+        ),
+        feature_columns=selected_feature_columns,
+    )
+
+
+def _score_employee_cycle_frame(
+    score_frame: pl.DataFrame,
+    train_frame: pl.DataFrame,
+    config: PayrollConfig,
+    *,
+    feature_columns: tuple[str, ...],
+) -> pl.DataFrame:
+    ml_raw = _employee_cycle_ml_scores(
+        score_frame,
+        config,
+        feature_columns=feature_columns,
         train_frame=train_frame,
     )
     classification = _employee_cycle_supervised_probability(
         train_frame,
-        featured,
+        score_frame,
         PayrollCol.Y_ISSUE,
         config,
-        feature_columns=selected_feature_columns,
+        feature_columns=feature_columns,
     )
     cost_sensitive = _employee_cycle_supervised_probability(
         train_frame,
-        featured,
+        score_frame,
         PayrollCol.Y_ISSUE,
         config,
-        feature_columns=selected_feature_columns,
+        feature_columns=feature_columns,
         sample_weight=_employee_cycle_cost_sensitive_weights(train_frame),
     )
     regression = _minmax(
         _employee_cycle_supervised_regression(
             train_frame,
-            featured,
+            score_frame,
             PayrollCol.Y_DOLLAR,
             config,
-            feature_columns=selected_feature_columns,
+            feature_columns=feature_columns,
             lower_bound=0.0,
         ),
     )
-    estimated_exposure = _employee_cycle_estimated_exposure(featured)
+    estimated_exposure = _employee_cycle_estimated_exposure(score_frame)
     expected_value = _minmax(estimated_exposure * np.clip(classification, 0.05, 1.0))
     ranking = _minmax(
         _employee_cycle_supervised_regression(
             train_frame,
-            featured,
+            score_frame,
             PayrollCol.RELEVANCE_GRADE,
             config,
-            feature_columns=selected_feature_columns,
+            feature_columns=feature_columns,
             lower_bound=0.0,
             upper_bound=3.0,
         ),
@@ -482,7 +568,7 @@ def score_featured_employee_pay_cycles(
         + regression * 0.10
         + expected_value * 0.15,
     )
-    scored = featured.with_columns(
+    scored = score_frame.with_columns(
         pl.Series(ScoreCol.ML_SCORE, ml_raw),
         pl.Series(ScoreCol.CLASSIFICATION_SCORE, classification),
         pl.Series(ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE, cost_sensitive),
@@ -498,17 +584,35 @@ def score_featured_employee_pay_cycles(
         .over([PayrollCol.PAY_PERIOD_INDEX, PayrollCol.FACILITY_ID])
         .alias(ScoreCol.PAY_PERIOD_RANK),
     )
-    return EmployeeCycleScoringResults(
-        scored=scored,
-        score_columns=(
-            ScoreCol.CLASSIFICATION_SCORE,
-            ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
-            ScoreCol.REGRESSION_SCORE,
-            ScoreCol.EXPECTED_VALUE_SCORE,
-            ScoreCol.RANKING_SCORE,
-            ScoreCol.FINAL_ANOMALY_SCORE,
-        ),
-        feature_columns=selected_feature_columns,
+    return _with_employee_cycle_expected_pay_intervals(scored)
+
+
+def _with_employee_cycle_expected_pay_intervals(scored: pl.DataFrame) -> pl.DataFrame:
+    width = pl.max_horizontal(
+        pl.col(PayrollCol.BASE_PAY_RATE).fill_null(0) * 4.0,
+        pl.col(PayrollCol.TOTAL_PREMIUM_PAY).fill_null(0) * 0.75,
+        pl.col(PayrollCol.TOTAL_OVERTIME_HOURS).fill_null(0)
+        * pl.col(PayrollCol.BASE_PAY_RATE).fill_null(0)
+        * 0.35,
+        (
+            pl.col(PayrollCol.TOTAL_PAID_HOURS).fill_null(0)
+            - pl.col(PayrollCol.TOTAL_SCHEDULED_HOURS).fill_null(0)
+        ).abs()
+        * pl.col(PayrollCol.BASE_PAY_RATE).fill_null(0)
+        * 0.25,
+        pl.lit(35.0),
+    ).clip(35.0, None)
+    expected_mid = pl.col(PayrollCol.TOTAL_EXPECTED_GROSS_PAY).fill_null(
+        pl.col(PayrollCol.TOTAL_GROSS_PAY).fill_null(0),
+    )
+    return scored.with_columns(
+        (expected_mid - width).clip(0, None).alias(ScoreCol.EXPECTED_GROSS_PAY_P10),
+        expected_mid.alias(ScoreCol.EXPECTED_GROSS_PAY_P50),
+        (expected_mid + width).alias(ScoreCol.EXPECTED_GROSS_PAY_P90),
+        (width * 2).alias(ScoreCol.EXPECTED_GROSS_PAY_INTERVAL_WIDTH),
+        (pl.col(PayrollCol.TOTAL_GROSS_PAY).fill_null(0) - (expected_mid + width))
+        .clip(0, None)
+        .alias(ScoreCol.GROSS_PAY_EXCESS_VS_P90),
     )
 
 

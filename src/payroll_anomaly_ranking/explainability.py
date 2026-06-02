@@ -121,8 +121,17 @@ def add_explanations(scored: pl.DataFrame) -> pl.DataFrame:
 
 
 def build_review_queue(scored: pl.DataFrame, top_k: int = 25) -> pl.DataFrame:
+    queue = _build_shift_review_queue_frame(scored, top_k)
+    return queue.drop(PayrollCol.RECORD_ID)
+
+
+def _build_shift_review_queue_frame(
+    scored: pl.DataFrame,
+    top_k: int = 25,
+) -> pl.DataFrame:
     explained = add_explanations(scored)
     fields = [
+        PayrollCol.RECORD_ID,
         ScoreCol.PAY_PERIOD_RANK,
         PayrollCol.EMPLOYEE_ID,
         PayrollCol.FACILITY_ID,
@@ -174,7 +183,7 @@ def build_review_queue(scored: pl.DataFrame, top_k: int = 25) -> pl.DataFrame:
             },
         )
         .sort(
-            [PayrollCol.FACILITY_ID, ReviewCol.RANK, RuleCol.MISSING_DEDUCTION],
+            [ReviewCol.RANK, PayrollCol.FACILITY_ID, RuleCol.MISSING_DEDUCTION],
             descending=[False, False, True],
         )
     )
@@ -184,23 +193,19 @@ def build_evaluation_review_queue(
     scored: pl.DataFrame,
     top_k: int = 25,
 ) -> pl.DataFrame:
-    return build_review_queue(scored, top_k).join(
-        scored.select(
-            PayrollCol.EMPLOYEE_ID,
-            PayrollCol.PAY_PERIOD_INDEX,
-            PayrollCol.SHIFT_DATE,
-            PayrollCol.SHIFT_TYPE,
-            PayrollCol.IS_ANOMALY,
-            PayrollCol.ANOMALY_CATEGORY,
-            PayrollCol.ANOMALY_DOLLARS,
-        ),
-        on=[
-            PayrollCol.EMPLOYEE_ID,
-            PayrollCol.PAY_PERIOD_INDEX,
-            PayrollCol.SHIFT_DATE,
-            PayrollCol.SHIFT_TYPE,
-        ],
-        how="left",
+    return (
+        _build_shift_review_queue_frame(scored, top_k)
+        .join(
+            scored.select(
+                PayrollCol.RECORD_ID,
+                PayrollCol.IS_ANOMALY,
+                PayrollCol.ANOMALY_CATEGORY,
+                PayrollCol.ANOMALY_DOLLARS,
+            ),
+            on=PayrollCol.RECORD_ID,
+            how="left",
+        )
+        .drop(PayrollCol.RECORD_ID)
     )
 
 
