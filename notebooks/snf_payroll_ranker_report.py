@@ -75,6 +75,9 @@ from payroll_anomaly_ranking.evaluation import (
 from payroll_anomaly_ranking.explainability import build_employee_cycle_review_queue
 from payroll_anomaly_ranking.models import score_employee_pay_cycles
 from payroll_anomaly_ranking.presentation import synthetic_schema_dictionary
+from payroll_anomaly_ranking.scenario_benchmark import (
+    run_employee_cycle_scenario_benchmark,
+)
 from payroll_anomaly_ranking.scenarios import diagnostic_scenario_catalog
 
 # %%
@@ -297,17 +300,18 @@ def build_similarity_heatmap(
 #
 # **Main finding**
 #
-# The expected-value model is the strongest overall default in this run because
-# it leads on residual NDCG, residual dollars captured, and incremental
-# utility. The regressor is most competitive for severe issue recall, while the
-# classifier remains best for calibrated issue probability.
+# The main study evaluates model performance across multiple synthetic SNF
+# payroll data-generating processes and random seeds. Across DGP scenarios,
+# expected-value scoring is the most robust default for dollar recovery and
+# incremental utility. Learning-to-rank is the strongest challenger when review
+# capacity is tight and the objective is top-of-queue severity ordering.
 #
-# **Production interpretation**
+# **Interpretation**
 #
-# For residual payroll review prioritization, expected-value scoring is the
-# most practical default when the business objective is financial recovery.
-# Learning-to-rank remains useful when top-of-queue relevance ordering is the
-# primary goal.
+# There is no universal winner. Model choice depends on the operating
+# objective: expected value for financial recovery, learning-to-rank for
+# severity ordering, and classifier scores for calibrated issue-probability
+# context.
 
 # %% [markdown]
 # ## 1. Problem Framing: Residual Payroll Review After Hard Rules
@@ -361,9 +365,9 @@ def build_similarity_heatmap(
 # - compliance, PBJ, and HPRD staffing metrics
 
 # %% [markdown]
-# ## 2. Synthetic SNF Payroll Data Generation
+# ## 2. Synthetic DGP Design and Scenario Suite
 #
-# This section documents the simulated world relevant for this experiment.
+# This section documents the synthetic DGP family used for the main study.
 #
 # The synthetic data supports two distinct populations:
 #
@@ -397,7 +401,7 @@ def build_similarity_heatmap(
 #         cycles["Employee-pay-cycle modeling table<br/>active ranking grain"]:::residual
 #     end
 #
-#     observed["Observed corrections<br/>biased reviewed subset"]:::bias
+#     observed["Observed corrections<br/>(biased reviewed subset)"]:::bias
 #
 #     payroll --> critical
 #     payroll --> residual
@@ -425,7 +429,23 @@ funnel = employee_cycle_hard_rule_funnel(data.payroll)
 residual_diagnostics = employee_cycle_residual_diagnostics(data.payroll)
 residual_payroll = data.payroll.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
 hard_rule_flagged = data.payroll.filter(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG) == 1)
+scenario_benchmark = run_employee_cycle_scenario_benchmark(
+    sim_config,
+    seeds=(sim_config.seed,),
+)
 
+
+# %% [markdown]
+# The scenario suite varies the synthetic data-generating process, not the
+# model objective or review capacity. Review capacity is evaluated separately as
+# an operating point.
+
+# %%
+scenario_benchmark.scenario_catalog.select(
+    "display_name",
+    "what_changes",
+    "status",
+)
 
 # %% [markdown]
 # ### snapshot
@@ -538,29 +558,41 @@ funnel.with_columns(
 # %% [markdown]
 # ## 4. Simulation Sanity Checks for the Residual Dataset
 #
-# After the hard-rule gate, the residual dataset still contains enough signal
-# and enough financial exposure to justify ML ranking.
-#
-# In this run, three properties stand out:
-#
-# 1. residual issue rates are fairly consistent across facilities, staying in a
-#    narrow band around 5% to 6%
-# 2. severe residual issues are relatively rare but cluster in specific
-#    facility-cycle queues
-# 3. the highest-dollar residual tail is concentrated in a small set of anomaly
-#    families, led by `overtime_double_shift`
-#
-# The checks below stay inside the residual universe, since full-dataset views
-# obscure the stage-2 ranking problem.
+# Before comparing models, the notebook checks whether the residual-ranking task
+# changes meaningfully across the DGP suite.
+
+# %%
+scenario_benchmark.scenario_summary.select(
+    "display_name",
+    "residual_issue_rate",
+    "severe_issue_rate",
+    "residual_dollars",
+    "dominant_issue_family",
+    "label_bias_strength",
+).rename(
+    {
+        "display_name": "Scenario",
+        "residual_issue_rate": "Residual issue rate",
+        "severe_issue_rate": "Severe issue rate",
+        "residual_dollars": "Residual dollars",
+        "dominant_issue_family": "Dominant issue family",
+        "label_bias_strength": "Label-bias strength",
+    },
+)
 
 # %% [markdown]
-# ### residual issue rate by facility
+# The detailed plots below stay focused on the baseline scenario as compact
+# examples. The main experimental evidence comes from cross-scenario aggregation,
+# not from any single residual dataset snapshot.
+
+# %% [markdown]
+# ### baseline example: residual issue rate by facility
 
 # %%
 build_residual_issue_rate_plot(residual_diagnostics["facility_residual_issue_rate"])
 
 # %% [markdown]
-# ### severe residual issues by facility-cycle
+# ### baseline example: severe residual issues by facility-cycle
 
 # %%
 build_severe_residual_heatmap(
@@ -568,7 +600,7 @@ build_severe_residual_heatmap(
 )
 
 # %% [markdown]
-# ### issue-type mix
+# ### baseline example: issue-type mix
 
 # %%
 build_issue_type_mix_plot(residual_diagnostics["issue_type_mix"])
@@ -577,10 +609,11 @@ build_issue_type_mix_plot(residual_diagnostics["issue_type_mix"])
 # ### top residual dollar records
 
 # %% [markdown]
-# Taken together, these diagnostics show that the residual queue is not random
-# cleanup noise. The remaining records still contain meaningful issue density,
-# a non-trivial severe tail, and concentrated dollar risk. That is the setting
-# where ranking quality can materially change review outcomes.
+# Taken together, the scenario summary table and baseline illustrations show
+# that the residual queue is not random cleanup noise. Residual issue density,
+# severe tails, dominant issue families, and observed-label bias all move across
+# DGP scenarios, which is why the main benchmark aggregates over scenario and
+# seed units instead of picking a winner from one synthetic world.
 
 # %%
 residual_diagnostics["residual_dollar_distribution"].head(10)
@@ -1071,19 +1104,16 @@ pl.DataFrame(
 )
 
 # %% [markdown]
-# ## 8. Main Results: Residual Queue Evaluation
+# ## 8. Main Study: DGP Scenario-Based Residual Ranking Benchmark
 #
-# All headline metrics in this section are computed only on residual records
-# within facility x payroll cycle groups.
+# The main study evaluates employee-pay-cycle residual ranking across DGP
+# scenarios and seeds, then aggregates by model, review-budget operating point,
+# and objective.
 #
-# The primary winner is selected by residual NDCG@K and incremental utility@K,
-# with residual dollars captured@K as the tie-breaker. Severe recall@K and
-# PR-AUC are reported as secondary diagnostics because they reflect narrower
-# operating goals.
-#
-# The practical question is whether a formulation changes what gets reviewed
-# when payroll analysts inspect only 1% to 10% of each facility-cycle residual
-# queue.
+# Each DGP scenario is evaluated over multiple random seeds. Seeds estimate
+# random-draw stability within the same payroll-generating process. They do not
+# fix structural DGP bias. Structural robustness is assessed by comparing across
+# DGP scenarios.
 
 
 # %%
@@ -1158,172 +1188,58 @@ backtest: pl.DataFrame | None = None
 if not validation_mode:
     backtest = employee_cycle_backtest_by_period(scored, sim_config)
 
-main_results_summary = pl.DataFrame(
-    {
-        "objective": [
-            "best residual severity ordering",
-            "best residual dollar recovery",
-            "best residual utility",
-            "best overall default in this run",
-        ],
-        "winner": [
-            comparison_for_summary.top_k(
-                1,
-                by=MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-            )["model"][0],
-            comparison_for_summary.top_k(1, by=MetricCol.DOLLARS_CAPTURED_AT_K)[
-                "model"
-            ][0],
-            comparison_for_summary.top_k(1, by=MetricCol.INCREMENTAL_UTILITY_AT_K)[
-                "model"
-            ][0],
-            comparison_for_summary.top_k(
-                1,
-                by=[MetricCol.RESIDUAL_NDCG_AT_K, MetricCol.INCREMENTAL_UTILITY_AT_K],
-            )["model"][0],
-        ],
-    },
-)
+aggregate_winner_frequency = scenario_benchmark.winner_frequency
+median_metric_summary = scenario_benchmark.median_metric_summary
+winner_map = scenario_benchmark.winner_map
 
 # %% [markdown]
-# ### residual metrics by review-budget percentage
+# ### DGP scenario catalog
 
 # %%
-evaluation.metrics.select(
-    pl.col(MetricCol.K)
-    .map_elements(
-        format_review_budget_pct,
-        return_dtype=pl.String,
+scenario_benchmark.scenario_catalog
+
+# %% [markdown]
+# ### scenario x seed design
+
+# %%
+scenario_benchmark.scenario_seed_design
+
+# %% [markdown]
+# ### aggregate winner frequency
+
+# %%
+aggregate_winner_frequency
+
+# %% [markdown]
+# ### median metric table with intervals
+
+# %%
+median_metric_summary
+
+# %% [markdown]
+# ### winner map by objective and review budget
+
+# %%
+(
+    ggplot(
+        winner_map,
+        aes(x="review_budget_label", y="objective", fill="selection_value"),
     )
-    .alias("review_budget_pct"),
-    MetricCol.RESIDUAL_NDCG_AT_K,
-    MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-    MetricCol.DOLLARS_CAPTURED_AT_K,
-    MetricCol.REVIEWER_YIELD_AT_K,
-    MetricCol.INCREMENTAL_UTILITY_AT_K,
-    MetricCol.PR_AUC,
+    + geom_tile()
+    + theme_minimal()
+    + rotated_x_labels()
+    + labs(x="Review budget", y="Objective", fill="Winner value")
+    + ggtitle("Winner Map by Objective and Review Budget")
 )
 
 # %% [markdown]
-# The 1% and 3% budgets are not operationally equivalent in this run. The 3%
-# budget roughly doubles average review depth per facility-period group relative
-# to 1%, and the metric lift reflects that deeper queue access. By 10%, the
-# queue is much deeper: severe recall is nearly saturated, but reviewer yield
-# falls sharply and incremental utility drops materially versus the 3% to 5%
-# range, which indicates diminishing returns beyond the high-yield residual
-# tail.
-
-# %% [markdown]
-# ### main-results dashboard
+# The aggregated benchmark shows a split leaderboard rather than one universal
+# winner. Expected value is the strongest default when dollar recovery and
+# incremental utility matter most, while learning-to-rank is a stronger
+# challenger when queue ordering at tight review budgets is the main objective.
 
 # %%
-gggrid(
-    [
-        build_model_budget_plot(
-            MetricCol.RESIDUAL_NDCG_AT_K,
-            "Residual NDCG by\nReview-Budget Percentage",
-            "Residual NDCG",
-        ),
-        build_model_budget_plot(
-            MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-            "Residual Severe-Issue Recall by\nReview-Budget Percentage",
-            "Rule-missed severe recall",
-        ),
-        build_model_budget_plot(
-            MetricCol.DOLLARS_CAPTURED_AT_K,
-            "Residual Dollars Captured by\nReview-Budget Percentage",
-            "Residual dollars captured",
-        ),
-        build_model_budget_plot(
-            MetricCol.INCREMENTAL_UTILITY_AT_K,
-            "Residual Utility by\nReview-Budget Percentage",
-            "Incremental utility",
-        ),
-    ],
-    ncol=2,
-    guides="collect",
-)
-
-# %% [markdown]
-# ### reviewer yield by review-budget percentage
-
-# %%
-build_model_budget_plot(
-    MetricCol.REVIEWER_YIELD_AT_K,
-    "Reviewer Yield by Review-Budget Percentage",
-    "Reviewer yield",
-)
-
-# %% [markdown]
-# ### compact main-results table
-
-# %%
-comparison_for_summary.select(
-    "model",
-    MetricCol.RESIDUAL_NDCG_AT_K,
-    MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-    MetricCol.DOLLARS_CAPTURED_AT_K,
-    MetricCol.REVIEWER_YIELD_AT_K,
-    MetricCol.INCREMENTAL_UTILITY_AT_K,
-    MetricCol.PR_AUC,
-).sort(
-    [MetricCol.RESIDUAL_NDCG_AT_K, MetricCol.INCREMENTAL_UTILITY_AT_K],
-    descending=[True, True],
-)
-
-# %% [markdown]
-# The compact results table shows a tight top tier rather than a runaway winner.
-# `expected_value` wins the primary operating objective in this run because it
-# leads on residual NDCG, residual dollars captured, and incremental utility.
-# `regressor` is most competitive on severe recall, while `classifier` remains
-# strongest on the issue-probability diagnostic of PR-AUC.
-#
-# PR-AUC is useful for understanding issue-probability quality, but it is not
-# the primary model-selection metric because reviewers consume a ranked residual
-# queue under fixed capacity.
-
-# %% [markdown]
-# ### clustered bootstrap summary at 5% budget
-#
-# Residual NDCG, rule-missed severe recall, and reviewer yield use clustered
-# percentile intervals over facility x payroll cycle resamples. Residual dollars
-# captured and incremental utility use the same percentile intervals plus a
-# leave-one-facility-cycle-out sensitivity summary so concentrated business
-# impact is visible alongside the interval.
-
-# %%
-gggrid(
-    [
-        build_bootstrap_interval_plot(
-            bootstrap_summary,
-            MetricCol.RESIDUAL_NDCG_AT_K,
-            0.05,
-        ),
-        build_bootstrap_interval_plot(
-            bootstrap_summary,
-            MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-            0.05,
-        ),
-        build_bootstrap_interval_plot(
-            bootstrap_summary,
-            MetricCol.DOLLARS_CAPTURED_AT_K,
-            0.05,
-        ),
-        build_bootstrap_interval_plot(
-            bootstrap_summary,
-            MetricCol.INCREMENTAL_UTILITY_AT_K,
-            0.05,
-        ),
-    ],
-    ncol=2,
-    guides="collect",
-)
-
-# %% [markdown]
-# ### decision summary
-
-# %%
-main_results_summary
+winner_map
 
 # %% [markdown]
 # ### score comparison on residual records
@@ -1626,24 +1542,18 @@ final_recommendation_summary = pl.DataFrame(
             "best production default",
         ],
         "recommended_model": [
-            comparison_for_summary.top_k(
-                1,
-                by=MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-            )["model"][0],
-            comparison_for_summary.top_k(1, by=MetricCol.DOLLARS_CAPTURED_AT_K)[
-                "model"
-            ][0],
+            winner_map.filter(pl.col("objective") == "severity_ordering")["winner"][0],
+            winner_map.filter(pl.col("objective") == "dollar_recovery")["winner"][0],
             comparison_for_summary.top_k(1, by=MetricCol.PR_AUC)["model"][0],
-            comparison_for_summary.top_k(
-                1,
-                by=[MetricCol.RESIDUAL_NDCG_AT_K, MetricCol.INCREMENTAL_UTILITY_AT_K],
-            )["model"][0],
+            winner_map.filter(pl.col("objective") == "incremental_utility")["winner"][
+                0
+            ],
         ],
         "why": [
-            "Highest severe residual recall at the active review budget.",
-            "Best recovery of residual dollar impact within the review budget.",
+            "Strongest aggregate severity ordering across scenario-seed benchmark units.",
+            "Best aggregate recovery of residual dollar impact across DGP scenarios.",
             "Strongest residual issue-probability ranking among comparable models.",
-            "Best balance of queue quality and residual utility in this run.",
+            "Most robust default for incremental utility across the scenario benchmark.",
         ],
     },
 )
@@ -1715,9 +1625,10 @@ final_recommendation_summary
 # ## Final Recommendation
 #
 # For residual SNF payroll loss prevention after hard-rule screening,
-# `expected_value` is the best production default in this synthetic benchmark.
-# It provides the strongest balance of residual NDCG, dollars captured, and
-# incremental utility.
+# `expected_value` remains the strongest production default in the aggregated
+# synthetic benchmark because it is the most robust model for dollar recovery
+# and incremental utility across DGP scenarios. `learning_to_rank` remains the
+# strongest challenger when top-of-queue severity ordering is the main goal.
 #
 # Recommended deployment pattern:
 #
@@ -2246,7 +2157,13 @@ def build_appendix_stress_test_config(
             "status": ", ".join(
                 format_review_budget_pct(budget) for budget in review_budgets
             ),
-            "detail": "Grouped review budgets for the residual ranking study",
+            "detail": "Grouped review budgets for the scenario-based residual ranking benchmark",
+        },
+        {
+            "artifact": "runtime_config",
+            "name": "scenario_seed_design",
+            "status": "1 seed x 8 scenarios",
+            "detail": "Interim notebook default; benchmark helper remains multi-seed capable for expanded runs",
         },
         {
             "artifact": "runtime_config",

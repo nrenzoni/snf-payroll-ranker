@@ -6,6 +6,9 @@
 - Employee-pay-cycle is the active modeling grain for future runtime, evaluation, and production-promotion work.
 - Phase 1 is production-oriented research: compare formulations, validate failure modes, and only promote methods or library components that earn production candidacy.
 - Lower-level shift, schedule, and timeclock information may still be generated or engineered as supporting context, but they are no longer the canonical active row contract.
+- The active notebook benchmark is now framed around `DGP scenario x seed x model x review budget x metric` rather than a single synthetic run.
+- The interim notebook default keeps the scenario benchmark at one seed for runtime control, but the benchmark helpers are intentionally multi-seed capable for expanded post-run sweeps.
+- Benchmark interpretation distinguishes random-draw stability within a DGP from structural robustness across DGP scenarios; one seed does not resolve structural DGP bias.
 
 ## SNF Shift-Level Payroll Domain Assumptions
 
