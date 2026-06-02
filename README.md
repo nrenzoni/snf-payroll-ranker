@@ -13,7 +13,27 @@ A privacy-safe machine learning portfolio project for prioritizing risky SNF pay
 
 ---
 
-![Pipeline Architecture](docs/assets/pipeline_architecture.svg)
+```mermaid
+flowchart LR
+    classDef source fill:#F8FAFC,stroke:#64748B,color:#0F172A;
+    classDef gate fill:#FEF2F2,stroke:#DC2626,color:#7F1D1D;
+    classDef residual fill:#F0FDF4,stroke:#16A34A,color:#14532D;
+    classDef model fill:#EFF6FF,stroke:#2563EB,color:#1E3A8A;
+    classDef output fill:#FAF5FF,stroke:#9333EA,color:#581C87;
+
+    synthetic[Synthetic payroll data]:::source
+    rules[Hard-rule screening]:::gate
+    excluded[Obvious violations removed]:::gate
+    residual[Residual payroll records]:::residual
+    features[Leakage-safe features]:::model
+    ranking[ML ranking]:::model
+    queue[Ranked review queue]:::output
+
+    synthetic --> rules
+    rules -->|rule hits| excluded
+    rules -->|surviving records| residual
+    residual --> features --> ranking --> queue
+```
 
 ## Highlights
 

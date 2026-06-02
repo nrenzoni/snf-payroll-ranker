@@ -372,25 +372,40 @@ def build_similarity_heatmap(
 
 # %% [markdown]
 # ```mermaid
-# flowchart TD
-#     classDef default fill:#F7F9FC,stroke:#5B6B83,stroke-width:1px,font-family:Helvetica,color:#000000;
-#     linkStyle default stroke:#5B6B83,font-family:Helvetica;
-#     facilities["<b>Facility hierarchy</b><br/>region, size tier, payroll maturity, local pay patterns"]
-#     employees["<b>Employee generation</b><br/>role, tenure, base rate, home facility, lifecycle state"]
-#     payroll["<b>Payroll cycles and timekeeping</b><br/>hours, overtime, rate changes, punches, edits"]
-#     critical["<b>Critical hard-rule issues</b><br/>duplicate or impossible records removed before ML"]
-#     residual["<b>Residual latent issues</b><br/>ambiguous payroll risks that survive the hard-rule gate"]
-#     observed["<b>Observed history</b><br/>reviewed corrections are a biased subset of true issues"]
-#     cycles["<b>Employee-pay-cycle records</b><br/>active modeling grain for residual ranking"]
-#     facilities -->|work context| employees
-#     facilities -->|facility effects| payroll
-#     employees -->|employee behavior| payroll
-#     payroll -->|obvious violations| critical
-#     payroll -->|subtle issues| residual
-#     critical -->|gate out| cycles
-#     residual -->|evaluation labels| cycles
-#     residual -->|selective review| observed
-#     observed -->|historical signal| cycles
+# flowchart LR
+#     classDef source fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A;
+#     classDef gate fill:#FEF2F2,stroke:#DC2626,stroke-width:1px,color:#7F1D1D;
+#     classDef residual fill:#F0FDF4,stroke:#16A34A,stroke-width:1px,color:#14532D;
+#     classDef bias fill:#FFFBEB,stroke:#D97706,stroke-width:1px,color:#78350F,stroke-dasharray: 5 3;
+#
+#     subgraph world["Synthetic payroll world"]
+#         facilities["Facility context<br/>region, size tier, payroll maturity"]:::source
+#         employees["Employee population<br/>role, tenure, home facility"]:::source
+#         payroll["Payroll and timekeeping generation<br/>hours, overtime, rate changes, edits"]:::source
+#         facilities --> payroll
+#         employees --> payroll
+#     end
+#
+#     subgraph gate_stage["Hard-rule gate"]
+#         critical["Critical rule violations"]:::gate
+#         excluded["Excluded before ML"]:::gate
+#     end
+#
+#     subgraph residual_stage["Residual ranking setup"]
+#         residual["Residual payroll issues<br/>ambiguous risks that survive the gate"]:::residual
+#         truth["Latent truth for evaluation"]:::residual
+#         cycles["Employee-pay-cycle modeling table<br/>active ranking grain"]:::residual
+#     end
+#
+#     observed["Observed corrections<br/>biased reviewed subset"]:::bias
+#
+#     payroll --> critical
+#     payroll --> residual
+#     critical --> excluded
+#     residual -->|survives gate| cycles
+#     residual --> truth
+#     residual -->|historically reviewed subset| observed
+#     observed -->|auxiliary historical signal| cycles
 # ```
 # %%
 sim_config = PayrollConfig(
