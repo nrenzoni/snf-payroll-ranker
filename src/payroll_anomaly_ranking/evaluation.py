@@ -566,14 +566,14 @@ def employee_cycle_label_ablation(
             _label_ablation_row(
                 comparison,
                 "graded_relevance",
-                ["learning_to_rank", "final_active_ranking"],
+                ["learning_to_rank"],
                 MetricCol.RESIDUAL_NDCG_AT_K,
                 "Direct graded ranking tends to help top-of-queue ordering.",
             ),
             _label_ablation_row(
                 comparison,
                 "utility_label",
-                ["expected_value", "final_active_ranking"],
+                ["expected_value"],
                 MetricCol.INCREMENTAL_UTILITY_AT_K,
                 "Utility-aware winners balance recovery against wasted review effort.",
             ),
@@ -587,7 +587,7 @@ def employee_cycle_label_ablation(
             _label_ablation_row(
                 comparison,
                 "latent_true_label",
-                ["learning_to_rank", "expected_value", "final_active_ranking"],
+                ["learning_to_rank", "expected_value"],
                 MetricCol.RESIDUAL_NDCG_AT_K,
                 "Latent residual truth highlights methods that preserve queue quality after gating.",
             ),

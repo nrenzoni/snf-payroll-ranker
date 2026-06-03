@@ -751,6 +751,9 @@ def test_employee_cycle_ablation_helpers_return_runtime_backed_outputs() -> None
         "observed_historical_label",
         "latent_true_label",
     } <= set(label_ablation.get_column("label").to_list())
+    assert "final_active_ranking" not in set(
+        label_ablation.get_column("best_model").to_list(),
+    )
 
 
 def test_employee_cycle_residual_diagnostic_helpers_return_issue_and_miss_views() -> (

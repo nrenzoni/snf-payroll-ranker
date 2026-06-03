@@ -1369,13 +1369,8 @@ if backtest is not None:
 # residual-only training universe remains the strongest option in this holdout
 # ablation.
 #
-# **9.4 Validation split ablation**
-#
-# Does the residual model generalize to future cycles and unseen facilities? The
-# temporal backtest still shows useful residual ranking value across many future
-# pay periods, but severe recall is episodic and varies substantially by period,
-# so the recommendation should be framed as strong but not uniform across every
-# holdout cycle.
+# DGP stability is handled by the scenario-suite benchmark in section 8 rather
+# than as a separate validation-split ablation here.
 
 # %%
 feature_ablation: pl.DataFrame | None = None
@@ -1451,74 +1446,14 @@ if training_universe_ablation is not None:
     )
 
 # %% [markdown]
-# ### 9.4 validation split ablation via temporal backtest
-#
-# Question: does the residual model generalize to future payroll cycles instead
-# of only fitting the current synthetic sample?
-#
-# Why it matters: a good residual queue model must hold up under temporal shift,
-# not just within a single pooled split.
-
-# %%
-if backtest is not None:
-    display(
-        pl.DataFrame(
-            {
-                "diagnostic": [
-                    "evaluated pay periods",
-                    "min residual ndcg",
-                    "max residual ndcg",
-                    "min severe recall",
-                    "max severe recall",
-                ],
-                "value": [
-                    float(backtest.height),
-                    round(
-                        float(
-                            backtest.select(pl.min(MetricCol.RESIDUAL_NDCG_AT_K)).item()
-                            or 0.0,
-                        ),
-                        4,
-                    ),
-                    round(
-                        float(
-                            backtest.select(pl.max(MetricCol.RESIDUAL_NDCG_AT_K)).item()
-                            or 0.0,
-                        ),
-                        4,
-                    ),
-                    round(
-                        float(
-                            backtest.select(
-                                pl.min(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
-                            ).item()
-                            or 0.0,
-                        ),
-                        4,
-                    ),
-                    round(
-                        float(
-                            backtest.select(
-                                pl.max(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
-                            ).item()
-                            or 0.0,
-                        ),
-                        4,
-                    ),
-                ],
-            },
-        ),
-    )
-
-# %% [markdown]
 # The ablation pattern answers a different question than the main comparison.
 # In this run, raw payroll alone is weak and far below the best feature sets,
 # even though it remains utility-positive. Most of the lift comes from adding
 # timekeeping and soft-warning context, which materially improves NDCG, severe
-# recall, and business value. The training-universe comparison stays fairly
-# tight even on holdout periods, which suggests the hard-rule gate is
-# functioning as a clean upstream filter rather than a source of ambiguous
-# examples the models still need to learn around.
+# recall, and business value. Label and training-universe ablations stay focused
+# on the five residual model families; the optional production blend is reserved
+# for the appendix, and DGP-stability evidence remains in the scenario-suite
+# benchmark.
 
 # %% [markdown]
 # ## 10. Diagnostics, Explanations, and Final Recommendation
@@ -2308,10 +2243,6 @@ if training_universe_ablation is not None:
 # %%
 if label_ablation is not None:
     display(label_ablation)
-
-# %%
-if backtest is not None:
-    display(backtest)
 
 # %% [markdown]
 # ### I. score-bucket calibration diagnostics
