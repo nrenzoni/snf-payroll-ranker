@@ -33,6 +33,16 @@ The system SHALL support supervised and ranking-oriented employee-pay-cycle scor
 - **WHEN** active model training or scoring is implemented
 - **THEN** the runtime contract supports employee-pay-cycle classification, regression, expected-value, or learning-to-rank formulations as comparable active scoring paths
 
+#### Scenario: Primary residual formulations train on residual records
+- **WHEN** the primary employee-pay-cycle benchmark trains supervised residual-ranking models
+- **THEN** classifier, cost-sensitive classifier, regressor, expected-value, and learning-to-rank formulations use records that survive the critical hard-rule gate as their main training universe
+- **AND** feature engineering may still use broader scoring-time-available historical payroll context when constructing leakage-safe features
+
+#### Scenario: Learning-to-rank uses facility-cycle query groups
+- **WHEN** the learning-to-rank formulation is trained for the primary residual benchmark
+- **THEN** it uses `relevance_grade` as the ranking label and `facility_id` × `pay_period_index` residual queues as query groups
+- **AND** grouped ranking training excludes single-item query groups and groups with no positive relevance while evaluation still includes all residual facility-cycle groups for reviewer-yield and waste accounting
+
 #### Scenario: Active scoring interfaces stay label-safe
 - **WHEN** synthetic or adjudicated labels are present for research evaluation
 - **THEN** active scoring features exclude evaluation-only truth fields and use only approved feature contracts for training, calibration, or scoring

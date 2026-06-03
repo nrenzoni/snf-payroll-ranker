@@ -472,13 +472,44 @@ def employee_cycle_training_universe_ablation(
     featured = build_employee_cycle_features(payroll)
     split = temporal_split(featured)
     train_reference = pl.concat([split.train, split.validation], how="vertical_relaxed")
+    pointwise_models = [
+        ("classifier", ScoreCol.CLASSIFICATION_SCORE),
+        ("cost_sensitive_classifier", ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE),
+        ("regressor", ScoreCol.REGRESSION_SCORE),
+        ("expected_value", ScoreCol.EXPECTED_VALUE_SCORE),
+    ]
     scenarios = [
-        ("all_records", "all_records", False),
-        ("residual_records_only", "residual_only", False),
-        ("all_records_with_gate_feature", "all_records_with_gate_feature", True),
+        (
+            "residual_only",
+            "residual_only",
+            False,
+            (*pointwise_models, ("learning_to_rank", ScoreCol.RANKING_SCORE)),
+            "primary_benchmark",
+        ),
+        (
+            "all_records",
+            "all_records",
+            False,
+            tuple(pointwise_models),
+            "broader_pointwise_signal",
+        ),
+        (
+            "all_records_hard_rule_downweighted",
+            "all_records_hard_rule_downweighted",
+            False,
+            tuple(pointwise_models),
+            "hard_rule_downweighted_compromise",
+        ),
+        (
+            "residual_only_true_ltr",
+            "residual_only",
+            False,
+            (("learning_to_rank", ScoreCol.RANKING_SCORE),),
+            "primary_ltr_setup",
+        ),
     ]
     rows: list[dict[str, float | str]] = []
-    for label, training_universe, include_gate_feature in scenarios:
+    for label, training_universe, include_gate_feature, models, purpose in scenarios:
         train_frame = _employee_cycle_ablation_training_frame(
             train_reference,
             training_universe,
@@ -488,47 +519,60 @@ def employee_cycle_training_universe_ablation(
             train_frame=train_frame,
             score_frame=split.test,
             config=config,
+            training_universe=training_universe,
             include_hard_rule_flag_feature=include_gate_feature,
         ).scored
-        metrics = employee_cycle_grouped_metrics(scored, budget)
-        rows.append(
-            {
-                "training_universe": label,
-                "scoring_universe": "residual_only",
-                "holdout_period_start": float(
-                    split.test.select(pl.min(PayrollCol.PAY_PERIOD_INDEX)).item() or 0,
+        for model_name, score_col in models:
+            metrics = employee_cycle_grouped_metrics(
+                scored.with_columns(
+                    pl.col(score_col).alias(ScoreCol.FINAL_ANOMALY_SCORE),
                 ),
-                "holdout_period_end": float(
-                    split.test.select(pl.max(PayrollCol.PAY_PERIOD_INDEX)).item() or 0,
-                ),
-                "train_records": float(train_frame.height),
-                "train_residual_records": float(
-                    train_frame.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1).height,
-                ),
-                "train_hard_rule_share": float(
-                    train_frame.select(
-                        pl.mean(PayrollCol.CRITICAL_HARD_RULE_FLAG),
-                    ).item()
-                    or 0.0,
-                ),
-                MetricCol.K: budget,
-                MetricCol.RESIDUAL_NDCG_AT_K: float(
-                    metrics[MetricCol.RESIDUAL_NDCG_AT_K],
-                ),
-                MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(
-                    metrics[MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K],
-                ),
-                MetricCol.DOLLARS_CAPTURED_AT_K: float(
-                    metrics[MetricCol.DOLLARS_CAPTURED_AT_K],
-                ),
-                MetricCol.REVIEWER_YIELD_AT_K: float(
-                    metrics[MetricCol.REVIEWER_YIELD_AT_K],
-                ),
-                MetricCol.INCREMENTAL_UTILITY_AT_K: float(
-                    metrics[MetricCol.INCREMENTAL_UTILITY_AT_K],
-                ),
-            },
-        )
+                budget,
+            )
+            rows.append(
+                {
+                    "training_universe": label,
+                    "scoring_universe": "residual_only",
+                    "model": model_name,
+                    "purpose": purpose,
+                    "holdout_period_start": float(
+                        split.test.select(pl.min(PayrollCol.PAY_PERIOD_INDEX)).item()
+                        or 0,
+                    ),
+                    "holdout_period_end": float(
+                        split.test.select(pl.max(PayrollCol.PAY_PERIOD_INDEX)).item()
+                        or 0,
+                    ),
+                    "train_records": float(train_frame.height),
+                    "train_residual_records": float(
+                        train_frame.filter(
+                            pl.col(PayrollCol.RESIDUAL_RECORD) == 1,
+                        ).height,
+                    ),
+                    "train_hard_rule_share": float(
+                        train_frame.select(
+                            pl.mean(PayrollCol.CRITICAL_HARD_RULE_FLAG),
+                        ).item()
+                        or 0.0,
+                    ),
+                    MetricCol.K: budget,
+                    MetricCol.RESIDUAL_NDCG_AT_K: float(
+                        metrics[MetricCol.RESIDUAL_NDCG_AT_K],
+                    ),
+                    MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(
+                        metrics[MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K],
+                    ),
+                    MetricCol.DOLLARS_CAPTURED_AT_K: float(
+                        metrics[MetricCol.DOLLARS_CAPTURED_AT_K],
+                    ),
+                    MetricCol.REVIEWER_YIELD_AT_K: float(
+                        metrics[MetricCol.REVIEWER_YIELD_AT_K],
+                    ),
+                    MetricCol.INCREMENTAL_UTILITY_AT_K: float(
+                        metrics[MetricCol.INCREMENTAL_UTILITY_AT_K],
+                    ),
+                },
+            )
     return pl.DataFrame(rows)
 
 
@@ -1873,7 +1917,10 @@ def _employee_cycle_residual_ndcg_at_k(scored: pl.DataFrame) -> float:
             .alias("_group_ndcg"),
         )
     )
-    return float(ndcg_by_group.select(pl.mean("_group_ndcg")).item() or 0.0)
+    meaningful_groups = ndcg_by_group.filter(pl.col("_ideal_dcg") > 0.0)
+    if meaningful_groups.height == 0:
+        return 0.0
+    return float(meaningful_groups.select(pl.mean("_group_ndcg")).item() or 0.0)
 
 
 def _employee_cycle_group_budget_count_expr(budget: float) -> pl.Expr:

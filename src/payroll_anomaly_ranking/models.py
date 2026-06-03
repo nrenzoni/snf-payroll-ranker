@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import numpy as np
 import polars as pl
+from lightgbm import LGBMRanker
 from sklearn.ensemble import (
     HistGradientBoostingClassifier,
     HistGradientBoostingRegressor,
@@ -403,7 +404,7 @@ def score_employee_pay_cycles(
     config: PayrollConfig = PayrollConfig(),
     *,
     feature_columns: tuple[str, ...] | None = None,
-    training_universe: str = "all_records",
+    training_universe: str = "residual_only",
     include_hard_rule_flag_feature: bool = False,
 ) -> EmployeeCycleScoringResults:
     featured = build_employee_cycle_features(payroll)
@@ -421,7 +422,7 @@ def score_employee_pay_cycles_holdout(
     config: PayrollConfig = PayrollConfig(),
     *,
     feature_columns: tuple[str, ...] | None = None,
-    training_universe: str = "all_records",
+    training_universe: str = "residual_only",
     include_hard_rule_flag_feature: bool = False,
 ) -> EmployeeCycleScoringResults:
     featured = build_employee_cycle_features(payroll)
@@ -439,7 +440,7 @@ def score_featured_employee_pay_cycles(
     config: PayrollConfig = PayrollConfig(),
     *,
     feature_columns: tuple[str, ...] | None = None,
-    training_universe: str = "all_records",
+    training_universe: str = "residual_only",
     include_hard_rule_flag_feature: bool = False,
 ) -> EmployeeCycleScoringResults:
     if PayrollCol.RECORD_ID not in featured.columns:
@@ -454,6 +455,10 @@ def score_featured_employee_pay_cycles(
         train_frame,
         config,
         feature_columns=selected_feature_columns,
+        pointwise_sample_weight=_employee_cycle_pointwise_weights(
+            train_frame,
+            training_universe,
+        ),
     )
     return EmployeeCycleScoringResults(
         scored=scored,
@@ -474,7 +479,7 @@ def score_featured_employee_pay_cycles_holdout(
     config: PayrollConfig = PayrollConfig(),
     *,
     feature_columns: tuple[str, ...] | None = None,
-    training_universe: str = "all_records",
+    training_universe: str = "residual_only",
     include_hard_rule_flag_feature: bool = False,
 ) -> EmployeeCycleScoringResults:
     if PayrollCol.RECORD_ID not in featured.columns:
@@ -488,7 +493,7 @@ def score_featured_employee_pay_cycles_holdout(
         [split.train, split.validation],
         how="vertical_relaxed",
     )
-    train_frame = _employee_cycle_training_frame(train_reference, training_universe)
+    train_frame = train_reference
     test_frame = split.test if split.test.height else featured
     return score_featured_employee_pay_cycles_custom_split(
         featured,
@@ -496,6 +501,8 @@ def score_featured_employee_pay_cycles_holdout(
         score_frame=test_frame,
         config=config,
         feature_columns=selected_feature_columns,
+        training_universe=training_universe,
+        include_hard_rule_flag_feature=include_hard_rule_flag_feature,
     )
 
 
@@ -506,6 +513,7 @@ def score_featured_employee_pay_cycles_custom_split(
     score_frame: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
     feature_columns: tuple[str, ...] | None = None,
+    training_universe: str = "residual_only",
     include_hard_rule_flag_feature: bool = False,
 ) -> EmployeeCycleScoringResults:
     if PayrollCol.RECORD_ID not in featured.columns:
@@ -516,9 +524,13 @@ def score_featured_employee_pay_cycles_custom_split(
     )
     scored = _score_employee_cycle_frame(
         score_frame,
-        train_frame,
+        _employee_cycle_training_frame(train_frame, training_universe),
         config,
         feature_columns=selected_feature_columns,
+        pointwise_sample_weight=_employee_cycle_pointwise_weights(
+            train_frame,
+            training_universe,
+        ),
     )
     return EmployeeCycleScoringResults(
         scored=scored,
@@ -540,6 +552,7 @@ def _score_employee_cycle_frame(
     config: PayrollConfig,
     *,
     feature_columns: tuple[str, ...],
+    pointwise_sample_weight: np.ndarray | None = None,
 ) -> pl.DataFrame:
     ml_raw = _employee_cycle_ml_scores(
         score_frame,
@@ -553,14 +566,18 @@ def _score_employee_cycle_frame(
         PayrollCol.Y_ISSUE,
         config,
         feature_columns=feature_columns,
+        sample_weight=pointwise_sample_weight,
     )
+    cost_sensitive_weight = _employee_cycle_cost_sensitive_weights(train_frame)
+    if pointwise_sample_weight is not None:
+        cost_sensitive_weight = cost_sensitive_weight * pointwise_sample_weight
     cost_sensitive = _employee_cycle_supervised_probability(
         train_frame,
         score_frame,
         PayrollCol.Y_ISSUE,
         config,
         feature_columns=feature_columns,
-        sample_weight=_employee_cycle_cost_sensitive_weights(train_frame),
+        sample_weight=cost_sensitive_weight,
     )
     regression = _minmax(
         _employee_cycle_supervised_regression(
@@ -570,19 +587,17 @@ def _score_employee_cycle_frame(
             config,
             feature_columns=feature_columns,
             lower_bound=0.0,
+            sample_weight=pointwise_sample_weight,
         ),
     )
     estimated_exposure = _employee_cycle_estimated_exposure(score_frame)
     expected_value = _minmax(estimated_exposure * np.clip(classification, 0.05, 1.0))
     ranking = _minmax(
-        _employee_cycle_supervised_regression(
+        _employee_cycle_ltr_scores(
             train_frame,
             score_frame,
-            PayrollCol.RELEVANCE_GRADE,
             config,
             feature_columns=feature_columns,
-            lower_bound=0.0,
-            upper_bound=3.0,
         ),
     )
     final_ranking = _minmax(
@@ -900,6 +915,81 @@ def _employee_cycle_supervised_regression(
     return prediction
 
 
+def _employee_cycle_ltr_scores(
+    train_frame: pl.DataFrame,
+    payroll: pl.DataFrame,
+    config: PayrollConfig,
+    *,
+    feature_columns: tuple[str, ...],
+) -> np.ndarray:
+    rank_train = _employee_cycle_ltr_training_frame(train_frame)
+    if rank_train.height == 0:
+        return np.zeros(payroll.height)
+    train_target = (
+        rank_train.get_column(PayrollCol.RELEVANCE_GRADE).fill_null(0).to_numpy()
+    )
+    if len(np.unique(train_target)) < 2:
+        return np.zeros(payroll.height)
+
+    group_sizes = _employee_cycle_ranker_group_sizes(rank_train)
+    if not group_sizes:
+        return np.zeros(payroll.height)
+
+    model = LGBMRanker(
+        objective="lambdarank",
+        metric="ndcg",
+        n_estimators=80,
+        learning_rate=0.05,
+        max_depth=3,
+        min_child_samples=5,
+        random_state=config.seed,
+        verbose=-1,
+    )
+    # Query rows must be contiguous and group sizes must match that sorted order.
+    model.fit(
+        _employee_cycle_feature_matrix(rank_train, feature_columns),
+        train_target,
+        group=group_sizes,
+    )
+    return model.predict(_employee_cycle_feature_matrix(payroll, feature_columns))
+
+
+def _employee_cycle_ltr_training_frame(train_frame: pl.DataFrame) -> pl.DataFrame:
+    residual = train_frame.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
+    if residual.height == 0:
+        return residual
+    group_columns = [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX]
+    return (
+        residual.with_columns(
+            pl.len().over(group_columns).alias("_ltr_group_size"),
+            pl.sum(PayrollCol.RELEVANCE_GRADE)
+            .over(group_columns)
+            .alias(
+                "_ltr_group_relevance",
+            ),
+        )
+        .filter(
+            (pl.col("_ltr_group_size") > 1) & (pl.col("_ltr_group_relevance") > 0),
+        )
+        .sort(group_columns)
+    )
+
+
+def _employee_cycle_ranker_group_sizes(rank_train: pl.DataFrame) -> list[int]:
+    if rank_train.height == 0:
+        return []
+    group_sizes = (
+        rank_train.group_by(
+            [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
+            maintain_order=True,
+        )
+        .agg(pl.len().alias("group_size"))
+        .get_column("group_size")
+        .to_list()
+    )
+    return [int(group_size) for group_size in group_sizes]
+
+
 def _employee_cycle_estimated_exposure(payroll: pl.DataFrame) -> np.ndarray:
     gross_gap = np.maximum(
         payroll.get_column(PayrollCol.TOTAL_GROSS_PAY).fill_null(0).to_numpy()
@@ -946,7 +1036,7 @@ def _employee_cycle_training_frame(
     payroll: pl.DataFrame,
     training_universe: str,
 ) -> pl.DataFrame:
-    if training_universe == "all_records":
+    if training_universe in {"all_records", "all_records_hard_rule_downweighted"}:
         return payroll
     if training_universe in {"residual_only", "residual_records_only"}:
         residual_only = payroll.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
@@ -955,6 +1045,24 @@ def _employee_cycle_training_frame(
         return payroll
     raise ValueError(
         f"Unsupported employee-cycle training universe: {training_universe}",
+    )
+
+
+def _employee_cycle_pointwise_weights(
+    train_frame: pl.DataFrame,
+    training_universe: str,
+) -> np.ndarray | None:
+    if training_universe != "all_records_hard_rule_downweighted":
+        return None
+    return (
+        train_frame.select(
+            pl.when(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG) == 1)
+            .then(0.2)
+            .otherwise(1.0)
+            .alias("sample_weight"),
+        )
+        .get_column("sample_weight")
+        .to_numpy()
     )
 
 

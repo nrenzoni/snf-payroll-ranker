@@ -829,17 +829,29 @@ residual_scored.sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).select(
 # %% [markdown]
 # | Model | Training target | Queue score | Why it is included |
 # | --- | --- | --- | --- |
-# | Classifier | `y_issue` | `P(issue)` | baseline supervised model |
-# | Cost-sensitive classifier | `y_issue` with severity-aware weights | weighted `P(issue)` | emphasizes costly or severe residual errors |
-# | Regressor | `y_dollar` | predicted dollar impact | captures financial exposure |
-# | Expected-value model | issue + impact | `P(issue) x E(impact \| issue)` | strong traditional ML baseline |
-# | Learning-to-rank | `relevance_grade` | ranking score | directly optimizes residual queue order |
+# | Classifier | `y_issue` on residual records | `P(issue)` | baseline supervised model |
+# | Cost-sensitive classifier | `y_issue` with severity-aware weights on residual records | weighted `P(issue)` | emphasizes costly or severe residual errors |
+# | Regressor | `y_dollar` on residual records | predicted dollar impact | captures financial exposure |
+# | Expected-value model | issue + impact on residual records | `P(issue) x E(impact \| issue)` | strong traditional ML baseline |
+# | Learning-to-rank | `relevance_grade`, grouped by `facility × pay_period` | ranking score | directly optimizes residual queue order |
+#
+# All primary models are trained and evaluated on the residual universe, defined
+# as records that survive the critical hard-rule gate. This aligns the training
+# target with the production queue: the model is not asked to learn obvious
+# hard-rule violations, because those records are not part of the ML review
+# stage.
+#
+# For true learning-to-rank, the query group is facility × pay period and the
+# candidate items are residual employee-pay-cycle records only. Training on all
+# records would create a query-composition mismatch because hard-rule records
+# would influence the ranking loss even though they are removed before ML
+# inference.
 
 # %% [markdown]
 # **Fair comparison rules**
 #
-# - same residual universe
-# - same facility x payroll cycle grouping
+# - same residual training and scoring universe
+# - same facility x payroll cycle grouping for queue evaluation and LTR queries
 # - same train and test splits
 # - same top-K evaluation budgets
 # - same leakage rules
@@ -997,11 +1009,11 @@ pl.DataFrame(
             "learning_to_rank",
         ],
         "training_target": [
-            str(PayrollCol.Y_ISSUE),
-            f"{PayrollCol.Y_ISSUE} with severity-aware weights",
-            str(PayrollCol.Y_DOLLAR),
-            "y_issue + estimated exposure",
-            str(PayrollCol.RELEVANCE_GRADE),
+            f"{PayrollCol.Y_ISSUE} on residual records",
+            f"{PayrollCol.Y_ISSUE} with severity-aware weights on residual records",
+            f"{PayrollCol.Y_DOLLAR} on residual records",
+            "y_issue + estimated exposure on residual records",
+            f"{PayrollCol.RELEVANCE_GRADE}, grouped by facility x pay period",
         ],
         "score_column": [
             str(ScoreCol.CLASSIFICATION_SCORE),
@@ -1031,6 +1043,7 @@ pl.DataFrame(
             "queue grouping",
             "review budgets",
             "temporal framing",
+            "training universe",
             "leakage control",
             "cost-sensitive coverage",
         ],
@@ -1039,6 +1052,7 @@ pl.DataFrame(
             "facility x payroll cycle",
             ", ".join(format_review_budget_pct(k) for k in review_budget_percents),
             "same employee-cycle temporal split logic for all formulations",
+            "primary supervised training rows are residual records only",
             "evaluation labels remain excluded from feature columns",
             "cost-sensitive classifier is included alongside the standard classifier",
         ],
@@ -1301,6 +1315,11 @@ if backtest is not None:
 #
 # DGP stability is handled by the scenario-suite benchmark in section 8 rather
 # than as a separate validation-split ablation here.
+#
+# A training-universe ablation tests whether pointwise models benefit from
+# broader all-record training before scoring only residual records. This is not
+# the primary LTR setup because grouped ranking should match the candidate set
+# used at inference.
 
 # %%
 feature_ablation: pl.DataFrame | None = None

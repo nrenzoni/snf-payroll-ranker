@@ -45,6 +45,7 @@ from payroll_anomaly_ranking.evaluation import (
     _bootstrap_sample_groups,
     bootstrap_residual_model_comparison,
     employee_cycle_feature_ablation,
+    employee_cycle_grouped_metrics,
     employee_cycle_issue_type_model_performance,
     employee_cycle_label_ablation,
     employee_cycle_severe_miss_examples,
@@ -64,6 +65,8 @@ from payroll_anomaly_ranking.features import (
     build_features,
 )
 from payroll_anomaly_ranking.models import (
+    _employee_cycle_ltr_training_frame,
+    _employee_cycle_ranker_group_sizes,
     _feature_matrix,
     score_employee_pay_cycles,
     score_employee_pay_cycles_holdout,
@@ -570,6 +573,67 @@ def test_employee_cycle_scoring_returns_formulation_columns() -> None:
     assert len(results.feature_columns) > 0
 
 
+def test_employee_cycle_scoring_defaults_to_residual_training_universe() -> None:
+    config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
+    payroll = generate_employee_pay_cycles(config).payroll
+
+    default = score_employee_pay_cycles(payroll, config).scored
+    explicit = score_employee_pay_cycles(
+        payroll,
+        config,
+        training_universe="residual_only",
+    ).scored
+
+    assert default.select(
+        ScoreCol.CLASSIFICATION_SCORE,
+        ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
+        ScoreCol.REGRESSION_SCORE,
+        ScoreCol.EXPECTED_VALUE_SCORE,
+        ScoreCol.RANKING_SCORE,
+    ).equals(
+        explicit.select(
+            ScoreCol.CLASSIFICATION_SCORE,
+            ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
+            ScoreCol.REGRESSION_SCORE,
+            ScoreCol.EXPECTED_VALUE_SCORE,
+            ScoreCol.RANKING_SCORE,
+        ),
+    )
+
+
+def test_employee_cycle_true_ltr_training_groups_are_residual_facility_period_queries() -> (
+    None
+):
+    frame = pl.DataFrame(
+        {
+            PayrollCol.FACILITY_ID: ["a", "a", "a", "b", "b", "c", "c"],
+            PayrollCol.PAY_PERIOD_INDEX: [1, 1, 2, 1, 1, 1, 1],
+            PayrollCol.RESIDUAL_RECORD: [1, 1, 1, 1, 1, 1, 0],
+            PayrollCol.RELEVANCE_GRADE: [2, 0, 3, 0, 0, 1, 3],
+        },
+    )
+
+    rank_train = _employee_cycle_ltr_training_frame(frame)
+
+    assert rank_train.select(
+        PayrollCol.FACILITY_ID,
+        PayrollCol.PAY_PERIOD_INDEX,
+        PayrollCol.RELEVANCE_GRADE,
+    ).to_dicts() == [
+        {
+            PayrollCol.FACILITY_ID: "a",
+            PayrollCol.PAY_PERIOD_INDEX: 1,
+            PayrollCol.RELEVANCE_GRADE: 2,
+        },
+        {
+            PayrollCol.FACILITY_ID: "a",
+            PayrollCol.PAY_PERIOD_INDEX: 1,
+            PayrollCol.RELEVANCE_GRADE: 0,
+        },
+    ]
+    assert _employee_cycle_ranker_group_sizes(rank_train) == [2]
+
+
 def test_employee_cycle_featured_scoring_matches_direct_scoring() -> None:
     config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
     payroll = generate_employee_pay_cycles(config).payroll
@@ -728,9 +792,10 @@ def test_employee_cycle_ablation_helpers_return_runtime_backed_outputs() -> None
         feature_ablation.get_column("feature_set").to_list(),
     )
     assert {
+        "residual_only",
         "all_records",
-        "residual_records_only",
-        "all_records_with_gate_feature",
+        "all_records_hard_rule_downweighted",
+        "residual_only_true_ltr",
     } <= set(training_ablation.get_column("training_universe").to_list())
     assert {
         "holdout_period_start",
@@ -738,7 +803,16 @@ def test_employee_cycle_ablation_helpers_return_runtime_backed_outputs() -> None
         "train_records",
         "train_residual_records",
         "train_hard_rule_share",
+        "model",
+        "purpose",
     } <= set(training_ablation.columns)
+    assert (
+        training_ablation.filter(
+            (pl.col("training_universe") == "all_records")
+            & (pl.col("model") == "learning_to_rank"),
+        ).height
+        == 0
+    )
     assert (
         training_ablation.get_column("holdout_period_end")
         >= training_ablation.get_column("holdout_period_start")
@@ -808,6 +882,31 @@ def test_employee_cycle_evaluation_supports_percent_review_budgets() -> None:
     ).all()
     assert (evaluation.metrics.get_column(MetricCol.REVIEW_VOLUME) > 0).all()
     assert queue.height > 0
+
+
+def test_employee_cycle_ndcg_ignores_zero_positive_groups_but_yield_includes_them() -> (
+    None
+):
+    scored = pl.DataFrame(
+        {
+            PayrollCol.FACILITY_ID: ["zero", "zero", "positive", "positive"],
+            PayrollCol.PAY_PERIOD_INDEX: [1, 1, 1, 1],
+            PayrollCol.RESIDUAL_RECORD: [1, 1, 1, 1],
+            PayrollCol.Y_ISSUE: [0, 0, 1, 0],
+            PayrollCol.Y_DOLLAR: [0.0, 0.0, 100.0, 0.0],
+            PayrollCol.RELEVANCE_GRADE: [0, 0, 2, 0],
+            PayrollCol.RULE_MISSED_SEVERE_ISSUE: [0, 0, 0, 0],
+            PayrollCol.NET_UTILITY: [-5.0, -5.0, 95.0, -5.0],
+            ScoreCol.ESTIMATED_EXPOSURE: [1.0, 2.0, 100.0, 1.0],
+            ScoreCol.FINAL_ANOMALY_SCORE: [0.9, 0.1, 0.8, 0.2],
+        },
+    )
+
+    metrics = employee_cycle_grouped_metrics(scored, 0.5)
+
+    assert metrics["group_count"] == 2.0
+    assert metrics[MetricCol.REVIEWER_YIELD_AT_K] == 0.5
+    assert metrics[MetricCol.RESIDUAL_NDCG_AT_K] == 1.0
 
 
 def test_bootstrap_residual_model_comparison_returns_combined_summary() -> None:
