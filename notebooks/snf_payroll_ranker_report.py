@@ -246,7 +246,7 @@ def build_similarity_heatmap(
 # **Main finding**
 #
 # The main study evaluates model performance across multiple synthetic SNF
-# payroll data-generating processes. In the current one-seed interim holdout
+# payroll data-generating processes. In the current scenario-seed holdout
 # benchmark, expected-value scoring is the most robust default for dollar
 # recovery and incremental utility. Learning-to-rank is the strongest
 # challenger when review capacity is tight and the objective is top-of-queue
@@ -375,9 +375,12 @@ funnel = employee_cycle_hard_rule_funnel(data.payroll)
 residual_diagnostics = employee_cycle_residual_diagnostics(data.payroll)
 residual_payroll = data.payroll.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
 hard_rule_flagged = data.payroll.filter(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG) == 1)
+scenario_benchmark_seeds = (
+    (sim_config.seed,) if validation_mode else (sim_config.seed, sim_config.seed + 1)
+)
 scenario_benchmark = run_employee_cycle_scenario_benchmark(
     sim_config,
-    seeds=(sim_config.seed,),
+    seeds=scenario_benchmark_seeds,
 )
 benchmark_recommendation_budget = (
     0.05 if 0.05 in review_budget_percents else review_budget_percents[0]
@@ -1069,8 +1072,8 @@ pl.DataFrame(
 # Each DGP scenario is evaluated over multiple random seeds. Seeds estimate
 # random-draw stability within the same payroll-generating process. They do not
 # fix structural DGP bias. Structural robustness is assessed by comparing across
-# DGP scenarios. The current rendered notebook keeps that design but runs an
-# interim one-seed holdout benchmark for faster iteration.
+# DGP scenarios. The current rendered notebook keeps that design and aggregates
+# across the configured scenario-seed benchmark units.
 
 
 # %%
@@ -2072,8 +2075,11 @@ def build_appendix_stress_test_config(
         {
             "artifact": "runtime_config",
             "name": "scenario_seed_design",
-            "status": "1 seed x 8 scenarios",
-            "detail": "Interim notebook default; benchmark helper remains multi-seed capable for expanded runs",
+            "status": (
+                f"{len(scenario_benchmark_seeds)} seeds x "
+                f"{scenario_benchmark.scenario_catalog.height} scenarios"
+            ),
+            "detail": "Configured scenario-seed benchmark design",
         },
         {
             "artifact": "runtime_config",
