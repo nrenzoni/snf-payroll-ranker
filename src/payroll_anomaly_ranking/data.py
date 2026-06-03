@@ -592,9 +592,11 @@ def inject_anomalies(
     else:
         category = _scenario_default_category(family)
         label_override = _scenario_label_override(scenario)
-        candidates = _scenario_candidates(rows, family)
+        candidates = [
+            idx for idx in _scenario_candidates(rows, family) if idx not in used_indices
+        ]
         if not candidates:
-            candidates = list(range(len(rows)))
+            candidates = [idx for idx in range(len(rows)) if idx not in used_indices]
         selected = rng.choice(
             candidates,
             min(target_count, len(candidates)),
@@ -602,6 +604,7 @@ def inject_anomalies(
         )
         for raw_idx in selected:
             idx = int(raw_idx)
+            used_indices.add(idx)
             row = rows[idx]
             _apply_shift_anomaly(row, category, family, policy, rng)
             _apply_scenario_anomaly_scaling(row, category, scenario)

@@ -301,10 +301,11 @@ def build_similarity_heatmap(
 # **Main finding**
 #
 # The main study evaluates model performance across multiple synthetic SNF
-# payroll data-generating processes and random seeds. Across DGP scenarios,
-# expected-value scoring is the most robust default for dollar recovery and
-# incremental utility. Learning-to-rank is the strongest challenger when review
-# capacity is tight and the objective is top-of-queue severity ordering.
+# payroll data-generating processes. In the current one-seed interim holdout
+# benchmark, expected-value scoring is the most robust default for dollar
+# recovery and incremental utility. Learning-to-rank is the strongest
+# challenger when review capacity is tight and the objective is top-of-queue
+# severity ordering.
 #
 # **Interpretation**
 #
@@ -1363,7 +1364,8 @@ if backtest is not None:
 # records with the hard-rule flag available recovers part of that gap without
 # overtaking the residual-only setup. That suggests the broad universe is only
 # modestly helpful when the model can explicitly adapt to the gate, and that the
-# residual-only training universe remains the strongest option in this run.
+# residual-only training universe remains the strongest option in this holdout
+# ablation.
 #
 # **9.4 Validation split ablation**
 #

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence, Set
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -20,6 +21,7 @@ from payroll_anomaly_ranking.features import build_employee_cycle_features
 from payroll_anomaly_ranking.models import (
     EMPLOYEE_CYCLE_FEATURE_FAMILIES,
     score_featured_employee_pay_cycles,
+    score_featured_employee_pay_cycles_custom_split,
     temporal_split,
 )
 
@@ -177,7 +179,7 @@ def evaluate_employee_cycle_scores(
         _employee_cycle_residual_frame(scored),
         review_budget=max(config.review_budgets),
     )
-    rolling = rolling_origin_evaluation(scored, config)
+    rolling = employee_cycle_rolling_origin_evaluation(scored, config)
     production = employee_cycle_production_candidacy(
         scored,
         rolling.metrics,
@@ -468,10 +470,8 @@ def employee_cycle_training_universe_ablation(
 ) -> pl.DataFrame:
     budget = review_budget or _default_employee_cycle_ablation_budget(config)
     featured = build_employee_cycle_features(payroll)
-    split = temporal_split(payroll)
-    holdout_periods = (
-        split.test.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list()
-    )
+    split = temporal_split(featured)
+    train_reference = pl.concat([split.train, split.validation], how="vertical_relaxed")
     scenarios = [
         ("all_records", "all_records", False),
         ("residual_records_only", "residual_only", False),
@@ -479,26 +479,27 @@ def employee_cycle_training_universe_ablation(
     ]
     rows: list[dict[str, float | str]] = []
     for label, training_universe, include_gate_feature in scenarios:
-        scored = score_featured_employee_pay_cycles(
+        train_frame = _employee_cycle_ablation_training_frame(
+            train_reference,
+            training_universe,
+        )
+        scored = score_featured_employee_pay_cycles_custom_split(
             featured,
-            config,
-            training_universe=training_universe,
+            train_frame=train_frame,
+            score_frame=split.test,
+            config=config,
             include_hard_rule_flag_feature=include_gate_feature,
         ).scored
-        train_frame = _employee_cycle_ablation_training_frame(scored, training_universe)
-        holdout_scored = scored.filter(
-            pl.col(PayrollCol.PAY_PERIOD_INDEX).is_in(holdout_periods),
-        )
-        metrics = employee_cycle_grouped_metrics(holdout_scored, budget)
+        metrics = employee_cycle_grouped_metrics(scored, budget)
         rows.append(
             {
                 "training_universe": label,
                 "scoring_universe": "residual_only",
                 "holdout_period_start": float(
-                    min(holdout_periods) if holdout_periods else 0,
+                    split.test.select(pl.min(PayrollCol.PAY_PERIOD_INDEX)).item() or 0,
                 ),
                 "holdout_period_end": float(
-                    max(holdout_periods) if holdout_periods else 0,
+                    split.test.select(pl.max(PayrollCol.PAY_PERIOD_INDEX)).item() or 0,
                 ),
                 "train_records": float(train_frame.height),
                 "train_residual_records": float(
@@ -713,22 +714,20 @@ def employee_cycle_backtest_by_period(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
 ) -> pl.DataFrame:
-    review_budgets = _employee_cycle_review_budgets(config)
-    rows = []
-    for period in sorted(
-        scored.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list(),
-    )[4:]:
-        period_scores = scored.filter(pl.col(PayrollCol.PAY_PERIOD_INDEX) == period)
-        rows.append(
-            {
-                PayrollCol.PAY_PERIOD_INDEX: period,
-                **employee_cycle_grouped_metrics(
-                    period_scores,
-                    review_budgets[0],
-                ),
-            },
-        )
-    return pl.DataFrame(rows)
+    rolling = employee_cycle_rolling_origin_evaluation(scored, config)
+    if rolling.metrics.is_empty():
+        return pl.DataFrame()
+    return rolling.metrics.rename({"test_period": PayrollCol.PAY_PERIOD_INDEX}).select(
+        PayrollCol.PAY_PERIOD_INDEX,
+        MetricCol.PRECISION_AT_K,
+        MetricCol.RECALL_AT_K,
+        MetricCol.F1_AT_K,
+        MetricCol.RESIDUAL_NDCG_AT_K,
+        MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+        MetricCol.REVIEWER_YIELD_AT_K,
+        MetricCol.DOLLARS_CAPTURED_AT_K,
+        MetricCol.INCREMENTAL_UTILITY_AT_K,
+    )
 
 
 def employee_cycle_production_candidacy(
@@ -1104,6 +1103,114 @@ def rolling_origin_evaluation(
                 ),
                 "recall_at_k_max": float(
                     metrics.select(pl.max("recall_at_k")).item() or 0.0,
+                ),
+                "score_mean_min": float(
+                    metrics.select(pl.min("test_score_mean")).item() or 0.0,
+                ),
+                "score_mean_max": float(
+                    metrics.select(pl.max("test_score_mean")).item() or 0.0,
+                ),
+                "mean_adjacent_queue_overlap": _mean_adjacent_overlap(queue_sets),
+            },
+        ],
+    )
+    return RollingOriginResults(metrics, settings, stability)
+
+
+def employee_cycle_rolling_origin_evaluation(
+    scored: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+) -> RollingOriginResults:
+    featured = build_employee_cycle_features(scored)
+    review_budgets = _employee_cycle_review_budgets(config)
+    periods = sorted(
+        featured.get_column(PayrollCol.PAY_PERIOD_INDEX).unique().to_list(),
+    )
+    if len(periods) < 6:
+        return RollingOriginResults(pl.DataFrame(), pl.DataFrame(), pl.DataFrame())
+
+    metric_rows = []
+    selected_rows = []
+    queue_sets: list[set[str]] = []
+    thresholds = [0.35, 0.5, 0.65, 0.8]
+    for origin, validation_period in enumerate(periods[3:-2], start=1):
+        test_period = periods[periods.index(validation_period) + 1]
+        train_periods = [period for period in periods if period < validation_period]
+        train_frame = featured.filter(
+            pl.col(PayrollCol.PAY_PERIOD_INDEX) < validation_period,
+        )
+        validation = score_featured_employee_pay_cycles_custom_split(
+            featured,
+            train_frame=train_frame,
+            score_frame=featured.filter(
+                pl.col(PayrollCol.PAY_PERIOD_INDEX) == validation_period,
+            ),
+            config=config,
+        ).scored
+        test = score_featured_employee_pay_cycles_custom_split(
+            featured,
+            train_frame=train_frame,
+            score_frame=featured.filter(
+                pl.col(PayrollCol.PAY_PERIOD_INDEX) == test_period,
+            ),
+            config=config,
+        ).scored
+        selected_threshold, validation_f1 = _select_threshold(validation, thresholds)
+        test_at_threshold = test.filter(
+            pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= selected_threshold,
+        )
+        grouped_metrics = employee_cycle_grouped_metrics(test, review_budgets[0])
+        reviewed_ids = set(
+            _employee_cycle_group_ranked(test, review_budgets[0])
+            .filter(pl.col("_employee_cycle_in_budget"))
+            .get_column(PayrollCol.EMPLOYEE_PAY_CYCLE_ID)
+            .to_list(),
+        )
+        queue_sets.append(reviewed_ids)
+        metric_rows.append(
+            {
+                "origin": origin,
+                "train_start_period": min(train_periods),
+                "train_end_period": max(train_periods),
+                "validation_period": validation_period,
+                "test_period": test_period,
+                "selected_threshold": selected_threshold,
+                "validation_f1": validation_f1,
+                "threshold_precision": _precision(test_at_threshold),
+                "threshold_recall": _recall(test, test_at_threshold),
+                **grouped_metrics,
+                "test_score_mean": float(
+                    test.select(pl.mean(ScoreCol.FINAL_ANOMALY_SCORE)).item() or 0.0,
+                ),
+            },
+        )
+        selected_rows.append(
+            {
+                "origin": origin,
+                "selected_on_period": validation_period,
+                "applied_to_period": test_period,
+                "selected_threshold": selected_threshold,
+                "validation_f1": validation_f1,
+            },
+        )
+
+    metrics = pl.DataFrame(metric_rows)
+    settings = pl.DataFrame(selected_rows)
+    stability = pl.DataFrame(
+        [
+            {
+                "origin_count": metrics.height,
+                "precision_at_k_min": float(
+                    metrics.select(pl.min(MetricCol.PRECISION_AT_K)).item() or 0.0,
+                ),
+                "precision_at_k_max": float(
+                    metrics.select(pl.max(MetricCol.PRECISION_AT_K)).item() or 0.0,
+                ),
+                "recall_at_k_min": float(
+                    metrics.select(pl.min(MetricCol.RECALL_AT_K)).item() or 0.0,
+                ),
+                "recall_at_k_max": float(
+                    metrics.select(pl.max(MetricCol.RECALL_AT_K)).item() or 0.0,
                 ),
                 "score_mean_min": float(
                     metrics.select(pl.min("test_score_mean")).item() or 0.0,
@@ -1867,7 +1974,7 @@ def _actual_gross_column(frame: pl.DataFrame) -> str:
     return str(PayrollCol.TOTAL_GROSS_PAY)
 
 
-def _mean_adjacent_overlap(queue_sets: list[set[int]]) -> float:
+def _mean_adjacent_overlap(queue_sets: Sequence[Set[object]]) -> float:
     if len(queue_sets) < 2:
         return 0.0
     overlaps = []

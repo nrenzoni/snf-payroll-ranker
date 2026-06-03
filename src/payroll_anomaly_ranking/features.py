@@ -248,7 +248,7 @@ def build_features(payroll: pl.DataFrame) -> pl.DataFrame:
 
 def build_employee_cycle_features(payroll: pl.DataFrame) -> pl.DataFrame:
     base = payroll.sort(
-        [PayrollCol.EMPLOYEE_ID, PayrollCol.PAY_PERIOD_INDEX],
+        [PayrollCol.PAY_PERIOD_INDEX, PayrollCol.EMPLOYEE_ID],
     ).with_columns(
         pl.when(pl.col(PayrollCol.TENURE_MONTHS) < 6)
         .then(pl.lit("new"))

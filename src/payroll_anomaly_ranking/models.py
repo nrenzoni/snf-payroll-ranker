@@ -490,8 +490,32 @@ def score_featured_employee_pay_cycles_holdout(
     )
     train_frame = _employee_cycle_training_frame(train_reference, training_universe)
     test_frame = split.test if split.test.height else featured
+    return score_featured_employee_pay_cycles_custom_split(
+        featured,
+        train_frame=train_frame,
+        score_frame=test_frame,
+        config=config,
+        feature_columns=selected_feature_columns,
+    )
+
+
+def score_featured_employee_pay_cycles_custom_split(
+    featured: pl.DataFrame,
+    *,
+    train_frame: pl.DataFrame,
+    score_frame: pl.DataFrame,
+    config: PayrollConfig = PayrollConfig(),
+    feature_columns: tuple[str, ...] | None = None,
+    include_hard_rule_flag_feature: bool = False,
+) -> EmployeeCycleScoringResults:
+    if PayrollCol.RECORD_ID not in featured.columns:
+        featured = featured.with_row_index(name=PayrollCol.RECORD_ID)
+    selected_feature_columns = _employee_cycle_selected_feature_columns(
+        feature_columns,
+        include_hard_rule_flag_feature=include_hard_rule_flag_feature,
+    )
     scored = _score_employee_cycle_frame(
-        test_frame,
+        score_frame,
         train_frame,
         config,
         feature_columns=selected_feature_columns,

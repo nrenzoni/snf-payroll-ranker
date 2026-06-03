@@ -489,6 +489,11 @@ def build_employee_cycle_facility_summary(
             ).alias("in_queue"),
         )
     )
+    grouped_queue_expr = (
+        pl.col("in_queue").cast(pl.Int64).sum()
+        if top_k <= 1
+        else (pl.col(ScoreCol.PAY_PERIOD_RANK) <= top_k).cast(pl.Int64).sum()
+    )
     return queued.group_by([PayrollCol.PAY_PERIOD_INDEX, PayrollCol.FACILITY_ID]).agg(
         pl.first(PayrollCol.FACILITY_NAME).alias(PayrollCol.FACILITY_NAME),
         pl.len().alias("total_employee_cycles"),
@@ -497,10 +502,7 @@ def build_employee_cycle_facility_summary(
         pl.sum(PayrollCol.TOTAL_OVERTIME_HOURS).alias("total_cycle_overtime_hours"),
         pl.sum(PayrollCol.TOTAL_PREMIUM_PAY).alias("total_cycle_premium_pay"),
         pl.col("in_queue").cast(pl.Int64).sum().alias("queue_count"),
-        (pl.col(ScoreCol.PAY_PERIOD_RANK) <= top_k)
-        .cast(pl.Int64)
-        .sum()
-        .alias("grouped_queue_count"),
+        grouped_queue_expr.alias("grouped_queue_count"),
         (pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= 0.65)
         .cast(pl.Int64)
         .sum()
