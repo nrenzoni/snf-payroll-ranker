@@ -837,7 +837,7 @@ residual_scored = scored.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
 # ### residual feature examples
 
 # %%
-residual_scored.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).select(
+residual_scored.sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).select(
     PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
     PayrollCol.FACILITY_ID,
     PayrollCol.PAY_PERIOD_INDEX,
@@ -899,10 +899,8 @@ residual_scored.sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).select(
 # - same top-K evaluation budgets
 # - same leakage rules
 #
-# The notebook also reports `final_active_ranking`, a blended score used as a
-# candidate production-style ranking. It is not treated as a separate modeling
-# family; it is included later to show whether a blended production score adds
-# value over the individual formulations.
+# Optional production blending is documented separately in the appendix. It is
+# not part of the primary model-family comparison.
 
 
 # %%
@@ -917,7 +915,6 @@ def build_model_budget_metrics(
         ("regressor", ScoreCol.REGRESSION_SCORE),
         ("expected_value", ScoreCol.EXPECTED_VALUE_SCORE),
         ("learning_to_rank", ScoreCol.RANKING_SCORE),
-        ("final_active_ranking", ScoreCol.FINAL_ANOMALY_SCORE),
     ]:
         scored_for_model = scored_frame.with_columns(
             pl.col(score_col).alias(ScoreCol.FINAL_ANOMALY_SCORE),
@@ -945,7 +942,6 @@ def build_model_similarity_diagnostics(
         ("regressor", ScoreCol.REGRESSION_SCORE),
         ("expected_value", ScoreCol.EXPECTED_VALUE_SCORE),
         ("learning_to_rank", ScoreCol.RANKING_SCORE),
-        ("final_active_ranking", ScoreCol.FINAL_ANOMALY_SCORE),
     ]
     group_cols = [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX]
 
@@ -1020,8 +1016,6 @@ def notebook_model_label(model_name: str) -> str:
         str(ScoreCol.REGRESSION_SCORE): "regressor",
         str(ScoreCol.EXPECTED_VALUE_SCORE): "expected_value",
         str(ScoreCol.RANKING_SCORE): "learning_to_rank",
-        "active_ranking": "final_active_ranking",
-        str(ScoreCol.ML_SCORE): "isolation_forest",
     }.get(model_name, model_name)
 
 
@@ -1032,6 +1026,16 @@ model_similarity_diagnostics = build_model_similarity_diagnostics(
 )
 comparison_for_summary = evaluation.model_comparison.with_columns(
     pl.col("model").map_elements(notebook_model_label, return_dtype=pl.String),
+).filter(
+    pl.col("model").is_in(
+        [
+            "classifier",
+            "cost_sensitive_classifier",
+            "regressor",
+            "expected_value",
+            "learning_to_rank",
+        ],
+    ),
 )
 
 # %%
@@ -1043,7 +1047,6 @@ bootstrap_summary = bootstrap_residual_model_comparison(
         "regressor": ScoreCol.REGRESSION_SCORE,
         "expected_value": ScoreCol.EXPECTED_VALUE_SCORE,
         "learning_to_rank": ScoreCol.RANKING_SCORE,
-        "final_active_ranking": ScoreCol.FINAL_ANOMALY_SCORE,
     },
     budgets=(0.05,),
     n_bootstrap=10 if validation_mode else 500,
@@ -1252,7 +1255,7 @@ median_metric_summary
 winner_map
 
 # %% [markdown]
-# ### score comparison on residual records
+# ### primary score comparison on residual records
 
 # %%
 residual_scored.select(
@@ -1266,8 +1269,7 @@ residual_scored.select(
     ScoreCol.REGRESSION_SCORE,
     ScoreCol.EXPECTED_VALUE_SCORE,
     ScoreCol.RANKING_SCORE,
-    ScoreCol.FINAL_ANOMALY_SCORE,
-).sort(ScoreCol.FINAL_ANOMALY_SCORE, descending=True).head(10)
+).sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).head(10)
 
 # %% [markdown]
 # ### model similarity diagnostics
@@ -1295,11 +1297,11 @@ gggrid(
 )
 
 # %% [markdown]
-# The overlap table shows a tight cluster at the top of the leaderboard. The
-# blended `final_active_ranking` is extremely close to `learning_to_rank` and
-# still highly correlated with the classifier, while the regressor is more
-# behaviorally distinct. That is why expected value can win business metrics
-# without requiring a radically different queue ordering.
+# The overlap table shows how similar the five supervised residual formulations
+# are at the top of the queue. The regressor is more behaviorally distinct than
+# the probability-first and relevance-ranking formulations, which is why expected
+# value can win business metrics without requiring a radically different queue
+# ordering.
 
 # %% [markdown]
 # ### temporal stability context
@@ -1353,8 +1355,8 @@ if backtest is not None:
 # Does the model winner change depending on how residual risk is defined? Yes,
 # but the changes are interpretable. The classifier remains the strongest pure
 # issue-probability signal, expected value wins the dollar- and utility-aware
-# views, and the active blended ranking performs best on graded queue-ordering
-# views built around latent residual truth.
+# views, and learning-to-rank remains the clearest graded queue-ordering
+# formulation built around latent residual truth.
 #
 # **9.3 Training universe ablation**
 #
@@ -1597,25 +1599,21 @@ if severe_miss_examples is not None:
     display(severe_miss_examples)
 
 # %% [markdown]
-# ### reviewer-facing queue examples
+# ### expected-value top residual examples
 
 # %%
-review_queue_examples.select(
-    ReviewCol.RANK,
+residual_scored.sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).select(
     PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
     PayrollCol.EMPLOYEE_ID,
     PayrollCol.FACILITY_ID,
     PayrollCol.PAY_PERIOD_INDEX,
-    ReviewCol.APPROVAL_RISK_CATEGORY,
-    ReviewCol.RECOMMENDED_ACTION,
-    ReviewCol.SOURCE_TO_CHECK,
-    ReviewCol.PRIMARY_REASON,
-    ReviewCol.SECONDARY_REASON,
-    ScoreCol.FINAL_ANOMALY_SCORE,
+    PayrollCol.ANOMALY_CATEGORY,
+    PayrollCol.Y_ISSUE,
+    PayrollCol.Y_DOLLAR,
+    PayrollCol.RELEVANCE_GRADE,
     ScoreCol.CLASSIFICATION_SCORE,
     ScoreCol.EXPECTED_VALUE_SCORE,
     ScoreCol.RANKING_SCORE,
-    ReviewCol.EXPLANATION,
 ).head(10)
 
 # %% [markdown]
@@ -2086,14 +2084,24 @@ def build_appendix_model_settings() -> pl.DataFrame:
                 "current_fixed_settings": "0.45 ranking + 0.15 classification + 0.15 cost_sensitive + 0.10 regression + 0.15 expected_value",
                 "documented_future_tuning_space": "blend weights selected on validation periods rather than fixed constants",
             },
-            {
-                "model": "isolation_forest",
-                "estimator_or_logic": "IsolationForest",
-                "current_fixed_settings": "n_estimators=100, contamination=0.03, random_state=config.seed",
-                "documented_future_tuning_space": "n_estimators, contamination, max_samples",
-            },
         ],
     )
+
+
+def build_optional_production_blend_metrics(
+    scored_frame: pl.DataFrame,
+    review_budgets: tuple[float, ...],
+) -> pl.DataFrame:
+    rows: list[dict[str, float | str]] = []
+    for budget in review_budgets:
+        rows.append(
+            {
+                "model": "final_active_ranking",
+                "review_budget_label": format_review_budget_pct(budget),
+                **employee_cycle_grouped_metrics(scored_frame, budget),
+            },
+        )
+    return pl.DataFrame(rows)
 
 
 def build_appendix_score_bucket_calibration(
@@ -2205,6 +2213,10 @@ appendix_metric_definitions = build_appendix_metric_definitions()
 appendix_group_construction = build_appendix_group_construction(review_budget_percents)
 appendix_zero_positive_policy = build_appendix_zero_positive_policy()
 appendix_model_settings = build_appendix_model_settings()
+appendix_optional_production_blend_metrics = build_optional_production_blend_metrics(
+    scored,
+    review_budget_percents,
+)
 appendix_score_bucket_calibration = build_appendix_score_bucket_calibration(scored)
 appendix_stress_test_config = build_appendix_stress_test_config(
     sim_config,
@@ -2249,7 +2261,41 @@ appendix_zero_positive_policy
 appendix_model_settings
 
 # %% [markdown]
-# ### G. additional ablation tables
+# ### G. Appendix: Optional production blend
+
+# %% [markdown]
+# `final_active_ranking` is an optional production-style blend, not a separate
+# modeling family in the primary comparison. It combines the supervised residual
+# scores into one operational queue score for reviewer-facing examples and
+# calibration checks.
+
+# %%
+appendix_model_settings.filter(pl.col("model") == "final_active_ranking")
+
+# %%
+appendix_optional_production_blend_metrics
+
+# %%
+review_queue_examples.select(
+    ReviewCol.RANK,
+    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+    PayrollCol.EMPLOYEE_ID,
+    PayrollCol.FACILITY_ID,
+    PayrollCol.PAY_PERIOD_INDEX,
+    ReviewCol.APPROVAL_RISK_CATEGORY,
+    ReviewCol.RECOMMENDED_ACTION,
+    ReviewCol.SOURCE_TO_CHECK,
+    ReviewCol.PRIMARY_REASON,
+    ReviewCol.SECONDARY_REASON,
+    ScoreCol.FINAL_ANOMALY_SCORE,
+    ScoreCol.CLASSIFICATION_SCORE,
+    ScoreCol.EXPECTED_VALUE_SCORE,
+    ScoreCol.RANKING_SCORE,
+    ReviewCol.EXPLANATION,
+).head(10)
+
+# %% [markdown]
+# ### H. additional ablation tables
 
 # %%
 if feature_ablation is not None:
@@ -2268,7 +2314,7 @@ if backtest is not None:
     display(backtest)
 
 # %% [markdown]
-# ### H. score-bucket calibration diagnostics
+# ### I. score-bucket calibration diagnostics
 
 # %%
 appendix_score_bucket_calibration
@@ -2313,7 +2359,7 @@ appendix_score_bucket_calibration
 )
 
 # %% [markdown]
-# ### I. stress-test configurations
+# ### J. stress-test configurations
 
 # %%
 appendix_stress_test_config
