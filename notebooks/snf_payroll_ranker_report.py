@@ -32,6 +32,8 @@
 # %autoreload 2
 
 # %%
+from dataclasses import replace
+
 import polars as pl
 import polars.selectors as pl_selectors
 from common.display import setup_notebook_html, setup_polars_display
@@ -66,6 +68,7 @@ from payroll_anomaly_ranking.evaluation import (
     employee_cycle_grouped_metrics,
     employee_cycle_issue_type_model_performance,
     employee_cycle_label_ablation,
+    employee_cycle_model_comparison,
     employee_cycle_severe_miss_examples,
     employee_cycle_training_universe_ablation,
     evaluate_employee_cycle_scores,
@@ -76,7 +79,10 @@ from payroll_anomaly_ranking.presentation import synthetic_schema_dictionary
 from payroll_anomaly_ranking.scenario_benchmark import (
     run_employee_cycle_scenario_benchmark,
 )
-from payroll_anomaly_ranking.scenarios import diagnostic_scenario_catalog
+from payroll_anomaly_ranking.scenarios import (
+    diagnostic_scenario_catalog,
+    implemented_dgp_scenario_catalog,
+)
 
 # %%
 setup_notebook_html()
@@ -358,16 +364,31 @@ def build_similarity_heatmap(
 #     observed -->|auxiliary historical signal| cycles
 # ```
 # %%
+# Validation mode is a CI execution check, not an analytical run. Keep enough
+# data to exercise model training, grouped ranking, temporal splits, and plot
+# code while avoiding the full scenario x seed x model workload.
+#
+# `pay_periods=6` is intentional: below 6 periods, rolling-origin temporal
+# diagnostics are empty by design, so 6 is the smallest useful setting for
+# validating temporal-path assumptions without paying full notebook cost.
+# A single review budget is enough to cover grouped-budget code paths in CI.
 sim_config = PayrollConfig(
-    facility_count=4 if validation_mode else 25,
-    employee_count=150 if validation_mode else 1500,
-    pay_periods=8 if validation_mode else 36,
+    facility_count=3 if validation_mode else 25,
+    employee_count=60 if validation_mode else 1500,
+    pay_periods=6 if validation_mode else 36,
     employee_cycle_review_budget_percents=(
-        (0.01, 0.05) if validation_mode else (0.01, 0.03, 0.05, 0.10)
+        (0.05,) if validation_mode else (0.01, 0.03, 0.05, 0.10)
     ),
 )
 review_budget_percents = sim_config.employee_cycle_review_budget_percents or tuple(
     float(budget) for budget in sim_config.review_budgets
+)
+# The scenario benchmark uses the default holdout splitter, which needs eight
+# periods for its 4-period validation and 4-period test windows. Keep the main
+# validation data at six periods, but raise only the reduced benchmark workload.
+scenario_benchmark_config = replace(
+    sim_config,
+    pay_periods=8 if validation_mode else sim_config.pay_periods,
 )
 
 data = generate_employee_pay_cycles(sim_config)
@@ -378,8 +399,19 @@ hard_rule_flagged = data.payroll.filter(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLA
 scenario_benchmark_seeds = (
     (sim_config.seed,) if validation_mode else (sim_config.seed, sim_config.seed + 1)
 )
+# In validation mode, exercise the default scenario plus one scenario with drift
+# controls. The full implemented scenario catalog is analysis-oriented and is
+# the dominant CI runtime cost because each scenario retrains every model family.
+scenario_benchmark_scenarios = None
+if validation_mode:
+    implemented_scenarios = implemented_dgp_scenario_catalog()
+    scenario_benchmark_scenarios = {
+        name: implemented_scenarios[name]
+        for name in ("baseline-operations", "temporal-payroll-drift")
+    }
 scenario_benchmark = run_employee_cycle_scenario_benchmark(
-    sim_config,
+    scenario_benchmark_config,
+    scenarios=scenario_benchmark_scenarios,
     seeds=scenario_benchmark_seeds,
 )
 benchmark_recommendation_budget = (
@@ -979,12 +1011,19 @@ def notebook_model_label(model_name: str) -> str:
     }.get(model_name, model_name)
 
 
-evaluation = evaluate_employee_cycle_scores(scored, sim_config)
+# Full employee-cycle evaluation includes rolling-origin and production-readiness
+# diagnostics that are useful for analysis but redundant for CI notebook runtime
+# checks. Validation mode only needs the downstream model-comparison contract.
+if validation_mode:
+    model_comparison = employee_cycle_model_comparison(scored, sim_config)
+else:
+    evaluation = evaluate_employee_cycle_scores(scored, sim_config)
+    model_comparison = evaluation.model_comparison
 model_similarity_diagnostics = build_model_similarity_diagnostics(
     scored,
     review_budget_percents,
 )
-comparison_for_summary = evaluation.model_comparison.with_columns(
+comparison_for_summary = model_comparison.with_columns(
     pl.col("model").map_elements(notebook_model_label, return_dtype=pl.String),
 ).filter(
     pl.col("model").is_in(
