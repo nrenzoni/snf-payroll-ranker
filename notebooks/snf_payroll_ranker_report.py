@@ -42,7 +42,6 @@ from common.plots import (
     geom_bar,
     geom_line,
     geom_point,
-    geom_segment,
     geom_tile,
     gggrid,
     ggplot,
@@ -62,7 +61,6 @@ from payroll_anomaly_ranking.data import (
     generate_employee_pay_cycles,
 )
 from payroll_anomaly_ranking.evaluation import (
-    bootstrap_residual_model_comparison,
     employee_cycle_backtest_by_period,
     employee_cycle_feature_ablation,
     employee_cycle_grouped_metrics,
@@ -160,59 +158,6 @@ def build_issue_type_mix_plot(issue_type_mix: pl.DataFrame) -> object:
             fill="Population",
         )
         + ggtitle("Issue-Type Mix Across Hard-Rule and Residual Populations")
-    )
-
-
-def bootstrap_metric_title(metric_name: str) -> str:
-    return {
-        str(MetricCol.RESIDUAL_NDCG_AT_K): "Residual NDCG",
-        str(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K): "Severe Recall",
-        str(MetricCol.DOLLARS_CAPTURED_AT_K): "Dollars Captured",
-        str(MetricCol.REVIEWER_YIELD_AT_K): "Reviewer Yield",
-        str(MetricCol.INCREMENTAL_UTILITY_AT_K): "Incremental Utility",
-    }.get(metric_name, metric_name)
-
-
-def build_bootstrap_interval_plot(
-    bootstrap_results: pl.DataFrame,
-    metric_name: str,
-    budget: float,
-) -> object:
-    plot_data = (
-        bootstrap_results.filter(
-            (pl.col("summary_type") == "model_metric")
-            & (pl.col("budget") == budget)
-            & (pl.col("metric") == metric_name),
-        )
-        .select("model", "point_estimate", "lower_95", "upper_95")
-        .sort("point_estimate")
-    )
-    return (
-        ggplot(
-            plot_data,
-            aes(x="model", y="point_estimate", color="model"),
-        )
-        + geom_segment(
-            aes(
-                x="model",
-                xend="model",
-                y="lower_95",
-                yend="upper_95",
-            ),
-            size=1.1,
-            alpha=0.7,
-        )
-        + geom_point(size=3)
-        + coord_flip()
-        + theme_minimal()
-        + labs(
-            x="Model",
-            y="Point estimate with 95% interval",
-            color="Model",
-        )
-        + ggtitle(
-            f"{bootstrap_metric_title(metric_name)} at {format_review_budget_pct(budget)} Review",
-        )
     )
 
 
@@ -1036,21 +981,6 @@ comparison_for_summary = evaluation.model_comparison.with_columns(
             "learning_to_rank",
         ],
     ),
-)
-
-# %%
-bootstrap_summary = bootstrap_residual_model_comparison(
-    scored,
-    score_cols={
-        "classifier": ScoreCol.CLASSIFICATION_SCORE,
-        "cost_sensitive_classifier": ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
-        "regressor": ScoreCol.REGRESSION_SCORE,
-        "expected_value": ScoreCol.EXPECTED_VALUE_SCORE,
-        "learning_to_rank": ScoreCol.RANKING_SCORE,
-    },
-    budgets=(0.05,),
-    n_bootstrap=10 if validation_mode else 500,
-    seed=sim_config.seed,
 )
 
 # %% [markdown]
@@ -2131,12 +2061,6 @@ def build_appendix_stress_test_config(
             "name": "reference_window_periods",
             "status": str(config.reference_window_periods),
             "detail": "Prior periods used for scoring-time context",
-        },
-        {
-            "artifact": "runtime_config",
-            "name": "bootstrap_samples",
-            "status": str(config.bootstrap_samples),
-            "detail": "Configured uncertainty bootstrap count available in project config",
         },
     ]
     return pl.DataFrame(config_rows + scenario_rows)
