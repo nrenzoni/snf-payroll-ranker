@@ -95,131 +95,6 @@ def format_review_budget_pct(budget: float) -> str:
     return f"{budget:.0%}" if budget <= 1 else str(int(budget))
 
 
-def build_residual_issue_rate_plot(facility_issue_rate: pl.DataFrame) -> object:
-    plot_data = facility_issue_rate.with_columns(
-        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
-        pl.col("residual_issue_rate").round(4),
-    ).sort("residual_issue_rate")
-    return (
-        ggplot(
-            plot_data,
-            aes(x="facility_id", y="residual_issue_rate"),
-        )
-        + geom_bar(stat="identity", fill="#2563eb")
-        + coord_flip()
-        + theme_minimal()
-        + labs(
-            x="Facility",
-            y="Residual issue rate",
-        )
-        + ggtitle("Residual Issue Rate by Facility")
-    )
-
-
-def build_severe_residual_heatmap(severe_counts: pl.DataFrame) -> object:
-    plot_data = severe_counts.with_columns(
-        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
-        pl.col(PayrollCol.PAY_PERIOD_INDEX).alias("pay_period"),
-    )
-    return (
-        ggplot(
-            plot_data,
-            aes(
-                x="pay_period",
-                y="facility_id",
-                fill="severe_residual_issues",
-            ),
-        )
-        + geom_tile()
-        + theme_minimal()
-        + labs(
-            x="Pay period",
-            y="Facility",
-            fill="Severe issues",
-        )
-        + scale_fill_gradient(low="#f8fafc", high="#b91c1c")
-        + ggtitle("Severe Residual Issues by Facility-Cycle")
-    )
-
-
-def build_issue_type_mix_plot(issue_type_mix: pl.DataFrame) -> object:
-    plot_data = issue_type_mix.with_columns(
-        pl.col(PayrollCol.ANOMALY_CATEGORY).cast(pl.String).alias("anomaly_category"),
-    ).sort([PayrollCol.ANOMALY_CATEGORY, "population"])
-    return (
-        ggplot(
-            plot_data,
-            aes(
-                x="anomaly_category",
-                y="records",
-                fill="population",
-            ),
-        )
-        + geom_bar(stat="identity", position="dodge")
-        + coord_flip()
-        + theme_minimal()
-        + labs(
-            x="Anomaly family",
-            y="Records",
-            fill="Population",
-        )
-        + ggtitle("Issue-Type Mix Across Hard-Rule and Residual Populations")
-    )
-
-
-def build_similarity_matrix(
-    similarity_diagnostics: pl.DataFrame,
-    value_col: str,
-) -> pl.DataFrame:
-    models = sorted(
-        {
-            *similarity_diagnostics.get_column("model_a").to_list(),
-            *similarity_diagnostics.get_column("model_b").to_list(),
-        },
-    )
-    pair_values = {
-        frozenset((row["model_a"], row["model_b"])): float(row[value_col] or 0.0)
-        for row in similarity_diagnostics.select(
-            "model_a",
-            "model_b",
-            value_col,
-        ).to_dicts()
-    }
-    rows: list[dict[str, float | str]] = []
-    for left_model in models:
-        for right_model in models:
-            rows.append(
-                {
-                    "model_x": left_model,
-                    "model_y": right_model,
-                    value_col: 1.0
-                    if left_model == right_model
-                    else pair_values.get(frozenset((left_model, right_model)), 0.0),
-                },
-            )
-    return pl.DataFrame(rows)
-
-
-def build_similarity_heatmap(
-    similarity_diagnostics: pl.DataFrame,
-    value_col: str,
-    title: str,
-) -> object:
-    plot_data = build_similarity_matrix(similarity_diagnostics, value_col)
-    return (
-        ggplot(
-            plot_data,
-            aes(x="model_x", y="model_y", fill=value_col),
-        )
-        + geom_tile()
-        + theme_minimal()
-        + rotated_x_labels()
-        + scale_fill_gradient(low="#f8fafc", high="#0f766e")
-        + labs(x="Model", y="Model", fill="Value")
-        + ggtitle(title)
-    )
-
-
 # %% [markdown]
 # ## 0. Executive Summary
 #
@@ -574,6 +449,80 @@ scenario_benchmark.scenario_summary.select(
 # examples. The main experimental evidence comes from cross-scenario aggregation,
 # not from any single residual dataset snapshot.
 
+
+# %%
+def build_residual_issue_rate_plot(facility_issue_rate: pl.DataFrame) -> object:
+    plot_data = facility_issue_rate.with_columns(
+        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
+        pl.col("residual_issue_rate").round(4),
+    ).sort("residual_issue_rate")
+    return (
+        ggplot(
+            plot_data,
+            aes(x="facility_id", y="residual_issue_rate"),
+        )
+        + geom_bar(stat="identity", fill="#2563eb")
+        + coord_flip()
+        + theme_minimal()
+        + labs(
+            x="Facility",
+            y="Residual issue rate",
+        )
+        + ggtitle("Residual Issue Rate by Facility")
+    )
+
+
+def build_severe_residual_heatmap(severe_counts: pl.DataFrame) -> object:
+    plot_data = severe_counts.with_columns(
+        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
+        pl.col(PayrollCol.PAY_PERIOD_INDEX).alias("pay_period"),
+    )
+    return (
+        ggplot(
+            plot_data,
+            aes(
+                x="pay_period",
+                y="facility_id",
+                fill="severe_residual_issues",
+            ),
+        )
+        + geom_tile()
+        + theme_minimal()
+        + labs(
+            x="Pay period",
+            y="Facility",
+            fill="Severe issues",
+        )
+        + scale_fill_gradient(low="#f8fafc", high="#b91c1c")
+        + ggtitle("Severe Residual Issues by Facility-Cycle")
+    )
+
+
+def build_issue_type_mix_plot(issue_type_mix: pl.DataFrame) -> object:
+    plot_data = issue_type_mix.with_columns(
+        pl.col(PayrollCol.ANOMALY_CATEGORY).cast(pl.String).alias("anomaly_category"),
+    ).sort([PayrollCol.ANOMALY_CATEGORY, "population"])
+    return (
+        ggplot(
+            plot_data,
+            aes(
+                x="anomaly_category",
+                y="records",
+                fill="population",
+            ),
+        )
+        + geom_bar(stat="identity", position="dodge")
+        + coord_flip()
+        + theme_minimal()
+        + labs(
+            x="Anomaly family",
+            y="Records",
+            fill="Population",
+        )
+        + ggtitle("Issue-Type Mix Across Hard-Rule and Residual Populations")
+    )
+
+
 # %% [markdown]
 # ### baseline example: residual issue rate by facility
 
@@ -893,35 +842,85 @@ residual_scored.sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).select(
 #
 # Optional production blending is documented separately in the appendix. It is
 # not part of the primary model-family comparison.
+# %% [markdown]
+# ### formulation summary
+
+# %%
+pl.DataFrame(
+    {
+        "model": [
+            "classifier",
+            "cost_sensitive_classifier",
+            "regressor",
+            "expected_value",
+            "learning_to_rank",
+        ],
+        "training_target": [
+            f"{PayrollCol.Y_ISSUE} on residual records",
+            f"{PayrollCol.Y_ISSUE} with severity-aware weights on residual records",
+            f"{PayrollCol.Y_DOLLAR} on residual records",
+            "y_issue + estimated exposure on residual records",
+            f"{PayrollCol.RELEVANCE_GRADE}, grouped by facility x pay period",
+        ],
+        "score_column": [
+            str(ScoreCol.CLASSIFICATION_SCORE),
+            str(ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE),
+            str(ScoreCol.REGRESSION_SCORE),
+            str(ScoreCol.EXPECTED_VALUE_SCORE),
+            str(ScoreCol.RANKING_SCORE),
+        ],
+        "business_question": [
+            "Which residual records are most likely to still contain a payroll issue?",
+            "Which residual issue records deserve extra weight when severity and dollars matter?",
+            "Which residual records imply the largest unresolved dollar impact?",
+            "Which residual records combine issue likelihood with financial exposure?",
+            "Which residual records deserve the strongest top-of-queue priority?",
+        ],
+    },
+)
+
+# %% [markdown]
+# ### fair comparison rules
+
+# %%
+pl.DataFrame(
+    {
+        "rule": [
+            "scoring universe",
+            "queue grouping",
+            "review budgets",
+            "temporal framing",
+            "training universe",
+            "leakage control",
+            "cost-sensitive coverage",
+        ],
+        "applied_setting": [
+            "residual records only for notebook comparison outputs",
+            "facility x payroll cycle",
+            ", ".join(format_review_budget_pct(k) for k in review_budget_percents),
+            "same employee-cycle temporal split logic for all formulations",
+            "primary supervised training rows are residual records only",
+            "evaluation labels remain excluded from feature columns",
+            "cost-sensitive classifier is included alongside the standard classifier",
+        ],
+    },
+)
+
+# %% [markdown]
+# ## 8. Main Study: DGP Scenario-Based Residual Ranking Benchmark
+#
+# The main study evaluates employee-pay-cycle residual ranking across DGP
+# scenarios and seeds, then aggregates by model, review-budget operating point,
+# and objective.
+#
+# Each DGP scenario is evaluated over multiple random seeds. Seeds estimate
+# random-draw stability within the same payroll-generating process. They do not
+# fix structural DGP bias. Structural robustness is assessed by comparing across
+# DGP scenarios. The current rendered notebook keeps that design and aggregates
+# across the configured scenario-seed benchmark units.
 
 
 # %%
-def build_model_budget_metrics(
-    scored_frame: pl.DataFrame,
-    review_budgets: tuple[float, ...],
-) -> pl.DataFrame:
-    rows: list[dict[str, float | str]] = []
-    for model_name, score_col in [
-        ("classifier", ScoreCol.CLASSIFICATION_SCORE),
-        ("cost_sensitive_classifier", ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE),
-        ("regressor", ScoreCol.REGRESSION_SCORE),
-        ("expected_value", ScoreCol.EXPECTED_VALUE_SCORE),
-        ("learning_to_rank", ScoreCol.RANKING_SCORE),
-    ]:
-        scored_for_model = scored_frame.with_columns(
-            pl.col(score_col).alias(ScoreCol.FINAL_ANOMALY_SCORE),
-        )
-        for budget in review_budgets:
-            rows.append(
-                {
-                    "model": model_name,
-                    "review_budget_label": format_review_budget_pct(budget),
-                    **employee_cycle_grouped_metrics(scored_for_model, budget),
-                },
-            )
-    return pl.DataFrame(rows)
-
-
 def build_model_similarity_diagnostics(
     scored_frame: pl.DataFrame,
     review_budgets: tuple[float, ...],
@@ -1036,153 +1035,6 @@ comparison_for_summary = model_comparison.with_columns(
         ],
     ),
 )
-
-# %% [markdown]
-# ### formulation summary
-
-# %%
-pl.DataFrame(
-    {
-        "model": [
-            "classifier",
-            "cost_sensitive_classifier",
-            "regressor",
-            "expected_value",
-            "learning_to_rank",
-        ],
-        "training_target": [
-            f"{PayrollCol.Y_ISSUE} on residual records",
-            f"{PayrollCol.Y_ISSUE} with severity-aware weights on residual records",
-            f"{PayrollCol.Y_DOLLAR} on residual records",
-            "y_issue + estimated exposure on residual records",
-            f"{PayrollCol.RELEVANCE_GRADE}, grouped by facility x pay period",
-        ],
-        "score_column": [
-            str(ScoreCol.CLASSIFICATION_SCORE),
-            str(ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE),
-            str(ScoreCol.REGRESSION_SCORE),
-            str(ScoreCol.EXPECTED_VALUE_SCORE),
-            str(ScoreCol.RANKING_SCORE),
-        ],
-        "business_question": [
-            "Which residual records are most likely to still contain a payroll issue?",
-            "Which residual issue records deserve extra weight when severity and dollars matter?",
-            "Which residual records imply the largest unresolved dollar impact?",
-            "Which residual records combine issue likelihood with financial exposure?",
-            "Which residual records deserve the strongest top-of-queue priority?",
-        ],
-    },
-)
-
-# %% [markdown]
-# ### fair comparison rules
-
-# %%
-pl.DataFrame(
-    {
-        "rule": [
-            "scoring universe",
-            "queue grouping",
-            "review budgets",
-            "temporal framing",
-            "training universe",
-            "leakage control",
-            "cost-sensitive coverage",
-        ],
-        "applied_setting": [
-            "residual records only for notebook comparison outputs",
-            "facility x payroll cycle",
-            ", ".join(format_review_budget_pct(k) for k in review_budget_percents),
-            "same employee-cycle temporal split logic for all formulations",
-            "primary supervised training rows are residual records only",
-            "evaluation labels remain excluded from feature columns",
-            "cost-sensitive classifier is included alongside the standard classifier",
-        ],
-    },
-)
-
-# %% [markdown]
-# ## 8. Main Study: DGP Scenario-Based Residual Ranking Benchmark
-#
-# The main study evaluates employee-pay-cycle residual ranking across DGP
-# scenarios and seeds, then aggregates by model, review-budget operating point,
-# and objective.
-#
-# Each DGP scenario is evaluated over multiple random seeds. Seeds estimate
-# random-draw stability within the same payroll-generating process. They do not
-# fix structural DGP bias. Structural robustness is assessed by comparing across
-# DGP scenarios. The current rendered notebook keeps that design and aggregates
-# across the configured scenario-seed benchmark units.
-
-
-# %%
-def build_review_budget_diagnostics(
-    residual_records_per_group: pl.DataFrame,
-    review_budgets: tuple[float, ...],
-) -> pl.DataFrame:
-    rows: list[dict[str, float | str]] = []
-    total_groups = max(residual_records_per_group.height, 1)
-    for budget in review_budgets:
-        reviewed_counts = residual_records_per_group.with_columns(
-            (pl.col("residual_records") * budget if budget <= 1 else pl.lit(budget))
-            .ceil()
-            .cast(pl.Int64)
-            .clip(1, None)
-            .alias("reviewed_records"),
-        )
-        rows.append(
-            {
-                "review_budget_pct": format_review_budget_pct(budget),
-                "avg_records_reviewed_per_group": round(
-                    float(
-                        reviewed_counts.select(pl.mean("reviewed_records")).item()
-                        or 0.0,
-                    ),
-                    2,
-                ),
-                "pct_groups_fully_reviewed": round(
-                    reviewed_counts.filter(
-                        pl.col("reviewed_records") >= pl.col("residual_records"),
-                    ).height
-                    / total_groups,
-                    4,
-                ),
-                "max_group_size": float(
-                    reviewed_counts.select(pl.max("residual_records")).item() or 0,
-                ),
-            },
-        )
-    return pl.DataFrame(rows)
-
-
-def build_model_budget_plot(
-    metric_col: str,
-    title: str,
-    y_label: str,
-) -> object:
-    return (
-        ggplot(
-            model_budget_metrics,
-            aes(
-                x="review_budget_label",
-                y=metric_col,
-                color="model",
-            ),
-        )
-        + geom_line()
-        + geom_point()
-        + theme_minimal()
-        + rotated_x_labels()
-        + labs(x="Residual queue reviewed", y=y_label, color="Model")
-        + ggtitle(title)
-    )
-
-
-model_budget_metrics = build_model_budget_metrics(scored, review_budget_percents)
-budget_diagnostics = build_review_budget_diagnostics(
-    residual_diagnostics["residual_records_per_facility_cycle"],
-    review_budget_percents,
-)
 backtest: pl.DataFrame | None = None
 if not validation_mode:
     backtest = employee_cycle_backtest_by_period(scored, sim_config)
@@ -1256,6 +1108,61 @@ residual_scored.select(
     ScoreCol.EXPECTED_VALUE_SCORE,
     ScoreCol.RANKING_SCORE,
 ).sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).head(10)
+
+
+# %%
+def build_similarity_matrix(
+    similarity_diagnostics: pl.DataFrame,
+    value_col: str,
+) -> pl.DataFrame:
+    models = sorted(
+        {
+            *similarity_diagnostics.get_column("model_a").to_list(),
+            *similarity_diagnostics.get_column("model_b").to_list(),
+        },
+    )
+    pair_values = {
+        frozenset((row["model_a"], row["model_b"])): float(row[value_col] or 0.0)
+        for row in similarity_diagnostics.select(
+            "model_a",
+            "model_b",
+            value_col,
+        ).to_dicts()
+    }
+    rows: list[dict[str, float | str]] = []
+    for left_model in models:
+        for right_model in models:
+            rows.append(
+                {
+                    "model_x": left_model,
+                    "model_y": right_model,
+                    value_col: 1.0
+                    if left_model == right_model
+                    else pair_values.get(frozenset((left_model, right_model)), 0.0),
+                },
+            )
+    return pl.DataFrame(rows)
+
+
+def build_similarity_heatmap(
+    similarity_diagnostics: pl.DataFrame,
+    value_col: str,
+    title: str,
+) -> object:
+    plot_data = build_similarity_matrix(similarity_diagnostics, value_col)
+    return (
+        ggplot(
+            plot_data,
+            aes(x="model_x", y="model_y", fill=value_col),
+        )
+        + geom_tile()
+        + theme_minimal()
+        + rotated_x_labels()
+        + scale_fill_gradient(low="#f8fafc", high="#0f766e")
+        + labs(x="Model", y="Model", fill="Value")
+        + ggtitle(title)
+    )
+
 
 # %% [markdown]
 # ### model similarity diagnostics
@@ -1525,6 +1432,28 @@ if severe_miss_examples is not None:
     display(severe_miss_examples)
 
 # %% [markdown]
+# ### reviewer-facing queue examples
+
+# %%
+review_queue_examples.select(
+    ReviewCol.RANK,
+    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+    PayrollCol.EMPLOYEE_ID,
+    PayrollCol.FACILITY_ID,
+    PayrollCol.PAY_PERIOD_INDEX,
+    ReviewCol.APPROVAL_RISK_CATEGORY,
+    ReviewCol.RECOMMENDED_ACTION,
+    ReviewCol.SOURCE_TO_CHECK,
+    ReviewCol.PRIMARY_REASON,
+    ReviewCol.SECONDARY_REASON,
+    ScoreCol.FINAL_ANOMALY_SCORE,
+    ScoreCol.CLASSIFICATION_SCORE,
+    ScoreCol.EXPECTED_VALUE_SCORE,
+    ScoreCol.RANKING_SCORE,
+    ReviewCol.EXPLANATION,
+).head(10)
+
+# %% [markdown]
 # ### expected-value top residual examples
 
 # %%
@@ -1584,6 +1513,9 @@ final_recommendation_summary
 
 # %% [markdown]
 # ## 11. Technical Appendix
+
+# %% [markdown]
+# ### A. data dictionary
 
 
 # %%
@@ -1778,6 +1710,14 @@ def build_appendix_data_dictionary() -> pl.DataFrame:
     )
 
 
+appendix_data_dictionary = build_appendix_data_dictionary()
+appendix_data_dictionary
+
+# %% [markdown]
+# ### B. hard rule definitions
+
+
+# %%
 def build_appendix_hard_rule_definitions() -> pl.DataFrame:
     return pl.DataFrame(
         [
@@ -1833,6 +1773,14 @@ def build_appendix_hard_rule_definitions() -> pl.DataFrame:
     )
 
 
+appendix_hard_rule_definitions = build_appendix_hard_rule_definitions()
+appendix_hard_rule_definitions
+
+# %% [markdown]
+# ### C. metric definitions
+
+
+# %%
 def build_appendix_metric_definitions() -> pl.DataFrame:
     return pl.DataFrame(
         [
@@ -1904,6 +1852,14 @@ def build_appendix_metric_definitions() -> pl.DataFrame:
     )
 
 
+appendix_metric_definitions = build_appendix_metric_definitions()
+appendix_metric_definitions
+
+# %% [markdown]
+# ### D. ranking group construction
+
+
+# %%
 def build_appendix_group_construction(
     review_budgets: tuple[float, ...],
 ) -> pl.DataFrame:
@@ -1939,6 +1895,14 @@ def build_appendix_group_construction(
     )
 
 
+appendix_group_construction = build_appendix_group_construction(review_budget_percents)
+appendix_group_construction
+
+# %% [markdown]
+# ### E. handling zero-positive residual groups
+
+
+# %%
 def build_appendix_zero_positive_policy() -> pl.DataFrame:
     return pl.DataFrame(
         [
@@ -1971,6 +1935,14 @@ def build_appendix_zero_positive_policy() -> pl.DataFrame:
     )
 
 
+appendix_zero_positive_policy = build_appendix_zero_positive_policy()
+appendix_zero_positive_policy
+
+# %% [markdown]
+# ### F. model settings and documented tuning space
+
+
+# %%
 def build_appendix_model_settings() -> pl.DataFrame:
     return pl.DataFrame(
         [
@@ -2014,6 +1986,19 @@ def build_appendix_model_settings() -> pl.DataFrame:
     )
 
 
+appendix_model_settings = build_appendix_model_settings()
+appendix_model_settings
+
+# %% [markdown]
+# ### G. Appendix: Optional production blend
+#
+# `final_active_ranking` is an optional production-style blend, not a separate
+# modeling family in the primary comparison. It combines the supervised residual
+# scores into one operational queue score for reviewer-facing examples and
+# calibration checks.
+
+
+# %%
 def build_optional_production_blend_metrics(
     scored_frame: pl.DataFrame,
     review_budgets: tuple[float, ...],
@@ -2030,6 +2015,20 @@ def build_optional_production_blend_metrics(
     return pl.DataFrame(rows)
 
 
+appendix_optional_production_blend_metrics = build_optional_production_blend_metrics(
+    scored,
+    review_budget_percents,
+)
+appendix_model_settings.filter(pl.col("model") == "final_active_ranking")
+
+# %%
+appendix_optional_production_blend_metrics
+
+# %% [markdown]
+# ### H. score-bucket calibration diagnostics
+
+
+# %%
 def build_appendix_score_bucket_calibration(
     scored_frame: pl.DataFrame,
     bucket_count: int = 10,
@@ -2061,6 +2060,53 @@ def build_appendix_score_bucket_calibration(
     )
 
 
+appendix_score_bucket_calibration = build_appendix_score_bucket_calibration(scored)
+appendix_score_bucket_calibration
+
+# %%
+(
+    ggplot(
+        appendix_score_bucket_calibration,
+        aes(x="bucket_rank", y="issue_rate"),
+    )
+    + geom_line()
+    + geom_point()
+    + theme_minimal()
+    + labs(x="Score bucket", y="Residual issue rate")
+    + ggtitle("Residual Issue Rate by Final-Score Bucket")
+)
+
+# %%
+(
+    ggplot(
+        appendix_score_bucket_calibration,
+        aes(x="bucket_rank", y="avg_residual_dollars"),
+    )
+    + geom_line()
+    + geom_point()
+    + theme_minimal()
+    + labs(x="Score bucket", y="Average residual dollars")
+    + ggtitle("Residual Dollars by Final-Score Bucket")
+)
+
+# %%
+(
+    ggplot(
+        appendix_score_bucket_calibration,
+        aes(x="bucket_rank", y="avg_gross_gap"),
+    )
+    + geom_line()
+    + geom_point()
+    + theme_minimal()
+    + labs(x="Score bucket", y="Average gross gap")
+    + ggtitle("Gross Gap by Final-Score Bucket")
+)
+
+# %% [markdown]
+# ### I. stress-test configurations
+
+
+# %%
 def build_appendix_stress_test_config(
     config: PayrollConfig,
     review_budgets: tuple[float, ...],
@@ -2130,95 +2176,15 @@ def build_appendix_stress_test_config(
     return pl.DataFrame(config_rows + scenario_rows)
 
 
-appendix_data_dictionary = build_appendix_data_dictionary()
-appendix_hard_rule_definitions = build_appendix_hard_rule_definitions()
-appendix_metric_definitions = build_appendix_metric_definitions()
-appendix_group_construction = build_appendix_group_construction(review_budget_percents)
-appendix_zero_positive_policy = build_appendix_zero_positive_policy()
-appendix_model_settings = build_appendix_model_settings()
-appendix_optional_production_blend_metrics = build_optional_production_blend_metrics(
-    scored,
-    review_budget_percents,
-)
-appendix_score_bucket_calibration = build_appendix_score_bucket_calibration(scored)
 appendix_stress_test_config = build_appendix_stress_test_config(
     sim_config,
     review_budget_percents,
     validation_mode,
 )
+appendix_stress_test_config
 
 # %% [markdown]
-# ### A. data dictionary
-
-# %%
-appendix_data_dictionary
-
-# %% [markdown]
-# ### B. hard rule definitions
-
-# %%
-appendix_hard_rule_definitions
-
-# %% [markdown]
-# ### C. metric definitions
-
-# %%
-appendix_metric_definitions
-
-# %% [markdown]
-# ### D. ranking group construction
-
-# %%
-appendix_group_construction
-
-# %% [markdown]
-# ### E. handling zero-positive residual groups
-
-# %%
-appendix_zero_positive_policy
-
-# %% [markdown]
-# ### F. model settings and documented tuning space
-
-# %%
-appendix_model_settings
-
-# %% [markdown]
-# ### G. Appendix: Optional production blend
-
-# %% [markdown]
-# `final_active_ranking` is an optional production-style blend, not a separate
-# modeling family in the primary comparison. It combines the supervised residual
-# scores into one operational queue score for reviewer-facing examples and
-# calibration checks.
-
-# %%
-appendix_model_settings.filter(pl.col("model") == "final_active_ranking")
-
-# %%
-appendix_optional_production_blend_metrics
-
-# %%
-review_queue_examples.select(
-    ReviewCol.RANK,
-    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
-    PayrollCol.EMPLOYEE_ID,
-    PayrollCol.FACILITY_ID,
-    PayrollCol.PAY_PERIOD_INDEX,
-    ReviewCol.APPROVAL_RISK_CATEGORY,
-    ReviewCol.RECOMMENDED_ACTION,
-    ReviewCol.SOURCE_TO_CHECK,
-    ReviewCol.PRIMARY_REASON,
-    ReviewCol.SECONDARY_REASON,
-    ScoreCol.FINAL_ANOMALY_SCORE,
-    ScoreCol.CLASSIFICATION_SCORE,
-    ScoreCol.EXPECTED_VALUE_SCORE,
-    ScoreCol.RANKING_SCORE,
-    ReviewCol.EXPLANATION,
-).head(10)
-
-# %% [markdown]
-# ### H. additional ablation tables
+# ### J. additional ablation tables
 
 # %%
 if feature_ablation is not None:
@@ -2231,54 +2197,3 @@ if training_universe_ablation is not None:
 # %%
 if label_ablation is not None:
     display(label_ablation)
-
-# %% [markdown]
-# ### I. score-bucket calibration diagnostics
-
-# %%
-appendix_score_bucket_calibration
-
-# %%
-(
-    ggplot(
-        appendix_score_bucket_calibration,
-        aes(x="bucket_rank", y="issue_rate"),
-    )
-    + geom_line()
-    + geom_point()
-    + theme_minimal()
-    + labs(x="Score bucket", y="Residual issue rate")
-    + ggtitle("Residual Issue Rate by Final-Score Bucket")
-)
-
-# %%
-(
-    ggplot(
-        appendix_score_bucket_calibration,
-        aes(x="bucket_rank", y="avg_residual_dollars"),
-    )
-    + geom_line()
-    + geom_point()
-    + theme_minimal()
-    + labs(x="Score bucket", y="Average residual dollars")
-    + ggtitle("Residual Dollars by Final-Score Bucket")
-)
-
-# %%
-(
-    ggplot(
-        appendix_score_bucket_calibration,
-        aes(x="bucket_rank", y="avg_gross_gap"),
-    )
-    + geom_line()
-    + geom_point()
-    + theme_minimal()
-    + labs(x="Score bucket", y="Average gross gap")
-    + ggtitle("Gross Gap by Final-Score Bucket")
-)
-
-# %% [markdown]
-# ### J. stress-test configurations
-
-# %%
-appendix_stress_test_config
