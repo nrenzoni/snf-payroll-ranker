@@ -272,7 +272,9 @@ residual_diagnostics = employee_cycle_residual_diagnostics(data.payroll)
 residual_payroll = data.payroll.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
 hard_rule_flagged = data.payroll.filter(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG) == 1)
 scenario_benchmark_seeds = (
-    (sim_config.seed,) if validation_mode else (sim_config.seed, sim_config.seed + 1)
+    (sim_config.seed,)
+    if validation_mode
+    else tuple(sim_config.seed + offset for offset in range(5))
 )
 # In validation mode, exercise the default scenario plus one scenario with drift
 # controls. The full implemented scenario catalog is analysis-oriented and is
