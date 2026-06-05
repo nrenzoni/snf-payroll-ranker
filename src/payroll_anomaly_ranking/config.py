@@ -42,6 +42,7 @@ class PayrollConfig:
     bootstrap_percentiles: tuple[float, float] = (10.0, 90.0)
     ood_rare_pay_code_threshold: int = 3
     ood_nearest_neighbor_percentile: float = 0.90
+    ltr_num_threads: int = 2
     data_dir: Path = Path("data/synthetic")
     output_dir: Path = Path("outputs")
 
@@ -93,3 +94,5 @@ def validate_snf_config(
         raise ValueError("overtime_multiplier must be at least 1")
     if policy.rest_gap_warning_hours <= 0:
         raise ValueError("rest_gap_warning_hours must be positive")
+    if config.ltr_num_threads <= 0:
+        raise ValueError("ltr_num_threads must be positive")

@@ -942,6 +942,7 @@ def _employee_cycle_ltr_scores(
         learning_rate=0.05,
         max_depth=3,
         min_child_samples=5,
+        n_jobs=config.ltr_num_threads,
         random_state=config.seed,
         verbose=-1,
     )

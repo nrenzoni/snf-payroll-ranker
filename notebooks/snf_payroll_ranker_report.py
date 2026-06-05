@@ -89,6 +89,10 @@ setup_notebook_html()
 setup_polars_display()
 validation_mode = notebook_validation_mode()
 
+# LightGBM learning-to-rank can otherwise use all host CPU threads during full
+# benchmark runs. Increase only when the host has spare cores and memory.
+NOTEBOOK_LTR_NUM_THREADS = 1 if validation_mode else 8
+
 
 # %%
 def format_review_budget_pct(budget: float) -> str:
@@ -251,6 +255,7 @@ sim_config = PayrollConfig(
     facility_count=3 if validation_mode else 25,
     employee_count=60 if validation_mode else 1500,
     pay_periods=6 if validation_mode else 36,
+    ltr_num_threads=NOTEBOOK_LTR_NUM_THREADS,
     employee_cycle_review_budget_percents=(
         (0.05,) if validation_mode else (0.01, 0.03, 0.05, 0.10)
     ),

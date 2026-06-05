@@ -573,6 +573,12 @@ def test_employee_cycle_scoring_returns_formulation_columns() -> None:
     assert len(results.feature_columns) > 0
 
 
+def test_payroll_config_exposes_ltr_thread_count() -> None:
+    config = PayrollConfig(ltr_num_threads=1)
+
+    assert config.ltr_num_threads == 1
+
+
 def test_employee_cycle_scoring_defaults_to_residual_training_universe() -> None:
     config = PayrollConfig(employee_count=80, pay_periods=10, review_budgets=(5, 10))
     payroll = generate_employee_pay_cycles(config).payroll
