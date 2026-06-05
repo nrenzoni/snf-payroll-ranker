@@ -485,6 +485,15 @@ def test_employee_cycle_residual_gate_artifacts_exist() -> None:
     } <= set(diagnostics)
     assert diagnostics["facility_residual_issue_rate"].height > 0
     assert PayrollCol.Y_DOLLAR in diagnostics["residual_dollar_distribution"].columns
+    issue_type_mix = diagnostics["issue_type_mix"]
+    assert "population_issue_share" in issue_type_mix.columns
+    assert (
+        not issue_type_mix.get_column(PayrollCol.ANOMALY_CATEGORY)
+        .is_in(
+            ["normal"],
+        )
+        .any()
+    )
     all_stage = funnel.filter(pl.col("stage") == "All payroll records").row(
         0,
         named=True,

@@ -1174,6 +1174,22 @@ def employee_cycle_residual_diagnostics(
 ) -> dict[str, pl.DataFrame]:
     residual = employee_cycles.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
     hard_rule = employee_cycles.filter(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG) == 1)
+    issue_type_mix = pl.DataFrame(
+        _issue_family_mix_rows(
+            hard_rule.filter(pl.col(PayrollCol.IS_ANOMALY) == 1),
+            "critical_hard_rule_flagged",
+        )
+        + _issue_family_mix_rows(
+            residual.filter(pl.col(PayrollCol.Y_ISSUE) == 1),
+            "residual_universe",
+        ),
+        schema={
+            "population": pl.String,
+            PayrollCol.ANOMALY_CATEGORY: pl.String,
+            "records": pl.Int64,
+            "population_issue_share": pl.Float64,
+        },
+    ).sort(["population", "records"], descending=[False, True])
     return {
         "facility_residual_issue_rate": residual.group_by(PayrollCol.FACILITY_ID)
         .agg(
@@ -1203,24 +1219,7 @@ def employee_cycle_residual_diagnostics(
             PayrollCol.RELEVANCE_GRADE,
             PayrollCol.ANOMALY_CATEGORY,
         ).sort(PayrollCol.Y_DOLLAR, descending=True),
-        "issue_type_mix": pl.DataFrame(
-            [
-                {
-                    "population": "critical_hard_rule_flagged",
-                    PayrollCol.ANOMALY_CATEGORY: category,
-                    "records": count,
-                }
-                for category, count in _category_counts(hard_rule).items()
-            ]
-            + [
-                {
-                    "population": "residual_universe",
-                    PayrollCol.ANOMALY_CATEGORY: category,
-                    "records": count,
-                }
-                for category, count in _category_counts(residual).items()
-            ],
-        ).sort(["population", "records"], descending=[False, True]),
+        "issue_type_mix": issue_type_mix,
         "residual_records_per_facility_cycle": residual.group_by(
             [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX],
         )
@@ -1281,6 +1280,25 @@ def _employee_cycle_hard_rule_flags(payroll: pl.DataFrame) -> pl.DataFrame:
         .cast(pl.Int8)
         .alias(PayrollCol.CRITICAL_HARD_RULE_FLAG),
     )
+
+
+def _issue_family_mix_rows(
+    issues: pl.DataFrame,
+    population: str,
+) -> list[dict[str, object]]:
+    issue_families = issues.filter(
+        pl.col(PayrollCol.ANOMALY_CATEGORY) != str(SNFAnomalyCategory.NORMAL),
+    )
+    issue_count = max(issue_families.height, 1)
+    return [
+        {
+            "population": population,
+            PayrollCol.ANOMALY_CATEGORY: category,
+            "records": count,
+            "population_issue_share": round(count / issue_count, 4),
+        }
+        for category, count in _category_counts(issue_families).items()
+    ]
 
 
 def _category_counts(frame: pl.DataFrame) -> dict[str, int]:

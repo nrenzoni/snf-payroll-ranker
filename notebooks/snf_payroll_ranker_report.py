@@ -508,13 +508,13 @@ def build_severe_residual_heatmap(severe_counts: pl.DataFrame) -> object:
 def build_issue_type_mix_plot(issue_type_mix: pl.DataFrame) -> object:
     plot_data = issue_type_mix.with_columns(
         pl.col(PayrollCol.ANOMALY_CATEGORY).cast(pl.String).alias("anomaly_category"),
-    ).sort([PayrollCol.ANOMALY_CATEGORY, "population"])
+    ).sort(["population_issue_share", PayrollCol.ANOMALY_CATEGORY])
     return (
         ggplot(
             plot_data,
             aes(
                 x="anomaly_category",
-                y="records",
+                y="population_issue_share",
                 fill="population",
             ),
         )
@@ -523,10 +523,10 @@ def build_issue_type_mix_plot(issue_type_mix: pl.DataFrame) -> object:
         + theme_minimal()
         + labs(
             x="Anomaly family",
-            y="Records",
+            y="Share of true issue records",
             fill="Population",
         )
-        + ggtitle("Issue-Type Mix Across Hard-Rule and Residual Populations")
+        + ggtitle("Issue-Family Mix Among True Issues")
     )
 
 
@@ -547,8 +547,17 @@ build_severe_residual_heatmap(
 # %% [markdown]
 # ### baseline example: issue-type mix
 
+# %% [markdown]
+# This chart excludes normal records and compares each population's share of
+# true issue records by anomaly family. The companion table keeps raw counts,
+# but the visual uses shares so the large normal residual universe does not hide
+# the issue-family pattern.
+
 # %%
 build_issue_type_mix_plot(residual_diagnostics["issue_type_mix"])
+
+# %%
+residual_diagnostics["issue_type_mix"]
 
 # %% [markdown]
 # ### top residual dollar records
