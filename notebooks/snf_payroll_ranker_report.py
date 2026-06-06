@@ -271,11 +271,18 @@ scenario_benchmark_config = replace(
     pay_periods=8 if validation_mode else sim_config.pay_periods,
 )
 
+# %%
 data = generate_employee_pay_cycles(sim_config)
+
+# %%
 funnel = employee_cycle_hard_rule_funnel(data.payroll)
 residual_diagnostics = employee_cycle_residual_diagnostics(data.payroll)
+
+# %%
 residual_payroll = data.payroll.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
 hard_rule_flagged = data.payroll.filter(pl.col(PayrollCol.CRITICAL_HARD_RULE_FLAG) == 1)
+
+# %%
 scenario_benchmark_seeds = (
     (sim_config.seed,)
     if validation_mode
@@ -291,11 +298,15 @@ if validation_mode:
         name: implemented_scenarios[name]
         for name in ("baseline-operations", "temporal-payroll-drift")
     }
+
+# %%
 scenario_benchmark = run_employee_cycle_scenario_benchmark(
     scenario_benchmark_config,
     scenarios=scenario_benchmark_scenarios,
     seeds=scenario_benchmark_seeds,
 )
+
+# %%
 benchmark_recommendation_budget = (
     0.05 if 0.05 in review_budget_percents else review_budget_percents[0]
 )
@@ -762,6 +773,8 @@ residual_family_mix
 
 # %%
 scoring_results = score_employee_pay_cycles(data.payroll, sim_config)
+
+# %%
 scored = scoring_results.scored
 residual_scored = scored.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
 
@@ -1026,6 +1039,7 @@ def notebook_model_label(model_name: str) -> str:
     }.get(model_name, model_name)
 
 
+# %%
 # Full employee-cycle evaluation includes rolling-origin and production-readiness
 # diagnostics that are useful for analysis but redundant for CI notebook runtime
 # checks. Validation mode only needs the downstream model-comparison contract.
@@ -1034,10 +1048,14 @@ if validation_mode:
 else:
     evaluation = evaluate_employee_cycle_scores(scored, sim_config)
     model_comparison = evaluation.model_comparison
+
+# %%
 model_similarity_diagnostics = build_model_similarity_diagnostics(
     scored,
     review_budget_percents,
 )
+
+# %%
 comparison_for_summary = model_comparison.with_columns(
     pl.col("model").map_elements(notebook_model_label, return_dtype=pl.String),
 ).filter(
@@ -1051,10 +1069,13 @@ comparison_for_summary = model_comparison.with_columns(
         ],
     ),
 )
+
+# %%
 backtest: pl.DataFrame | None = None
 if not validation_mode:
     backtest = employee_cycle_backtest_by_period(scored, sim_config)
 
+# %%
 aggregate_winner_frequency = scenario_benchmark.winner_frequency
 median_metric_summary = scenario_benchmark.median_metric_summary
 winner_map = scenario_benchmark.winner_map
@@ -1290,12 +1311,20 @@ if backtest is not None:
 feature_ablation: pl.DataFrame | None = None
 training_universe_ablation: pl.DataFrame | None = None
 label_ablation: pl.DataFrame | None = None
+
+# %%
 if not validation_mode:
     feature_ablation = employee_cycle_feature_ablation(data.payroll, sim_config)
+
+# %%
+if not validation_mode:
     training_universe_ablation = employee_cycle_training_universe_ablation(
         data.payroll,
         sim_config,
     )
+
+# %%
+if not validation_mode:
     label_ablation = employee_cycle_label_ablation(scored, sim_config)
 
 # %% [markdown]
@@ -1382,6 +1411,8 @@ review_queue_examples = build_employee_cycle_review_queue(
     scored,
     top_k=0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
 )
+
+# %%
 issue_type_model_performance: pl.DataFrame | None = None
 severe_miss_examples: pl.DataFrame | None = None
 if not validation_mode:
@@ -1389,12 +1420,16 @@ if not validation_mode:
         scored,
         0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
     )
+
+# %%
+if not validation_mode:
     severe_miss_examples = employee_cycle_severe_miss_examples(
         scored,
         0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
         limit_per_model=3,
     )
 
+# %%
 final_recommendation_summary = pl.DataFrame(
     {
         "objective": [
