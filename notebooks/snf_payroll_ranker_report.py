@@ -1108,7 +1108,7 @@ gggrid(
             "Model Overlap at Active Review Budget",
         ),
     ],
-    ncol=2,
+    ncol=1,
 )
 
 # %% [markdown]
