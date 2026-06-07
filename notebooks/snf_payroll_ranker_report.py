@@ -320,13 +320,6 @@ benchmark_recommendation_budget = (
 # model objective or review capacity. Review capacity is evaluated separately as
 # an operating point.
 
-# %%
-scenario_benchmark.scenario_catalog.select(
-    "display_name",
-    "what_changes",
-    "status",
-)
-
 # %% [markdown]
 # ### snapshot
 
