@@ -53,6 +53,7 @@ from common.plots import (
     scale_fill_gradient,
     theme_minimal,
 )
+from common.progress import TqdmProgress
 from IPython.display import display
 
 from payroll_anomaly_ranking.columns import MetricCol, PayrollCol, ReviewCol, ScoreCol
@@ -88,6 +89,7 @@ from payroll_anomaly_ranking.scenarios import (
 setup_notebook_html()
 setup_polars_display()
 validation_mode = notebook_validation_mode()
+progress = TqdmProgress(disable=validation_mode)
 
 # LightGBM learning-to-rank can otherwise use all host CPU threads during full
 # benchmark runs. Increase only when the host has spare cores and memory.
@@ -272,7 +274,7 @@ scenario_benchmark_config = replace(
 )
 
 # %%
-data = generate_employee_pay_cycles(sim_config)
+data = generate_employee_pay_cycles(sim_config, progress=progress)
 
 # %%
 funnel = employee_cycle_hard_rule_funnel(data.payroll)
@@ -304,6 +306,7 @@ scenario_benchmark = run_employee_cycle_scenario_benchmark(
     scenario_benchmark_config,
     scenarios=scenario_benchmark_scenarios,
     seeds=scenario_benchmark_seeds,
+    progress=progress,
 )
 
 # %%
@@ -772,7 +775,7 @@ residual_family_mix
 # | Temporal | holiday cycle, vendor drift, staffing shock | seasonality and drift context |
 
 # %%
-scoring_results = score_employee_pay_cycles(data.payroll, sim_config)
+scoring_results = score_employee_pay_cycles(data.payroll, sim_config, progress=progress)
 
 # %%
 scored = scoring_results.scored
@@ -1046,7 +1049,7 @@ def notebook_model_label(model_name: str) -> str:
 if validation_mode:
     model_comparison = employee_cycle_model_comparison(scored, sim_config)
 else:
-    evaluation = evaluate_employee_cycle_scores(scored, sim_config)
+    evaluation = evaluate_employee_cycle_scores(scored, sim_config, progress=progress)
     model_comparison = evaluation.model_comparison
 
 # %%
@@ -1073,7 +1076,7 @@ comparison_for_summary = model_comparison.with_columns(
 # %%
 backtest: pl.DataFrame | None = None
 if not validation_mode:
-    backtest = employee_cycle_backtest_by_period(scored, sim_config)
+    backtest = employee_cycle_backtest_by_period(scored, sim_config, progress=progress)
 
 # %%
 aggregate_winner_frequency = scenario_benchmark.winner_frequency
@@ -1314,18 +1317,27 @@ label_ablation: pl.DataFrame | None = None
 
 # %%
 if not validation_mode:
-    feature_ablation = employee_cycle_feature_ablation(data.payroll, sim_config)
+    feature_ablation = employee_cycle_feature_ablation(
+        data.payroll,
+        sim_config,
+        progress=progress,
+    )
 
 # %%
 if not validation_mode:
     training_universe_ablation = employee_cycle_training_universe_ablation(
         data.payroll,
         sim_config,
+        progress=progress,
     )
 
 # %%
 if not validation_mode:
-    label_ablation = employee_cycle_label_ablation(scored, sim_config)
+    label_ablation = employee_cycle_label_ablation(
+        scored,
+        sim_config,
+        progress=progress,
+    )
 
 # %% [markdown]
 # ### 9.1 feature-family ablation
@@ -1419,6 +1431,7 @@ if not validation_mode:
     issue_type_model_performance = employee_cycle_issue_type_model_performance(
         scored,
         0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
+        progress=progress,
     )
 
 # %%
@@ -1427,6 +1440,7 @@ if not validation_mode:
         scored,
         0.05 if 0.05 in review_budget_percents else review_budget_percents[0],
         limit_per_model=3,
+        progress=progress,
     )
 
 # %%

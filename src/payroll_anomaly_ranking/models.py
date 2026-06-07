@@ -23,6 +23,7 @@ from payroll_anomaly_ranking.columns import (
 )
 from payroll_anomaly_ranking.config import PayrollConfig, SNFPayPolicyConfig
 from payroll_anomaly_ranking.features import build_employee_cycle_features
+from payroll_anomaly_ranking.progress import ProgressReporter, progress_or_none
 
 FEATURE_COLUMNS = MODEL_FEATURE_COLUMNS
 EMPLOYEE_CYCLE_FEATURE_COLUMNS = (
@@ -406,6 +407,7 @@ def score_employee_pay_cycles(
     feature_columns: tuple[str, ...] | None = None,
     training_universe: str = "residual_only",
     include_hard_rule_flag_feature: bool = False,
+    progress: ProgressReporter | None = None,
 ) -> EmployeeCycleScoringResults:
     featured = build_employee_cycle_features(payroll)
     return score_featured_employee_pay_cycles(
@@ -414,6 +416,7 @@ def score_employee_pay_cycles(
         feature_columns=feature_columns,
         training_universe=training_universe,
         include_hard_rule_flag_feature=include_hard_rule_flag_feature,
+        progress=progress,
     )
 
 
@@ -424,6 +427,7 @@ def score_employee_pay_cycles_holdout(
     feature_columns: tuple[str, ...] | None = None,
     training_universe: str = "residual_only",
     include_hard_rule_flag_feature: bool = False,
+    progress: ProgressReporter | None = None,
 ) -> EmployeeCycleScoringResults:
     featured = build_employee_cycle_features(payroll)
     return score_featured_employee_pay_cycles_holdout(
@@ -432,6 +436,7 @@ def score_employee_pay_cycles_holdout(
         feature_columns=feature_columns,
         training_universe=training_universe,
         include_hard_rule_flag_feature=include_hard_rule_flag_feature,
+        progress=progress,
     )
 
 
@@ -442,6 +447,7 @@ def score_featured_employee_pay_cycles(
     feature_columns: tuple[str, ...] | None = None,
     training_universe: str = "residual_only",
     include_hard_rule_flag_feature: bool = False,
+    progress: ProgressReporter | None = None,
 ) -> EmployeeCycleScoringResults:
     if PayrollCol.RECORD_ID not in featured.columns:
         featured = featured.with_row_index(name=PayrollCol.RECORD_ID)
@@ -459,6 +465,7 @@ def score_featured_employee_pay_cycles(
             train_frame,
             training_universe,
         ),
+        progress=progress,
     )
     return EmployeeCycleScoringResults(
         scored=scored,
@@ -481,6 +488,7 @@ def score_featured_employee_pay_cycles_holdout(
     feature_columns: tuple[str, ...] | None = None,
     training_universe: str = "residual_only",
     include_hard_rule_flag_feature: bool = False,
+    progress: ProgressReporter | None = None,
 ) -> EmployeeCycleScoringResults:
     if PayrollCol.RECORD_ID not in featured.columns:
         featured = featured.with_row_index(name=PayrollCol.RECORD_ID)
@@ -503,6 +511,7 @@ def score_featured_employee_pay_cycles_holdout(
         feature_columns=selected_feature_columns,
         training_universe=training_universe,
         include_hard_rule_flag_feature=include_hard_rule_flag_feature,
+        progress=progress,
     )
 
 
@@ -515,6 +524,7 @@ def score_featured_employee_pay_cycles_custom_split(
     feature_columns: tuple[str, ...] | None = None,
     training_universe: str = "residual_only",
     include_hard_rule_flag_feature: bool = False,
+    progress: ProgressReporter | None = None,
 ) -> EmployeeCycleScoringResults:
     if PayrollCol.RECORD_ID not in featured.columns:
         featured = featured.with_row_index(name=PayrollCol.RECORD_ID)
@@ -531,6 +541,7 @@ def score_featured_employee_pay_cycles_custom_split(
             train_frame,
             training_universe,
         ),
+        progress=progress,
     )
     return EmployeeCycleScoringResults(
         scored=scored,
@@ -553,53 +564,84 @@ def _score_employee_cycle_frame(
     *,
     feature_columns: tuple[str, ...],
     pointwise_sample_weight: np.ndarray | None = None,
+    progress: ProgressReporter | None = None,
 ) -> pl.DataFrame:
-    ml_raw = _employee_cycle_ml_scores(
-        score_frame,
-        config,
-        feature_columns=feature_columns,
-        train_frame=train_frame,
-    )
-    classification = _employee_cycle_supervised_probability(
-        train_frame,
-        score_frame,
-        PayrollCol.Y_ISSUE,
-        config,
-        feature_columns=feature_columns,
-        sample_weight=pointwise_sample_weight,
-    )
-    cost_sensitive_weight = _employee_cycle_cost_sensitive_weights(train_frame)
-    if pointwise_sample_weight is not None:
-        cost_sensitive_weight = cost_sensitive_weight * pointwise_sample_weight
-    cost_sensitive = _employee_cycle_supervised_probability(
-        train_frame,
-        score_frame,
-        PayrollCol.Y_ISSUE,
-        config,
-        feature_columns=feature_columns,
-        sample_weight=cost_sensitive_weight,
-    )
-    regression = _minmax(
-        _employee_cycle_supervised_regression(
-            train_frame,
-            score_frame,
-            PayrollCol.Y_DOLLAR,
-            config,
-            feature_columns=feature_columns,
-            lower_bound=0.0,
-            sample_weight=pointwise_sample_weight,
+    progress = progress_or_none(progress)
+    empty_scores = np.zeros(score_frame.height)
+    ml_raw = empty_scores
+    classification = empty_scores
+    cost_sensitive = empty_scores
+    regression = empty_scores
+    estimated_exposure = empty_scores
+    expected_value = empty_scores
+    ranking = empty_scores
+    for stage in progress.iter(
+        (
+            "isolation_forest",
+            "classifier",
+            "cost_sensitive_classifier",
+            "regressor",
+            "expected_value",
+            "learning_to_rank",
         ),
-    )
-    estimated_exposure = _employee_cycle_estimated_exposure(score_frame)
-    expected_value = _minmax(estimated_exposure * np.clip(classification, 0.05, 1.0))
-    ranking = _minmax(
-        _employee_cycle_ltr_scores(
-            train_frame,
-            score_frame,
-            config,
-            feature_columns=feature_columns,
-        ),
-    )
+        desc="Scoring employee cycles",
+        total=6,
+        unit="stage",
+    ):
+        if stage == "isolation_forest":
+            ml_raw = _employee_cycle_ml_scores(
+                score_frame,
+                config,
+                feature_columns=feature_columns,
+                train_frame=train_frame,
+            )
+        elif stage == "classifier":
+            classification = _employee_cycle_supervised_probability(
+                train_frame,
+                score_frame,
+                PayrollCol.Y_ISSUE,
+                config,
+                feature_columns=feature_columns,
+                sample_weight=pointwise_sample_weight,
+            )
+        elif stage == "cost_sensitive_classifier":
+            cost_sensitive_weight = _employee_cycle_cost_sensitive_weights(train_frame)
+            if pointwise_sample_weight is not None:
+                cost_sensitive_weight = cost_sensitive_weight * pointwise_sample_weight
+            cost_sensitive = _employee_cycle_supervised_probability(
+                train_frame,
+                score_frame,
+                PayrollCol.Y_ISSUE,
+                config,
+                feature_columns=feature_columns,
+                sample_weight=cost_sensitive_weight,
+            )
+        elif stage == "regressor":
+            regression = _minmax(
+                _employee_cycle_supervised_regression(
+                    train_frame,
+                    score_frame,
+                    PayrollCol.Y_DOLLAR,
+                    config,
+                    feature_columns=feature_columns,
+                    lower_bound=0.0,
+                    sample_weight=pointwise_sample_weight,
+                ),
+            )
+        elif stage == "expected_value":
+            estimated_exposure = _employee_cycle_estimated_exposure(score_frame)
+            expected_value = _minmax(
+                estimated_exposure * np.clip(classification, 0.05, 1.0),
+            )
+        else:
+            ranking = _minmax(
+                _employee_cycle_ltr_scores(
+                    train_frame,
+                    score_frame,
+                    config,
+                    feature_columns=feature_columns,
+                ),
+            )
     final_ranking = _minmax(
         ranking * 0.45
         + classification * 0.15

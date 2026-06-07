@@ -12,6 +12,7 @@ from payroll_anomaly_ranking.models import (
     score_employee_pay_cycles_holdout,
     temporal_split,
 )
+from payroll_anomaly_ranking.progress import ProgressReporter, progress_or_none
 from payroll_anomaly_ranking.scenarios import (
     ScenarioSpec,
     implemented_dgp_scenario_catalog,
@@ -59,7 +60,9 @@ def run_employee_cycle_scenario_benchmark(
     *,
     scenarios: dict[str, ScenarioSpec] | None = None,
     seeds: tuple[int, ...] = (42,),
+    progress: ProgressReporter | None = None,
 ) -> ScenarioBenchmarkResults:
+    progress = progress_or_none(progress)
     scenario_catalog = scenarios or implemented_dgp_scenario_catalog()
     review_budgets = config.employee_cycle_review_budget_percents or tuple(
         float(budget) for budget in config.review_budgets
@@ -81,65 +84,75 @@ def run_employee_cycle_scenario_benchmark(
                 "description": str(scenario.metadata.get("description", "")),
             },
         )
-        for seed in seeds:
-            seed_config = replace(config, seed=seed)
-            generated = generate_employee_pay_cycles(seed_config, scenario=scenario)
-            scoring_results = score_employee_pay_cycles_holdout(
-                generated.payroll,
-                seed_config,
-            )
-            scored = scoring_results.scored
-            split = temporal_split(generated.payroll)
-            scenario_seed_rows.append(
-                {
-                    "scenario": scenario_name,
-                    "display_name": str(
-                        scenario.metadata.get("display_name", scenario.name),
-                    ),
-                    "seed": seed,
-                    "unit": _benchmark_unit_name(scenario_name, seed),
-                    "review_budgets": ", ".join(
-                        _format_review_budget_pct(budget) for budget in review_budgets
-                    ),
-                    "train_records": split.train.height + split.validation.height,
-                    "test_records": split.test.height,
-                    "test_periods": ", ".join(
-                        str(period)
-                        for period in sorted(
-                            split.test.get_column(PayrollCol.PAY_PERIOD_INDEX)
-                            .unique()
-                            .to_list(),
-                        )
-                    ),
-                    "test_residual_records": split.test.filter(
-                        pl.col(PayrollCol.RESIDUAL_RECORD) == 1,
-                    ).height,
-                },
-            )
-            scenario_summary_rows.append(
-                _scenario_summary_row(
-                    scenario_name,
-                    scenario,
-                    seed,
-                    generated.payroll,
+    scenario_seed_pairs = [
+        (scenario_name, scenario, seed)
+        for scenario_name, scenario in scenario_catalog.items()
+        for seed in seeds
+    ]
+    for scenario_name, scenario, seed in progress.iter(
+        scenario_seed_pairs,
+        desc="Running scenario benchmark",
+        total=len(scenario_seed_pairs),
+        unit="unit",
+    ):
+        seed_config = replace(config, seed=seed)
+        generated = generate_employee_pay_cycles(seed_config, scenario=scenario)
+        scoring_results = score_employee_pay_cycles_holdout(
+            generated.payroll,
+            seed_config,
+        )
+        scored = scoring_results.scored
+        split = temporal_split(generated.payroll)
+        scenario_seed_rows.append(
+            {
+                "scenario": scenario_name,
+                "display_name": str(
+                    scenario.metadata.get("display_name", scenario.name),
                 ),
-            )
-            for model_name, score_col in SCENARIO_BENCHMARK_MODELS:
-                scored_for_model = scored.with_columns(
-                    pl.col(score_col).alias(ScoreCol.FINAL_ANOMALY_SCORE),
-                )
-                for budget in review_budgets:
-                    metrics = employee_cycle_grouped_metrics(scored_for_model, budget)
-                    metric_unit_rows.extend(
-                        _metric_unit_rows(
-                            scenario_name,
-                            scenario,
-                            seed,
-                            model_name,
-                            budget,
-                            metrics,
-                        ),
+                "seed": seed,
+                "unit": _benchmark_unit_name(scenario_name, seed),
+                "review_budgets": ", ".join(
+                    _format_review_budget_pct(budget) for budget in review_budgets
+                ),
+                "train_records": split.train.height + split.validation.height,
+                "test_records": split.test.height,
+                "test_periods": ", ".join(
+                    str(period)
+                    for period in sorted(
+                        split.test.get_column(PayrollCol.PAY_PERIOD_INDEX)
+                        .unique()
+                        .to_list(),
                     )
+                ),
+                "test_residual_records": split.test.filter(
+                    pl.col(PayrollCol.RESIDUAL_RECORD) == 1,
+                ).height,
+            },
+        )
+        scenario_summary_rows.append(
+            _scenario_summary_row(
+                scenario_name,
+                scenario,
+                seed,
+                generated.payroll,
+            ),
+        )
+        for model_name, score_col in SCENARIO_BENCHMARK_MODELS:
+            scored_for_model = scored.with_columns(
+                pl.col(score_col).alias(ScoreCol.FINAL_ANOMALY_SCORE),
+            )
+            for budget in review_budgets:
+                metrics = employee_cycle_grouped_metrics(scored_for_model, budget)
+                metric_unit_rows.extend(
+                    _metric_unit_rows(
+                        scenario_name,
+                        scenario,
+                        seed,
+                        model_name,
+                        budget,
+                        metrics,
+                    ),
+                )
 
     metric_units = pl.DataFrame(metric_unit_rows, infer_schema_length=None)
     return ScenarioBenchmarkResults(

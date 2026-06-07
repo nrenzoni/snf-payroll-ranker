@@ -24,6 +24,7 @@ from payroll_anomaly_ranking.config import (
     SNFPayPolicyConfig,
     validate_snf_config,
 )
+from payroll_anomaly_ranking.progress import ProgressReporter, progress_or_none
 from payroll_anomaly_ranking.scenarios import (
     AnomalyPlan,
     ChangePointEvent,
@@ -138,21 +139,62 @@ MATERIAL_RESIDUAL_CATEGORIES: tuple[str, ...] = (
 def generate_payroll(
     config: PayrollConfig = PayrollConfig(),
     scenario: ScenarioSpec | None = None,
+    *,
+    progress: ProgressReporter | None = None,
 ) -> GeneratedPayroll:
+    progress = progress_or_none(progress)
     policy = SNFPayPolicyConfig()
     validate_snf_config(config, policy)
     _validate_supported_scenario_controls(scenario)
     rng = np.random.default_rng(config.seed + (scenario.seed_offset if scenario else 0))
-    facilities = generate_facilities(config, rng, scenario=scenario)
-    employees = generate_employees(config, facilities, rng, scenario=scenario)
-    schedules = generate_schedules(config, facilities, employees, rng)
-    timeclock = generate_timeclock(schedules, facilities, config, policy, rng, scenario)
-    payroll = generate_payroll_lines(timeclock, policy, rng)
-    payroll = apply_scenario_perturbations(payroll, scenario)
-    payroll, labels = inject_anomalies(payroll, config, scenario, policy, rng)
-    facility_rollups = facility_pay_period_rollups(payroll)
-    employee_rollups = employee_pay_period_rollups(payroll)
-    _validate_rollups(payroll, facility_rollups)
+    facilities = pl.DataFrame()
+    employees = pl.DataFrame()
+    schedules = pl.DataFrame()
+    timeclock = pl.DataFrame()
+    payroll = pl.DataFrame()
+    labels = pl.DataFrame()
+    facility_rollups = pl.DataFrame()
+    employee_rollups = pl.DataFrame()
+    for stage in progress.iter(
+        (
+            "facilities",
+            "employees",
+            "schedules",
+            "timeclock",
+            "payroll_lines",
+            "scenario_controls",
+            "anomalies",
+            "rollups",
+        ),
+        desc="Generating payroll data",
+        total=8,
+        unit="stage",
+    ):
+        if stage == "facilities":
+            facilities = generate_facilities(config, rng, scenario=scenario)
+        elif stage == "employees":
+            employees = generate_employees(config, facilities, rng, scenario=scenario)
+        elif stage == "schedules":
+            schedules = generate_schedules(config, facilities, employees, rng)
+        elif stage == "timeclock":
+            timeclock = generate_timeclock(
+                schedules,
+                facilities,
+                config,
+                policy,
+                rng,
+                scenario,
+            )
+        elif stage == "payroll_lines":
+            payroll = generate_payroll_lines(timeclock, policy, rng)
+        elif stage == "scenario_controls":
+            payroll = apply_scenario_perturbations(payroll, scenario)
+        elif stage == "anomalies":
+            payroll, labels = inject_anomalies(payroll, config, scenario, policy, rng)
+        else:
+            facility_rollups = facility_pay_period_rollups(payroll)
+            employee_rollups = employee_pay_period_rollups(payroll)
+            _validate_rollups(payroll, facility_rollups)
     return GeneratedPayroll(
         payroll=payroll,
         labels=labels,
@@ -820,10 +862,23 @@ def write_synthetic_data(config: PayrollConfig = PayrollConfig()) -> GeneratedPa
 def generate_employee_pay_cycles(
     config: PayrollConfig = PayrollConfig(),
     scenario: ScenarioSpec | None = None,
+    *,
+    progress: ProgressReporter | None = None,
 ) -> GeneratedEmployeePayCycles:
-    generated = generate_payroll(config, scenario=scenario)
-    employee_cycles = employee_pay_cycle_records(generated.payroll)
-    labels = employee_pay_cycle_labels(employee_cycles)
+    progress = progress_or_none(progress)
+    generated = generate_payroll(config, scenario=scenario, progress=progress)
+    employee_cycles = pl.DataFrame()
+    labels = pl.DataFrame()
+    for stage in progress.iter(
+        ("employee_cycle_records", "employee_cycle_labels"),
+        desc="Building employee cycles",
+        total=2,
+        unit="stage",
+    ):
+        if stage == "employee_cycle_records":
+            employee_cycles = employee_pay_cycle_records(generated.payroll)
+        else:
+            labels = employee_pay_cycle_labels(employee_cycles)
     return GeneratedEmployeePayCycles(
         payroll=employee_cycles,
         labels=labels,

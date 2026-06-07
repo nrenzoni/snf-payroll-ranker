@@ -24,6 +24,7 @@ from payroll_anomaly_ranking.models import (
     score_featured_employee_pay_cycles_custom_split,
     temporal_split,
 )
+from payroll_anomaly_ranking.progress import ProgressReporter, progress_or_none
 
 
 @dataclass(frozen=True)
@@ -169,17 +170,29 @@ def evaluate_scores(
 def evaluate_employee_cycle_scores(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
+    *,
+    progress: ProgressReporter | None = None,
 ) -> EvaluationResults:
+    progress = progress_or_none(progress)
     review_budgets = _employee_cycle_review_budgets(config)
     rows = []
-    for k in review_budgets:
+    for k in progress.iter(
+        review_budgets,
+        desc="Evaluating review budgets",
+        total=len(review_budgets),
+        unit="budget",
+    ):
         rows.append(employee_cycle_grouped_metrics(scored, k))
-    comparison = employee_cycle_model_comparison(scored, config)
+    comparison = employee_cycle_model_comparison(scored, config, progress=progress)
     category = category_error_analysis(
         _employee_cycle_residual_frame(scored),
         review_budget=max(config.review_budgets),
     )
-    rolling = employee_cycle_rolling_origin_evaluation(scored, config)
+    rolling = employee_cycle_rolling_origin_evaluation(
+        scored,
+        config,
+        progress=progress,
+    )
     production = employee_cycle_production_candidacy(
         scored,
         rolling.metrics,
@@ -332,10 +345,13 @@ def _employee_cycle_grouped_metrics_from_ranked(
 def employee_cycle_model_comparison(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
+    *,
+    progress: ProgressReporter | None = None,
 ) -> pl.DataFrame:
+    progress = progress_or_none(progress)
     review_budgets = _employee_cycle_review_budgets(config)
     rows = []
-    for score_name in [
+    score_names = [
         ScoreCol.CLASSIFICATION_SCORE,
         ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
         ScoreCol.REGRESSION_SCORE,
@@ -343,7 +359,13 @@ def employee_cycle_model_comparison(
         ScoreCol.RANKING_SCORE,
         ScoreCol.ML_SCORE,
         ScoreCol.FINAL_ANOMALY_SCORE,
-    ]:
+    ]
+    for score_name in progress.iter(
+        score_names,
+        desc="Comparing employee-cycle models",
+        total=len(score_names),
+        unit="model",
+    ):
         if score_name not in scored.columns:
             continue
         renamed = scored.with_columns(
@@ -422,7 +444,10 @@ def employee_cycle_feature_ablation(
     payroll: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
     review_budget: float | None = None,
+    *,
+    progress: ProgressReporter | None = None,
 ) -> pl.DataFrame:
+    progress = progress_or_none(progress)
     budget = review_budget or _default_employee_cycle_ablation_budget(config)
     featured = build_employee_cycle_features(payroll)
     cumulative_feature_sets = []
@@ -432,7 +457,12 @@ def employee_cycle_feature_ablation(
         cumulative_feature_sets.append((feature_set, tuple(dict.fromkeys(selected))))
 
     rows: list[dict[str, float | str]] = []
-    for feature_set, feature_columns in cumulative_feature_sets:
+    for feature_set, feature_columns in progress.iter(
+        cumulative_feature_sets,
+        desc="Running feature ablation",
+        total=len(cumulative_feature_sets),
+        unit="set",
+    ):
         scored = score_featured_employee_pay_cycles(
             featured,
             config,
@@ -467,7 +497,10 @@ def employee_cycle_training_universe_ablation(
     payroll: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
     review_budget: float | None = None,
+    *,
+    progress: ProgressReporter | None = None,
 ) -> pl.DataFrame:
+    progress = progress_or_none(progress)
     budget = review_budget or _default_employee_cycle_ablation_budget(config)
     featured = build_employee_cycle_features(payroll)
     split = temporal_split(featured)
@@ -509,7 +542,18 @@ def employee_cycle_training_universe_ablation(
         ),
     ]
     rows: list[dict[str, float | str]] = []
-    for label, training_universe, include_gate_feature, models, purpose in scenarios:
+    for (
+        label,
+        training_universe,
+        include_gate_feature,
+        models,
+        purpose,
+    ) in progress.iter(
+        scenarios,
+        desc="Running training-universe ablation",
+        total=len(scenarios),
+        unit="scenario",
+    ):
         train_frame = _employee_cycle_ablation_training_frame(
             train_reference,
             training_universe,
@@ -580,10 +624,19 @@ def employee_cycle_label_ablation(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
     review_budget: float | None = None,
+    *,
+    progress: ProgressReporter | None = None,
 ) -> pl.DataFrame:
+    progress = progress_or_none(progress)
     budget = review_budget or _default_employee_cycle_ablation_budget(config)
     comparison_rows = []
-    for model_name, score_name in _employee_cycle_model_scores(scored):
+    model_scores = _employee_cycle_model_scores(scored)
+    for model_name, score_name in progress.iter(
+        model_scores,
+        desc="Running label ablation",
+        total=len(model_scores),
+        unit="model",
+    ):
         renamed = scored.with_columns(
             pl.col(score_name).alias(ScoreCol.FINAL_ANOMALY_SCORE),
         )
@@ -642,9 +695,18 @@ def employee_cycle_label_ablation(
 def employee_cycle_issue_type_model_performance(
     scored: pl.DataFrame,
     review_budget: float,
+    *,
+    progress: ProgressReporter | None = None,
 ) -> pl.DataFrame:
+    progress = progress_or_none(progress)
     rows: list[dict[str, float | str]] = []
-    for model_name, score_name in _employee_cycle_model_scores(scored):
+    model_scores = _employee_cycle_model_scores(scored)
+    for model_name, score_name in progress.iter(
+        model_scores,
+        desc="Evaluating issue-type performance",
+        total=len(model_scores),
+        unit="model",
+    ):
         ranked = _employee_cycle_group_ranked(
             _employee_cycle_residual_frame(
                 scored.with_columns(
@@ -711,9 +773,17 @@ def employee_cycle_severe_miss_examples(
     review_budget: float,
     *,
     limit_per_model: int = 5,
+    progress: ProgressReporter | None = None,
 ) -> pl.DataFrame:
+    progress = progress_or_none(progress)
     rows: list[pl.DataFrame] = []
-    for model_name, score_name in _employee_cycle_model_scores(scored):
+    model_scores = _employee_cycle_model_scores(scored)
+    for model_name, score_name in progress.iter(
+        model_scores,
+        desc="Finding severe misses",
+        total=len(model_scores),
+        unit="model",
+    ):
         ranked = _employee_cycle_group_ranked(
             _employee_cycle_residual_frame(
                 scored.with_columns(
@@ -757,8 +827,14 @@ def employee_cycle_severe_miss_examples(
 def employee_cycle_backtest_by_period(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
+    *,
+    progress: ProgressReporter | None = None,
 ) -> pl.DataFrame:
-    rolling = employee_cycle_rolling_origin_evaluation(scored, config)
+    rolling = employee_cycle_rolling_origin_evaluation(
+        scored,
+        config,
+        progress=progress,
+    )
     if rolling.metrics.is_empty():
         return pl.DataFrame()
     return rolling.metrics.rename({"test_period": PayrollCol.PAY_PERIOD_INDEX}).select(
@@ -1164,7 +1240,10 @@ def rolling_origin_evaluation(
 def employee_cycle_rolling_origin_evaluation(
     scored: pl.DataFrame,
     config: PayrollConfig = PayrollConfig(),
+    *,
+    progress: ProgressReporter | None = None,
 ) -> RollingOriginResults:
+    progress = progress_or_none(progress)
     featured = build_employee_cycle_features(scored)
     review_budgets = _employee_cycle_review_budgets(config)
     periods = sorted(
@@ -1177,7 +1256,13 @@ def employee_cycle_rolling_origin_evaluation(
     selected_rows = []
     queue_sets: list[set[str]] = []
     thresholds = [0.35, 0.5, 0.65, 0.8]
-    for origin, validation_period in enumerate(periods[3:-2], start=1):
+    validation_periods = periods[3:-2]
+    for origin, validation_period in progress.iter(
+        enumerate(validation_periods, start=1),
+        desc="Running rolling-origin evaluation",
+        total=len(validation_periods),
+        unit="origin",
+    ):
         test_period = periods[periods.index(validation_period) + 1]
         train_periods = [period for period in periods if period < validation_period]
         train_frame = featured.filter(
