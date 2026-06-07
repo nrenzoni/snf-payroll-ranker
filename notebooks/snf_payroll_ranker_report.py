@@ -1194,6 +1194,7 @@ if backtest is not None:
 
 # %%
 feature_ablation: pl.DataFrame | None = None
+feature_ablation_lift: pl.DataFrame | None = None
 training_universe_ablation: pl.DataFrame | None = None
 label_ablation: pl.DataFrame | None = None
 
@@ -1203,6 +1204,28 @@ if not validation_mode:
         data.payroll,
         sim_config,
         progress=progress,
+    )
+    feature_ablation_baseline = feature_ablation.filter(
+        pl.col("feature_set") == "raw_payroll",
+    ).select(
+        "model",
+        pl.col(MetricCol.RESIDUAL_NDCG_AT_K).alias("baseline_residual_ndcg_at_k"),
+        pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).alias(
+            "baseline_incremental_utility_at_k",
+        ),
+    )
+    feature_ablation_lift = feature_ablation.join(
+        feature_ablation_baseline,
+        on="model",
+        how="left",
+    ).with_columns(
+        (
+            pl.col(MetricCol.RESIDUAL_NDCG_AT_K) - pl.col("baseline_residual_ndcg_at_k")
+        ).alias("residual_ndcg_lift_vs_raw_payroll"),
+        (
+            pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K)
+            - pl.col("baseline_incremental_utility_at_k")
+        ).alias("incremental_utility_improvement_vs_raw_payroll"),
     )
 
 # %%
@@ -1241,6 +1264,63 @@ if feature_ablation is not None:
             pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
             pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
         ),
+    )
+
+# %% [markdown]
+# ### feature-family ablation lift by model
+#
+# The feature ablation is model-aware: each cumulative feature family is scored
+# separately for the five residual model formulations. The lift view below uses
+# raw payroll as the within-model baseline and shows the final cumulative feature
+# set improvement by model.
+
+# %%
+feature_lift_endpoint: pl.DataFrame | None = None
+if feature_ablation_lift is not None:
+    final_feature_set = feature_ablation_lift.get_column("feature_set").to_list()[-1]
+    feature_lift_endpoint = feature_ablation_lift.filter(
+        pl.col("feature_set") == final_feature_set,
+    ).with_columns(
+        pl.col("residual_ndcg_lift_vs_raw_payroll").round(4),
+        pl.col("incremental_utility_improvement_vs_raw_payroll").round(2),
+    )
+    display(
+        feature_lift_endpoint.select(
+            "feature_set",
+            "model",
+            "residual_ndcg_lift_vs_raw_payroll",
+            "incremental_utility_improvement_vs_raw_payroll",
+        ),
+    )
+
+# %%
+if feature_ablation_lift is not None and feature_lift_endpoint is not None:
+    gggrid(
+        [
+            (
+                ggplot(
+                    feature_lift_endpoint,
+                    aes(x="model", y="residual_ndcg_lift_vs_raw_payroll"),
+                )
+                + geom_bar(stat="identity", fill="#0f766e")
+                + theme_minimal()
+                + rotated_x_labels()
+                + labs(x="Model", y="NDCG lift vs raw payroll")
+                + ggtitle("Feature Ablation Lift by Model")
+            ),
+            (
+                ggplot(
+                    feature_lift_endpoint,
+                    aes(x="model", y="incremental_utility_improvement_vs_raw_payroll"),
+                )
+                + geom_bar(stat="identity", fill="#1d4ed8")
+                + theme_minimal()
+                + rotated_x_labels()
+                + labs(x="Model", y="Utility improvement vs raw payroll")
+                + ggtitle("Feature Ablation Utility Improvement by Model")
+            ),
+        ],
+        ncol=1,
     )
 
 # %% [markdown]

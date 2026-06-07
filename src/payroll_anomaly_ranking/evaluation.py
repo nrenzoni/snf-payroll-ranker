@@ -469,28 +469,37 @@ def employee_cycle_feature_ablation(
             feature_columns=feature_columns,
             progress=progress,
         ).scored
-        metrics = employee_cycle_grouped_metrics(scored, budget)
-        rows.append(
-            {
-                "feature_set": feature_set,
-                MetricCol.K: budget,
-                MetricCol.RESIDUAL_NDCG_AT_K: float(
-                    metrics[MetricCol.RESIDUAL_NDCG_AT_K],
+        for model_name, score_name in _employee_cycle_model_scores(scored):
+            if model_name == "final_active_ranking":
+                continue
+            metrics = employee_cycle_grouped_metrics(
+                scored.with_columns(
+                    pl.col(score_name).alias(ScoreCol.FINAL_ANOMALY_SCORE),
                 ),
-                MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(
-                    metrics[MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K],
-                ),
-                MetricCol.DOLLARS_CAPTURED_AT_K: float(
-                    metrics[MetricCol.DOLLARS_CAPTURED_AT_K],
-                ),
-                MetricCol.REVIEWER_YIELD_AT_K: float(
-                    metrics[MetricCol.REVIEWER_YIELD_AT_K],
-                ),
-                MetricCol.INCREMENTAL_UTILITY_AT_K: float(
-                    metrics[MetricCol.INCREMENTAL_UTILITY_AT_K],
-                ),
-            },
-        )
+                budget,
+            )
+            rows.append(
+                {
+                    "feature_set": feature_set,
+                    "model": model_name,
+                    MetricCol.K: budget,
+                    MetricCol.RESIDUAL_NDCG_AT_K: float(
+                        metrics[MetricCol.RESIDUAL_NDCG_AT_K],
+                    ),
+                    MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(
+                        metrics[MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K],
+                    ),
+                    MetricCol.DOLLARS_CAPTURED_AT_K: float(
+                        metrics[MetricCol.DOLLARS_CAPTURED_AT_K],
+                    ),
+                    MetricCol.REVIEWER_YIELD_AT_K: float(
+                        metrics[MetricCol.REVIEWER_YIELD_AT_K],
+                    ),
+                    MetricCol.INCREMENTAL_UTILITY_AT_K: float(
+                        metrics[MetricCol.INCREMENTAL_UTILITY_AT_K],
+                    ),
+                },
+            )
     return pl.DataFrame(rows)
 
 

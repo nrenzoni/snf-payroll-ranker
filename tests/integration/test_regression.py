@@ -807,6 +807,16 @@ def test_employee_cycle_ablation_helpers_return_runtime_backed_outputs() -> None
         feature_ablation.get_column("feature_set").to_list(),
     )
     assert {
+        "classifier",
+        "cost_sensitive_classifier",
+        "regressor",
+        "expected_value",
+        "learning_to_rank",
+    } <= set(feature_ablation.get_column("model").to_list())
+    assert "final_active_ranking" not in set(
+        feature_ablation.get_column("model").to_list(),
+    )
+    assert {
         "residual_only",
         "all_records",
         "all_records_hard_rule_downweighted",
