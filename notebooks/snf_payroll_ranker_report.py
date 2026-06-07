@@ -104,108 +104,38 @@ def format_review_budget_pct(budget: float) -> str:
 # %% [markdown]
 # ## 0. Executive Summary
 #
-# This notebook presents the SNF Payroll Ranker: an ML workflow for the second
-# stage of SNF payroll review prioritization.
+# This report answers one decision question: after deterministic hard rules have
+# removed obvious payroll violations, which ML formulation should rank the
+# remaining SNF payroll records for limited human review?
 #
-# Critical hard rules first remove obvious payroll violations. The remaining
-# records form a residual queue of ambiguous payroll risks. The modeling
-# question is:
-#
-# > Among payroll records not caught by hard rules, which ML formulation best
-# > prioritizes records for human review under limited reviewer capacity?
-#
-# **Models compared**
-#
-# - classifier: ranks by probability of payroll issue
-# - cost-sensitive classifier: ranks by severity-weighted issue probability
-# - regressor: ranks by predicted dollar impact
-# - expected-value model: ranks by probability x expected impact
-# - learning-to-rank: ranks by graded residual relevance
-#
-# **Primary metrics**
-#
-# - residual NDCG@K
-# - rule-missed severe recall@K
-# - residual dollars captured@K
-# - reviewer yield@K
-# - incremental utility@K
-#
-# **Main finding**
-#
-# The main study evaluates model performance across multiple synthetic SNF
-# payroll data-generating processes. In the current scenario-seed holdout
-# benchmark, expected-value scoring is the most robust default for dollar
-# recovery and incremental utility. Learning-to-rank is the strongest
-# challenger when review capacity is tight and the objective is top-of-queue
-# severity ordering.
-#
-# **Interpretation**
-#
-# There is no universal winner. Model choice depends on the operating
-# objective: expected value for financial recovery, learning-to-rank for
-# severity ordering, and classifier scores for calibrated issue-probability
-# context.
+# The scenario-seed benchmark shows a split leaderboard rather than a universal
+# winner. `expected_value` is the strongest default for dollar recovery and
+# incremental utility, while `learning_to_rank` is the main challenger when the
+# operating goal is tight-budget severity ordering. Classifier scores remain
+# useful as calibrated issue-probability context, not as the primary production
+# ranker.
 
 # %% [markdown]
 # ## 1. Problem Framing: Residual Payroll Review After Hard Rules
 #
-# Does ML add value after hard rules have already removed
-# the obvious cases?
+# Hard rules are the first-stage control. They catch impossible or obvious
+# payroll defects before ML begins. The ML stage only sees residual
+# employee-pay-cycle records and ranks them within facility x payroll-cycle
+# queues under a limited review budget.
 #
-# **Production assumption**
-#
-# hard rules already catch impossible or obvious payroll records before
-# the ML stage begins.
-#
-# **Modeling question**
-#
-# Among employee-pay-cycle records not caught by hard rules, which ML
-# formulation best ranks the remaining payroll review candidates?
-#
-# **Queue framing**
-#
-# - item: employee-pay-cycle payroll record
-# - group: facility x payroll cycle
-# - business constraint: reviewers can inspect only a limited share of each residual queue
-# - objective: maximize review value within the reviewed share of each residual queue
-#
-# **Scope discipline**
-#
-# This is a payroll loss-prevention project, not a staffing compliance project.
-#
-# Excluded from target and evaluation:
-#
-# - PBJ compliance labels
-# - HPRD staffing metrics
-# - regulatory staffing-risk scores
-# - compliance severity weights
-#
-# Allowed as payroll context:
-#
-# - facility
-# - role
-# - pay period
-# - timekeeping signals
-# - payroll history
-# - facility-role peer baselines
-#
-# **Out of scope**
-#
-# - optimizing the hard rules
-# - ranking all payroll records before hard rules
-# - evaluating a full hybrid production policy end to end
-# - UI or workflow implementation
-# - compliance, PBJ, and HPRD staffing metrics
+# The objective is payroll loss prevention, not staffing compliance. PBJ, HPRD,
+# and regulatory staffing-risk metrics are excluded from targets and evaluation;
+# facility, role, pay-period, timekeeping, payroll-history, and peer-baseline
+# context remain allowed as payroll signals. Detailed scope and schema notes are
+# in the appendix.
 
 # %% [markdown]
 # ## 2. Synthetic DGP Design and Scenario Suite
 #
-# This section documents the synthetic DGP family used for the main study.
-#
-# The synthetic data supports two distinct populations:
-#
-# - hard-rule-caught obvious payroll issues
-# - rule-missed residual issues that remain ambiguous after gating
+# The benchmark uses synthetic SNF payroll data so latent residual truth,
+# dollar impact, severe misses, and label bias are observable for evaluation.
+# Each scenario varies the data-generating process; review capacity and model
+# objective are evaluated separately as operating choices.
 
 # %% [markdown]
 # ```mermaid
@@ -316,108 +246,21 @@ benchmark_recommendation_budget = (
 
 
 # %% [markdown]
-# The scenario suite varies the synthetic data-generating process, not the
-# model objective or review capacity. Review capacity is evaluated separately as
-# an operating point.
-
-# %% [markdown]
-# ### snapshot
-
-# %%
-pl.DataFrame(
-    {
-        "metric": [
-            "employee-pay-cycle records",
-            "hard-rule flagged",
-            "residual records",
-            "residual issue rate",
-            "residual severe issues",
-            "residual dollars",
-        ],
-        "value": [
-            float(data.payroll.height),
-            float(hard_rule_flagged.height),
-            float(residual_payroll.height),
-            round(
-                float(
-                    residual_payroll.select(pl.mean(PayrollCol.Y_ISSUE)).item() or 0.0,
-                ),
-                4,
-            ),
-            float(
-                residual_payroll.select(
-                    pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE),
-                ).item()
-                or 0,
-            ),
-            round(
-                float(
-                    residual_payroll.select(pl.sum(PayrollCol.Y_DOLLAR)).item() or 0.0,
-                ),
-                2,
-            ),
-        ],
-    },
-)
-
-# %% [markdown]
-# ### schema example:
-
-# %%
-data.payroll.select(
-    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
-    PayrollCol.EMPLOYEE_ID,
-    PayrollCol.FACILITY_ID,
-    PayrollCol.PAY_PERIOD_INDEX,
-    PayrollCol.TOTAL_GROSS_PAY,
-    PayrollCol.TOTAL_OVERTIME_HOURS,
-    PayrollCol.CRITICAL_HARD_RULE_FLAG,
-    PayrollCol.RESIDUAL_RECORD,
-    PayrollCol.Y_ISSUE,
-    PayrollCol.Y_DOLLAR,
-).head()
+# Dataset snapshot and schema examples are included in the technical appendix.
 
 # %% [markdown]
 # ## 3. Hard Rule Gate: Defining the Residual Universe
 #
-# Hard rules are an upstream gate, not a competing model.
-#
-# **Critical hard rules**
-#
-# These filter records out of the ML universe. Examples include:
-#
-# - duplicate or overlapping shift
-# - negative hours
-# - gross pay equal to zero with positive hours
-# - missing pay rate
-# - physically impossible hours
-# - terminated employee paid regular hours
-#
-# **Soft warning signals**
-#
-# These do not remove a record from the ML universe. They remain candidate input
-# features because they are contextual info.
-#
-# Examples:
-#
-# - overtime above threshold
-# - manual edit
-# - missing punch
-# - unusual facility pattern
-# - pay-rate change
-# - high gross pay versus employee baseline
-#
-# **Residual universe**
-#
-# The hard-rule gate removes records with critical deterministic violations. The
-# remaining residual universe still contains a meaningful share of true issues
-# and severe payroll-loss cases, but these cases are less obvious and require
-# contextual ranking.
+# Hard rules are an upstream gate, not a competing model. They remove critical
+# deterministic violations before ML ranking. Soft warnings remain eligible as
+# contextual model features because they are ambiguous after gating.
 #
 # The ML task is therefore:
 #
 # > Rank residual records within each facility x payroll cycle by expected
 # > review value.
+#
+# Detailed hard-rule definitions and soft-signal scope are in the appendix.
 
 # %% [markdown]
 # **Observed funnel summary**
@@ -471,38 +314,15 @@ scenario_benchmark.scenario_summary.select(
 # %% [markdown]
 # ## 5. Label Engineering for Residual Ranking
 #
-# The labels in this notebook are defined for the post-gate ranking problem
-# rather than the full payroll universe. In this run, the residual universe
-# contains 46,307 records, including 2,314 residual issues and 211 rule-missed
-# severe issues, so the label design needs to separate common ambiguous issues
-# from the smaller severe tail.
+# Labels are defined for the post-gate residual ranking problem, not the full
+# payroll universe. The core targets are latent residual issue truth, residual
+# dollar impact, graded relevance, rule-missed severe issues, and evaluation-only
+# net utility. Historical observed corrections are retained only for bias
+# analysis and are not mixed into latent residual truth.
 #
-# **Core labels**
-#
-# - `y_issue`: latent residual issue truth used by classifier models
-# - `y_dollar`: residual dollar impact used by regression-style models
-# - `severe_issue`: overall severe anomaly label used for funnel and upstream
-#   gate reporting across all employee-pay-cycles
-# - `relevance_grade`: graded residual relevance used by learning-to-rank
-# - `rule_missed_severe_issue`: severe residual issue slice used in evaluation
-# - `net_utility`: evaluation-only business value after review cost
-# - `observed_correction`: biased historical review signal retained only for
-#   bias analysis or auxiliary comparisons
-#
-# **Relevance grade definition**
-#
-# - `0`: no known residual issue
-# - `1`: minor residual issue
-# - `2`: material residual issue
-# - `3`: severe rule-missed residual issue
-#
-# **Important note**
-#
-# `y_issue` means latent residual issue truth. It is not mixed with observed
-# historical review outcomes. `severe_issue` tracks the full severe anomaly
-# population for funnel accounting, while `rule_missed_severe_issue` is the
-# narrower severe residual slice that survives the hard-rule gate and remains
-# relevant for stage-2 model evaluation.
+# The main implication is that the benchmark compares models on the same stage-2
+# queue they would face in production. Full label definitions and examples are
+# in the appendix.
 
 # %% [markdown]
 # | Label | Column | Used by | Meaning |
@@ -515,38 +335,6 @@ scenario_benchmark.scenario_summary.select(
 # | **rule-missed severe issue** | `rule_missed_severe_issue` | evaluation | key severe-issue slice that survived the hard-rule gate |
 # | **observed correction** | `observed_correction` | bias analysis | biased reviewed-and-corrected historical subset |
 # | **net utility** | `net_utility` | evaluation | residual business value minus review cost |
-
-# %% [markdown]
-# label examples
-
-# %%
-residual_payroll.select(
-    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
-    PayrollCol.ANOMALY_CATEGORY,
-    PayrollCol.CRITICAL_HARD_RULE_FLAG,
-    PayrollCol.RESIDUAL_RECORD,
-    PayrollCol.Y_ISSUE,
-    PayrollCol.Y_DOLLAR,
-    PayrollCol.RULE_MISSED_SEVERE_ISSUE,
-    PayrollCol.RELEVANCE_GRADE,
-    PayrollCol.OBSERVED_CORRECTION,
-    PayrollCol.NET_UTILITY,
-).unique(
-    pl_selectors.all()
-    - pl_selectors.matches("employee_pay_cycle_id|y_dollar|net_utility"),
-).head(10)
-
-# %% [markdown]
-# ### label summary
-
-# %%
-residual_payroll.select(
-    pl.len().alias("residual_records"),
-    pl.sum(PayrollCol.Y_ISSUE).alias("residual_issues"),
-    pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE).alias("rule_missed_severe_issues"),
-    pl.mean(PayrollCol.Y_DOLLAR).round(2).alias("avg_residual_dollars"),
-    pl.mean(PayrollCol.NET_UTILITY).round(2).alias("avg_net_utility"),
-)
 
 
 # %%
@@ -612,15 +400,6 @@ residual_label_diagnostics = build_residual_label_diagnostics(residual_payroll)
 residual_family_mix = build_residual_family_mix(residual_payroll)
 
 # %% [markdown]
-# ### residual label diagnostics
-
-# %%
-residual_label_diagnostics
-
-# %% [markdown]
-# ### residual anomaly-family mix
-
-# %% [markdown]
 # The residual label mix is dominated by material but non-severe issues: grade
 # 2 accounts for most residual issues, while the severe grade-3 slice is much
 # smaller. The residual problem is therefore broader than severe-case
@@ -630,10 +409,7 @@ residual_label_diagnostics
 # The anomaly-family mix is also concentrated. `paid_vs_scheduled_mismatch` is
 # the largest family by count, while `overtime_double_shift` is the most severe
 # and dollar-heavy family, making it disproportionately important for top-of-
-# queue review quality.
-
-# %%
-residual_family_mix
+# queue review quality. Supporting label diagnostics are in the appendix.
 
 # %% [markdown]
 # ## 6. Feature Engineering for Ambiguous Payroll Records
@@ -664,53 +440,9 @@ scored = scoring_results.scored
 residual_scored = scored.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
 
 # %% [markdown]
-# ### feature families
-
-# %% [markdown]
-# | feature_family | examples | why_it_matters |
-# | :--- | :--- | :--- |
-# | raw payroll | total gross pay, total overtime hours, total premium pay, total paid hours | captures the basic cycle-level payroll signal that remains after hard-rule gating |
-# | employee history | lag gross pay, gross pay pct change, prior employee pay-period count | catches employee-specific deviations from recent payroll history |
-# | facility-role baseline | peer gross deviation ratio, peer overtime deviation ratio, facility premium share median | shows whether a cycle looks unusual relative to local role peers |
-# | timekeeping and soft warnings | paid minus scheduled hours, premium eligibility mismatch, rest gap risk | retains ambiguous warning signals without treating them as deterministic failures |
-# | cross-facility and peer context | cross-facility role median, peer gross median, effective peer reference size | detects unusual facility placement or peer-context changes |
-# | temporal and robust context | gross pay robust z, gross pay mad score, gross pay percentile | adds stable outlier context that is less sensitive to raw dollar levels |
-
-# %% [markdown]
-# ### residual feature examples
-
-# %%
-residual_scored.sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).select(
-    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
-    PayrollCol.FACILITY_ID,
-    PayrollCol.PAY_PERIOD_INDEX,
-    PayrollCol.TOTAL_GROSS_PAY,
-    PayrollCol.TOTAL_EXPECTED_GROSS_PAY,
-    PayrollCol.TOTAL_OVERTIME_HOURS,
-    PayrollCol.TOTAL_PREMIUM_PAY,
-    "gross_pay_pct_change",
-    "peer_gross_deviation_ratio",
-    "paid_minus_scheduled_hours",
-    "gross_pay_robust_z",
-    "premium_eligibility_mismatch",
-).head(10)
-
-# %% [markdown]
-# ### leakage-safe contract
-
-# %% [markdown]
 # In other words, these features are meant to separate ambiguous-but-benign
-# residual records from ambiguous-and-costly ones.
-
-# %% [markdown]
-# | contract_point | active_behavior |
-# | :--- | :--- |
-# | historical features | exclude the current and future pay periods |
-# | peer baselines | use only scoring-time-available employee and facility context |
-# | evaluation labels | remain excluded from employee-cycle model features |
-# | hard-rule gate | defines the residual universe before model comparison begins |
-# | soft warning features | remain allowed as ambiguous feature inputs after gating |
-# | out-of-scope metrics | PBJ, HPRD, and compliance staffing metrics are excluded |
+# residual records from ambiguous-and-costly ones. Feature-family examples and
+# leakage-safe contract details are in the appendix.
 
 # %% [markdown]
 # ## 7. Model Formulations
@@ -756,69 +488,7 @@ residual_scored.sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).select(
 #
 # Optional production blending is documented separately in the appendix. It is
 # not part of the primary model-family comparison.
-# %% [markdown]
-# ### formulation summary
-
-# %%
-pl.DataFrame(
-    {
-        "model": [
-            "classifier",
-            "cost_sensitive_classifier",
-            "regressor",
-            "expected_value",
-            "learning_to_rank",
-        ],
-        "training_target": [
-            f"{PayrollCol.Y_ISSUE} on residual records",
-            f"{PayrollCol.Y_ISSUE} with severity-aware weights on residual records",
-            f"{PayrollCol.Y_DOLLAR} on residual records",
-            "y_issue + estimated exposure on residual records",
-            f"{PayrollCol.RELEVANCE_GRADE}, grouped by facility x pay period",
-        ],
-        "score_column": [
-            str(ScoreCol.CLASSIFICATION_SCORE),
-            str(ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE),
-            str(ScoreCol.REGRESSION_SCORE),
-            str(ScoreCol.EXPECTED_VALUE_SCORE),
-            str(ScoreCol.RANKING_SCORE),
-        ],
-        "business_question": [
-            "Which residual records are most likely to still contain a payroll issue?",
-            "Which residual issue records deserve extra weight when severity and dollars matter?",
-            "Which residual records imply the largest unresolved dollar impact?",
-            "Which residual records combine issue likelihood with financial exposure?",
-            "Which residual records deserve the strongest top-of-queue priority?",
-        ],
-    },
-)
-
-# %% [markdown]
-# ### fair comparison rules
-
-# %%
-pl.DataFrame(
-    {
-        "rule": [
-            "scoring universe",
-            "queue grouping",
-            "review budgets",
-            "temporal framing",
-            "training universe",
-            "leakage control",
-            "cost-sensitive coverage",
-        ],
-        "applied_setting": [
-            "residual records only for notebook comparison outputs",
-            "facility x payroll cycle",
-            ", ".join(format_review_budget_pct(k) for k in review_budget_percents),
-            "same employee-cycle temporal split logic for all formulations",
-            "primary supervised training rows are residual records only",
-            "evaluation labels remain excluded from feature columns",
-            "cost-sensitive classifier is included alongside the standard classifier",
-        ],
-    },
-)
+# Detailed formulation metadata and comparison contracts are in the appendix.
 
 # %% [markdown]
 # ## 8. Main Study: DGP Scenario-Based Residual Ranking Benchmark
@@ -966,18 +636,6 @@ median_metric_summary = scenario_benchmark.median_metric_summary
 winner_map = scenario_benchmark.winner_map
 
 # %% [markdown]
-# ### DGP scenario catalog
-
-# %%
-scenario_benchmark.scenario_catalog
-
-# %% [markdown]
-# ### scenario x seed design
-
-# %%
-scenario_benchmark.scenario_seed_design
-
-# %% [markdown]
 # ### aggregate winner frequency
 
 # %%
@@ -1011,25 +669,7 @@ median_metric_summary
 # incremental utility matter most, while learning-to-rank is a stronger
 # challenger when queue ordering at tight review budgets is the main objective.
 
-# %%
-winner_map
-
-# %% [markdown]
-# ### primary score comparison on residual records
-
-# %%
-residual_scored.select(
-    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
-    PayrollCol.ANOMALY_CATEGORY,
-    PayrollCol.Y_ISSUE,
-    PayrollCol.Y_DOLLAR,
-    PayrollCol.RELEVANCE_GRADE,
-    ScoreCol.CLASSIFICATION_SCORE,
-    ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
-    ScoreCol.REGRESSION_SCORE,
-    ScoreCol.EXPECTED_VALUE_SCORE,
-    ScoreCol.RANKING_SCORE,
-).sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).head(10)
+# Full winner-map rows and score examples are included in the appendix.
 
 
 # %%
@@ -1087,54 +727,6 @@ def build_similarity_heatmap(
 
 
 # %% [markdown]
-# ### model similarity diagnostics
-
-# %%
-gggrid(
-    [
-        build_similarity_heatmap(
-            model_similarity_diagnostics,
-            "score_correlation",
-            "Model Score Correlation",
-        ),
-        build_similarity_heatmap(
-            model_similarity_diagnostics,
-            "top_1_overlap",
-            "Model Overlap at 1% Review",
-        ),
-        build_similarity_heatmap(
-            model_similarity_diagnostics,
-            f"top_{format_review_budget_pct(0.05 if 0.05 in review_budget_percents else review_budget_percents[0])}_overlap",
-            "Model Overlap at Active Review Budget",
-        ),
-    ],
-    ncol=1,
-)
-
-# %% [markdown]
-# The overlap table shows how similar the five supervised residual formulations
-# are at the top of the queue. The regressor is more behaviorally distinct than
-# the probability-first and relevance-ranking formulations, which is why expected
-# value can win business metrics without requiring a radically different queue
-# ordering.
-
-# %% [markdown]
-# ### temporal stability context
-
-# %%
-if backtest is not None:
-    display(
-        backtest.select(
-            PayrollCol.PAY_PERIOD_INDEX,
-            MetricCol.RESIDUAL_NDCG_AT_K,
-            MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
-            MetricCol.DOLLARS_CAPTURED_AT_K,
-            MetricCol.REVIEWER_YIELD_AT_K,
-            MetricCol.INCREMENTAL_UTILITY_AT_K,
-        ).sort(PayrollCol.PAY_PERIOD_INDEX),
-    )
-
-# %% [markdown]
 # The expected-value model wins because the residual task is heavily financial:
 # high-priority records are not merely likely to be wrong, but costly when
 # ignored. The learning-to-rank model is competitive on graded relevance, but
@@ -1142,15 +734,8 @@ if backtest is not None:
 # holdout benchmark. For payroll loss prevention, direct business-value scoring
 # can matter as much as ranking-specific objectives.
 
-# %% [markdown]
-# The severe residual tail is concentrated rather than broad. `overtime_double_shift`
-# accounts for a small share of residual issues but a disproportionate share of
-# severe and high-dollar cases in this simulation. Severe-recall results should
-# therefore be interpreted as performance on a concentrated high-dollar tail
-# rather than broad severe-risk detection. The issue-family diagnostics and
-# ablations are included to keep that dependency visible. A severe-family
-# diversification stress test would be the next robustness extension if this
-# benchmark is expanded.
+# Model similarity, temporal stability, and severe-tail diagnostics are included
+# in the appendix for audit and robustness review.
 
 # %% [markdown]
 # ## 9. Ablation Studies
@@ -1244,36 +829,6 @@ if not validation_mode:
         progress=progress,
     )
 
-# %% [markdown]
-# ### 9.1 feature-family ablation
-#
-# Question: after hard rules remove obvious violations, do contextual features
-# still add value?
-#
-# Why it matters: if raw payroll features perform nearly as well, the residual
-# problem is probably too easy. If contextual features create most of the lift,
-# the simulation provides a better case for ML.
-
-# %%
-if feature_ablation is not None:
-    display(
-        feature_ablation.with_columns(
-            pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
-            pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
-            pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
-            pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
-            pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
-        ),
-    )
-
-# %% [markdown]
-# ### feature-family ablation lift by model
-#
-# The feature ablation is model-aware: each cumulative feature family is scored
-# separately for the five residual model formulations. The lift view below uses
-# raw payroll as the within-model baseline and shows the final cumulative feature
-# set improvement by model.
-
 # %%
 feature_lift_endpoint: pl.DataFrame | None = None
 if feature_ablation_lift is not None:
@@ -1284,83 +839,6 @@ if feature_ablation_lift is not None:
         pl.col("residual_ndcg_lift_vs_raw_payroll").round(4),
         pl.col("incremental_utility_improvement_vs_raw_payroll").round(2),
     )
-    display(
-        feature_lift_endpoint.select(
-            "feature_set",
-            "model",
-            "residual_ndcg_lift_vs_raw_payroll",
-            "incremental_utility_improvement_vs_raw_payroll",
-        ),
-    )
-
-# %%
-if feature_ablation_lift is not None and feature_lift_endpoint is not None:
-    gggrid(
-        [
-            (
-                ggplot(
-                    feature_lift_endpoint,
-                    aes(x="model", y="residual_ndcg_lift_vs_raw_payroll"),
-                )
-                + geom_bar(stat="identity", fill="#0f766e")
-                + theme_minimal()
-                + rotated_x_labels()
-                + labs(x="Model", y="NDCG lift vs raw payroll")
-                + ggtitle("Feature Ablation Lift by Model")
-            ),
-            (
-                ggplot(
-                    feature_lift_endpoint,
-                    aes(x="model", y="incremental_utility_improvement_vs_raw_payroll"),
-                )
-                + geom_bar(stat="identity", fill="#1d4ed8")
-                + theme_minimal()
-                + rotated_x_labels()
-                + labs(x="Model", y="Utility improvement vs raw payroll")
-                + ggtitle("Feature Ablation Utility Improvement by Model")
-            ),
-        ],
-        ncol=1,
-    )
-
-# %% [markdown]
-# ### 9.2 label-oriented winner summary
-#
-# Question: does the model winner change depending on how residual risk is
-# defined?
-#
-# Why it matters: the notebook should show whether the recommendation is robust
-# to issue-oriented, dollar-oriented, or graded-priority formulations.
-
-# %%
-if label_ablation is not None:
-    display(
-        label_ablation.with_columns(
-            pl.col("selection_value").round(4),
-        ),
-    )
-
-# %% [markdown]
-# ### 9.3 training-universe ablation
-#
-# Question: should a residual-stage model train on all payroll records or
-# specialize to records that survive the hard-rule gate?
-#
-# Why it matters: this directly tests the strategic choice between broader
-# training coverage and a residual-only model tuned to the stage-2 queue.
-
-# %%
-if training_universe_ablation is not None:
-    display(
-        training_universe_ablation.with_columns(
-            pl.col("train_hard_rule_share").round(4),
-            pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
-            pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
-            pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
-            pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
-            pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
-        ),
-    )
 
 # %% [markdown]
 # The ablation pattern answers a different question than the main comparison.
@@ -1370,7 +848,7 @@ if training_universe_ablation is not None:
 # recall, and business value. Label and training-universe ablations stay focused
 # on the five residual model families; the optional production blend is reserved
 # for the appendix, and DGP-stability evidence remains in the scenario-suite
-# benchmark.
+# benchmark. Detailed ablation tables and lift plots are in the appendix.
 
 # %% [markdown]
 # ## 10. Diagnostics, Explanations, and Final Recommendation
@@ -1439,26 +917,6 @@ final_recommendation_summary = pl.DataFrame(
 )
 
 # %% [markdown]
-# ### issue-type performance by model
-
-# %%
-if issue_type_model_performance is not None:
-    display(
-        issue_type_model_performance.with_columns(
-            pl.col(MetricCol.RECALL_AT_K).round(4),
-            pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
-            pl.col(MetricCol.DOLLAR_CAPTURE_RATE).round(4),
-        ),
-    )
-
-# %% [markdown]
-# ### severe residual miss examples
-
-# %%
-if severe_miss_examples is not None:
-    display(severe_miss_examples)
-
-# %% [markdown]
 # ### reviewer-facing queue examples
 
 # %%
@@ -1480,23 +938,8 @@ review_queue_examples.select(
     ReviewCol.EXPLANATION,
 ).head(10)
 
-# %% [markdown]
-# ### expected-value top residual examples
-
-# %%
-residual_scored.sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).select(
-    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
-    PayrollCol.EMPLOYEE_ID,
-    PayrollCol.FACILITY_ID,
-    PayrollCol.PAY_PERIOD_INDEX,
-    PayrollCol.ANOMALY_CATEGORY,
-    PayrollCol.Y_ISSUE,
-    PayrollCol.Y_DOLLAR,
-    PayrollCol.RELEVANCE_GRADE,
-    ScoreCol.CLASSIFICATION_SCORE,
-    ScoreCol.EXPECTED_VALUE_SCORE,
-    ScoreCol.RANKING_SCORE,
-).head(10)
+# Issue-type performance, severe miss examples, and expected-value score
+# examples are included in the appendix.
 
 # %% [markdown]
 # ### limitations
@@ -1547,6 +990,107 @@ final_recommendation_summary
 # These baseline diagnostics support the compact sanity check in section 4. They
 # are useful for auditing the synthetic residual queue, but they are kept out of
 # the main narrative so the model-comparison story stays concise.
+
+# %% [markdown]
+# #### dataset snapshot
+
+# %%
+pl.DataFrame(
+    {
+        "metric": [
+            "employee-pay-cycle records",
+            "hard-rule flagged",
+            "residual records",
+            "residual issue rate",
+            "residual severe issues",
+            "residual dollars",
+        ],
+        "value": [
+            float(data.payroll.height),
+            float(hard_rule_flagged.height),
+            float(residual_payroll.height),
+            round(
+                float(
+                    residual_payroll.select(pl.mean(PayrollCol.Y_ISSUE)).item() or 0.0,
+                ),
+                4,
+            ),
+            float(
+                residual_payroll.select(
+                    pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE),
+                ).item()
+                or 0,
+            ),
+            round(
+                float(
+                    residual_payroll.select(pl.sum(PayrollCol.Y_DOLLAR)).item() or 0.0,
+                ),
+                2,
+            ),
+        ],
+    },
+)
+
+# %% [markdown]
+# #### schema example
+
+# %%
+data.payroll.select(
+    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+    PayrollCol.EMPLOYEE_ID,
+    PayrollCol.FACILITY_ID,
+    PayrollCol.PAY_PERIOD_INDEX,
+    PayrollCol.TOTAL_GROSS_PAY,
+    PayrollCol.TOTAL_OVERTIME_HOURS,
+    PayrollCol.CRITICAL_HARD_RULE_FLAG,
+    PayrollCol.RESIDUAL_RECORD,
+    PayrollCol.Y_ISSUE,
+    PayrollCol.Y_DOLLAR,
+).head()
+
+# %% [markdown]
+# #### label summary
+
+# %%
+residual_payroll.select(
+    pl.len().alias("residual_records"),
+    pl.sum(PayrollCol.Y_ISSUE).alias("residual_issues"),
+    pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE).alias("rule_missed_severe_issues"),
+    pl.mean(PayrollCol.Y_DOLLAR).round(2).alias("avg_residual_dollars"),
+    pl.mean(PayrollCol.NET_UTILITY).round(2).alias("avg_net_utility"),
+)
+
+# %% [markdown]
+# #### label examples
+
+# %%
+residual_payroll.select(
+    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+    PayrollCol.ANOMALY_CATEGORY,
+    PayrollCol.CRITICAL_HARD_RULE_FLAG,
+    PayrollCol.RESIDUAL_RECORD,
+    PayrollCol.Y_ISSUE,
+    PayrollCol.Y_DOLLAR,
+    PayrollCol.RULE_MISSED_SEVERE_ISSUE,
+    PayrollCol.RELEVANCE_GRADE,
+    PayrollCol.OBSERVED_CORRECTION,
+    PayrollCol.NET_UTILITY,
+).unique(
+    pl_selectors.all()
+    - pl_selectors.matches("employee_pay_cycle_id|y_dollar|net_utility"),
+).head(10)
+
+# %% [markdown]
+# #### residual label diagnostics
+
+# %%
+residual_label_diagnostics
+
+# %% [markdown]
+# #### residual anomaly-family mix
+
+# %%
+residual_family_mix
 
 
 # %%
@@ -1657,7 +1201,55 @@ residual_diagnostics["issue_type_mix"]
 residual_diagnostics["residual_dollar_distribution"].head(10)
 
 # %% [markdown]
-# ### B. data dictionary
+# ### B. feature contracts and data dictionary
+
+# %% [markdown]
+# #### feature families
+
+# %% [markdown]
+# | feature_family | examples | why_it_matters |
+# | :--- | :--- | :--- |
+# | raw payroll | total gross pay, total overtime hours, total premium pay, total paid hours | captures the basic cycle-level payroll signal that remains after hard-rule gating |
+# | employee history | lag gross pay, gross pay pct change, prior employee pay-period count | catches employee-specific deviations from recent payroll history |
+# | facility-role baseline | peer gross deviation ratio, peer overtime deviation ratio, facility premium share median | shows whether a cycle looks unusual relative to local role peers |
+# | timekeeping and soft warnings | paid minus scheduled hours, premium eligibility mismatch, rest gap risk | retains ambiguous warning signals without treating them as deterministic failures |
+# | cross-facility and peer context | cross-facility role median, peer gross median, effective peer reference size | detects unusual facility placement or peer-context changes |
+# | temporal and robust context | gross pay robust z, gross pay mad score, gross pay percentile | adds stable outlier context that is less sensitive to raw dollar levels |
+
+# %% [markdown]
+# #### residual feature examples
+
+# %%
+residual_scored.sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).select(
+    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+    PayrollCol.FACILITY_ID,
+    PayrollCol.PAY_PERIOD_INDEX,
+    PayrollCol.TOTAL_GROSS_PAY,
+    PayrollCol.TOTAL_EXPECTED_GROSS_PAY,
+    PayrollCol.TOTAL_OVERTIME_HOURS,
+    PayrollCol.TOTAL_PREMIUM_PAY,
+    "gross_pay_pct_change",
+    "peer_gross_deviation_ratio",
+    "paid_minus_scheduled_hours",
+    "gross_pay_robust_z",
+    "premium_eligibility_mismatch",
+).head(10)
+
+# %% [markdown]
+# #### leakage-safe contract
+
+# %% [markdown]
+# | contract_point | active_behavior |
+# | :--- | :--- |
+# | historical features | exclude the current and future pay periods |
+# | peer baselines | use only scoring-time-available employee and facility context |
+# | evaluation labels | remain excluded from employee-cycle model features |
+# | hard-rule gate | defines the residual universe before model comparison begins |
+# | soft warning features | remain allowed as ambiguous feature inputs after gating |
+# | out-of-scope metrics | PBJ, HPRD, and compliance staffing metrics are excluded |
+
+# %% [markdown]
+# #### data dictionary
 
 
 # %%
@@ -2083,6 +1675,73 @@ appendix_zero_positive_policy
 # %% [markdown]
 # ### G. model settings and documented tuning space
 
+# %% [markdown]
+# #### formulation summary
+
+# %%
+pl.DataFrame(
+    {
+        "model": [
+            "classifier",
+            "cost_sensitive_classifier",
+            "regressor",
+            "expected_value",
+            "learning_to_rank",
+        ],
+        "training_target": [
+            f"{PayrollCol.Y_ISSUE} on residual records",
+            f"{PayrollCol.Y_ISSUE} with severity-aware weights on residual records",
+            f"{PayrollCol.Y_DOLLAR} on residual records",
+            "y_issue + estimated exposure on residual records",
+            f"{PayrollCol.RELEVANCE_GRADE}, grouped by facility x pay period",
+        ],
+        "score_column": [
+            str(ScoreCol.CLASSIFICATION_SCORE),
+            str(ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE),
+            str(ScoreCol.REGRESSION_SCORE),
+            str(ScoreCol.EXPECTED_VALUE_SCORE),
+            str(ScoreCol.RANKING_SCORE),
+        ],
+        "business_question": [
+            "Which residual records are most likely to still contain a payroll issue?",
+            "Which residual issue records deserve extra weight when severity and dollars matter?",
+            "Which residual records imply the largest unresolved dollar impact?",
+            "Which residual records combine issue likelihood with financial exposure?",
+            "Which residual records deserve the strongest top-of-queue priority?",
+        ],
+    },
+)
+
+# %% [markdown]
+# #### fair comparison rules
+
+# %%
+pl.DataFrame(
+    {
+        "rule": [
+            "scoring universe",
+            "queue grouping",
+            "review budgets",
+            "temporal framing",
+            "training universe",
+            "leakage control",
+            "cost-sensitive coverage",
+        ],
+        "applied_setting": [
+            "residual records only for notebook comparison outputs",
+            "facility x payroll cycle",
+            ", ".join(format_review_budget_pct(k) for k in review_budget_percents),
+            "same employee-cycle temporal split logic for all formulations",
+            "primary supervised training rows are residual records only",
+            "evaluation labels remain excluded from feature columns",
+            "cost-sensitive classifier is included alongside the standard classifier",
+        ],
+    },
+)
+
+# %% [markdown]
+# #### model settings
+
 
 # %%
 def build_appendix_model_settings() -> pl.DataFrame:
@@ -2247,6 +1906,18 @@ appendix_score_bucket_calibration
 # %% [markdown]
 # ### J. stress-test configurations
 
+# %% [markdown]
+# #### DGP scenario catalog
+
+# %%
+scenario_benchmark.scenario_catalog
+
+# %% [markdown]
+# #### scenario x seed design
+
+# %%
+scenario_benchmark.scenario_seed_design
+
 
 # %%
 def build_appendix_stress_test_config(
@@ -2328,14 +1999,193 @@ appendix_stress_test_config
 # %% [markdown]
 # ### K. additional ablation tables
 
+# %% [markdown]
+# #### feature-family ablation
+
 # %%
 if feature_ablation is not None:
-    display(feature_ablation)
+    display(
+        feature_ablation.with_columns(
+            pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
+            pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
+            pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
+            pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
+            pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
+        ),
+    )
+
+# %% [markdown]
+# #### feature-family ablation lift by model
+
+# %%
+if feature_lift_endpoint is not None:
+    display(
+        feature_lift_endpoint.select(
+            "feature_set",
+            "model",
+            "residual_ndcg_lift_vs_raw_payroll",
+            "incremental_utility_improvement_vs_raw_payroll",
+        ),
+    )
+
+# %%
+if feature_lift_endpoint is not None:
+    gggrid(
+        [
+            (
+                ggplot(
+                    feature_lift_endpoint,
+                    aes(x="model", y="residual_ndcg_lift_vs_raw_payroll"),
+                )
+                + geom_bar(stat="identity", fill="#0f766e")
+                + theme_minimal()
+                + rotated_x_labels()
+                + labs(x="Model", y="NDCG lift vs raw payroll")
+                + ggtitle("Feature Ablation Lift by Model")
+            ),
+            (
+                ggplot(
+                    feature_lift_endpoint,
+                    aes(x="model", y="incremental_utility_improvement_vs_raw_payroll"),
+                )
+                + geom_bar(stat="identity", fill="#1d4ed8")
+                + theme_minimal()
+                + rotated_x_labels()
+                + labs(x="Model", y="Utility improvement vs raw payroll")
+                + ggtitle("Feature Ablation Utility Improvement by Model")
+            ),
+        ],
+        ncol=1,
+    )
+
+# %% [markdown]
+# #### training-universe ablation
 
 # %%
 if training_universe_ablation is not None:
-    display(training_universe_ablation)
+    display(
+        training_universe_ablation.with_columns(
+            pl.col("train_hard_rule_share").round(4),
+            pl.col(MetricCol.RESIDUAL_NDCG_AT_K).round(4),
+            pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
+            pl.col(MetricCol.DOLLARS_CAPTURED_AT_K).round(2),
+            pl.col(MetricCol.REVIEWER_YIELD_AT_K).round(4),
+            pl.col(MetricCol.INCREMENTAL_UTILITY_AT_K).round(2),
+        ),
+    )
+
+# %% [markdown]
+# #### label-oriented winner summary
 
 # %%
 if label_ablation is not None:
-    display(label_ablation)
+    display(
+        label_ablation.with_columns(
+            pl.col("selection_value").round(4),
+        ),
+    )
+
+# %% [markdown]
+# ### L. model diagnostics and examples
+
+# %% [markdown]
+# #### full winner map rows
+
+# %%
+winner_map
+
+# %% [markdown]
+# #### primary score comparison on residual records
+
+# %%
+residual_scored.select(
+    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+    PayrollCol.ANOMALY_CATEGORY,
+    PayrollCol.Y_ISSUE,
+    PayrollCol.Y_DOLLAR,
+    PayrollCol.RELEVANCE_GRADE,
+    ScoreCol.CLASSIFICATION_SCORE,
+    ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE,
+    ScoreCol.REGRESSION_SCORE,
+    ScoreCol.EXPECTED_VALUE_SCORE,
+    ScoreCol.RANKING_SCORE,
+).sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).head(10)
+
+# %% [markdown]
+# #### model similarity diagnostics
+
+# %%
+gggrid(
+    [
+        build_similarity_heatmap(
+            model_similarity_diagnostics,
+            "score_correlation",
+            "Model Score Correlation",
+        ),
+        build_similarity_heatmap(
+            model_similarity_diagnostics,
+            "top_1_overlap",
+            "Model Overlap at 1% Review",
+        ),
+        build_similarity_heatmap(
+            model_similarity_diagnostics,
+            f"top_{format_review_budget_pct(0.05 if 0.05 in review_budget_percents else review_budget_percents[0])}_overlap",
+            "Model Overlap at Active Review Budget",
+        ),
+    ],
+    ncol=1,
+)
+
+# %% [markdown]
+# #### temporal stability context
+
+# %%
+if backtest is not None:
+    display(
+        backtest.select(
+            PayrollCol.PAY_PERIOD_INDEX,
+            MetricCol.RESIDUAL_NDCG_AT_K,
+            MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K,
+            MetricCol.DOLLARS_CAPTURED_AT_K,
+            MetricCol.REVIEWER_YIELD_AT_K,
+            MetricCol.INCREMENTAL_UTILITY_AT_K,
+        ).sort(PayrollCol.PAY_PERIOD_INDEX),
+    )
+
+# %% [markdown]
+# #### issue-type performance by model
+
+# %%
+if issue_type_model_performance is not None:
+    display(
+        issue_type_model_performance.with_columns(
+            pl.col(MetricCol.RECALL_AT_K).round(4),
+            pl.col(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K).round(4),
+            pl.col(MetricCol.DOLLAR_CAPTURE_RATE).round(4),
+        ),
+    )
+
+# %% [markdown]
+# #### severe residual miss examples
+
+# %%
+if severe_miss_examples is not None:
+    display(severe_miss_examples)
+
+# %% [markdown]
+# #### expected-value top residual examples
+
+# %%
+residual_scored.sort(ScoreCol.EXPECTED_VALUE_SCORE, descending=True).select(
+    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
+    PayrollCol.EMPLOYEE_ID,
+    PayrollCol.FACILITY_ID,
+    PayrollCol.PAY_PERIOD_INDEX,
+    PayrollCol.ANOMALY_CATEGORY,
+    PayrollCol.Y_ISSUE,
+    PayrollCol.Y_DOLLAR,
+    PayrollCol.RELEVANCE_GRADE,
+    ScoreCol.CLASSIFICATION_SCORE,
+    ScoreCol.EXPECTED_VALUE_SCORE,
+    ScoreCol.RANKING_SCORE,
+).head(10)
