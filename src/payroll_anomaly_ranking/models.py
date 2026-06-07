@@ -4,9 +4,9 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any, cast
 
+import lightgbm as lgb
 import numpy as np
 import polars as pl
-from lightgbm import LGBMRanker
 from sklearn.ensemble import (
     HistGradientBoostingClassifier,
     HistGradientBoostingRegressor,
@@ -977,24 +977,30 @@ def _employee_cycle_ltr_scores(
     if not group_sizes:
         return np.zeros(payroll.height)
 
-    model = LGBMRanker(
-        objective="lambdarank",
-        metric="ndcg",
-        n_estimators=80,
-        learning_rate=0.05,
-        max_depth=3,
-        min_child_samples=5,
-        n_jobs=config.ltr_num_threads,
-        random_state=config.seed,
-        verbose=-1,
-    )
     # Query rows must be contiguous and group sizes must match that sorted order.
-    model.fit(
-        _employee_cycle_feature_matrix(rank_train, feature_columns),
-        train_target,
+    train_features = _employee_cycle_feature_matrix(rank_train, feature_columns)
+    score_features = _employee_cycle_feature_matrix(payroll, feature_columns)
+    dataset = lgb.Dataset(
+        train_features,
+        label=train_target,
         group=group_sizes,
+        feature_name=list(feature_columns),
     )
-    return model.predict(_employee_cycle_feature_matrix(payroll, feature_columns))
+    model = lgb.train(
+        {
+            "objective": "lambdarank",
+            "metric": "ndcg",
+            "num_iterations": 80,
+            "learning_rate": 0.05,
+            "max_depth": 3,
+            "min_child_samples": 5,
+            "num_threads": config.ltr_num_threads,
+            "seed": config.seed,
+            "verbose": -1,
+        },
+        dataset,
+    )
+    return cast(np.ndarray, model.predict(score_features))
 
 
 def _employee_cycle_ltr_training_frame(train_frame: pl.DataFrame) -> pl.DataFrame:
