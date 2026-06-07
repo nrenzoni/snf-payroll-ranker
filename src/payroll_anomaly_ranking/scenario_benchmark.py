@@ -12,7 +12,11 @@ from payroll_anomaly_ranking.models import (
     score_employee_pay_cycles_holdout,
     temporal_split,
 )
-from payroll_anomaly_ranking.progress import ProgressReporter, progress_or_none
+from payroll_anomaly_ranking.progress import (
+    ProgressReporter,
+    SharedStepProgress,
+    progress_or_none,
+)
 from payroll_anomaly_ranking.scenarios import (
     ScenarioSpec,
     implemented_dgp_scenario_catalog,
@@ -41,6 +45,15 @@ SCENARIO_BENCHMARK_METRICS: tuple[str, ...] = (
     str(MetricCol.REVIEWER_YIELD_AT_K),
     str(MetricCol.INCREMENTAL_UTILITY_AT_K),
     str(MetricCol.PR_AUC),
+)
+
+SCENARIO_BENCHMARK_GENERATION_STAGES = 8
+SCENARIO_BENCHMARK_BUILD_STAGES = 2
+SCENARIO_BENCHMARK_SCORING_STAGES = 6
+SCENARIO_BENCHMARK_STAGES_PER_UNIT = (
+    SCENARIO_BENCHMARK_GENERATION_STAGES
+    + SCENARIO_BENCHMARK_BUILD_STAGES
+    + SCENARIO_BENCHMARK_SCORING_STAGES
 )
 
 
@@ -89,75 +102,85 @@ def run_employee_cycle_scenario_benchmark(
         for scenario_name, scenario in scenario_catalog.items()
         for seed in seeds
     ]
-    for scenario_name, scenario, seed in progress.iter(
-        scenario_seed_pairs,
+    total_progress_steps = len(scenario_seed_pairs) * SCENARIO_BENCHMARK_STAGES_PER_UNIT
+    progress_steps = progress.iter(
+        range(total_progress_steps),
         desc="Running scenario benchmark",
-        total=len(scenario_seed_pairs),
-        unit="unit",
-    ):
-        seed_config = replace(config, seed=seed)
-        generated = generate_employee_pay_cycles(
-            seed_config,
-            scenario=scenario,
-            progress=progress,
-        )
-        scoring_results = score_employee_pay_cycles_holdout(
-            generated.payroll,
-            seed_config,
-            progress=progress,
-        )
-        scored = scoring_results.scored
-        split = temporal_split(generated.payroll)
-        scenario_seed_rows.append(
-            {
-                "scenario": scenario_name,
-                "display_name": str(
-                    scenario.metadata.get("display_name", scenario.name),
-                ),
-                "seed": seed,
-                "unit": _benchmark_unit_name(scenario_name, seed),
-                "review_budgets": ", ".join(
-                    _format_review_budget_pct(budget) for budget in review_budgets
-                ),
-                "train_records": split.train.height + split.validation.height,
-                "test_records": split.test.height,
-                "test_periods": ", ".join(
-                    str(period)
-                    for period in sorted(
-                        split.test.get_column(PayrollCol.PAY_PERIOD_INDEX)
-                        .unique()
-                        .to_list(),
-                    )
-                ),
-                "test_residual_records": split.test.filter(
-                    pl.col(PayrollCol.RESIDUAL_RECORD) == 1,
-                ).height,
-            },
-        )
-        scenario_summary_rows.append(
-            _scenario_summary_row(
-                scenario_name,
-                scenario,
-                seed,
-                generated.payroll,
-            ),
-        )
-        for model_name, score_col in SCENARIO_BENCHMARK_MODELS:
-            scored_for_model = scored.with_columns(
-                pl.col(score_col).alias(ScoreCol.FINAL_ANOMALY_SCORE),
+        total=total_progress_steps,
+        unit="stage",
+    )
+    unit_progress = SharedStepProgress(progress_steps)
+    try:
+        for scenario_name, scenario, seed in scenario_seed_pairs:
+            seed_config = replace(config, seed=seed)
+            generated = generate_employee_pay_cycles(
+                seed_config,
+                scenario=scenario,
+                progress=unit_progress,
             )
-            for budget in review_budgets:
-                metrics = employee_cycle_grouped_metrics(scored_for_model, budget)
-                metric_unit_rows.extend(
-                    _metric_unit_rows(
-                        scenario_name,
-                        scenario,
-                        seed,
-                        model_name,
-                        budget,
-                        metrics,
+            scoring_results = score_employee_pay_cycles_holdout(
+                generated.payroll,
+                seed_config,
+                progress=unit_progress,
+            )
+            scored = scoring_results.scored
+            split = temporal_split(generated.payroll)
+            scenario_seed_rows.append(
+                {
+                    "scenario": scenario_name,
+                    "display_name": str(
+                        scenario.metadata.get("display_name", scenario.name),
                     ),
+                    "seed": seed,
+                    "unit": _benchmark_unit_name(scenario_name, seed),
+                    "review_budgets": ", ".join(
+                        _format_review_budget_pct(budget) for budget in review_budgets
+                    ),
+                    "train_records": split.train.height + split.validation.height,
+                    "test_records": split.test.height,
+                    "test_periods": ", ".join(
+                        str(period)
+                        for period in sorted(
+                            split.test.get_column(PayrollCol.PAY_PERIOD_INDEX)
+                            .unique()
+                            .to_list(),
+                        )
+                    ),
+                    "test_residual_records": split.test.filter(
+                        pl.col(PayrollCol.RESIDUAL_RECORD) == 1,
+                    ).height,
+                },
+            )
+            scenario_summary_rows.append(
+                _scenario_summary_row(
+                    scenario_name,
+                    scenario,
+                    seed,
+                    generated.payroll,
+                ),
+            )
+            for model_name, score_col in SCENARIO_BENCHMARK_MODELS:
+                scored_for_model = scored.with_columns(
+                    pl.col(score_col).alias(ScoreCol.FINAL_ANOMALY_SCORE),
                 )
+                for budget in review_budgets:
+                    metrics = employee_cycle_grouped_metrics(scored_for_model, budget)
+                    metric_unit_rows.extend(
+                        _metric_unit_rows(
+                            scenario_name,
+                            scenario,
+                            seed,
+                            model_name,
+                            budget,
+                            metrics,
+                        ),
+                    )
+        for _ in progress_steps:
+            pass
+    finally:
+        close_progress = getattr(progress_steps, "close", None)
+        if close_progress is not None:
+            close_progress()
 
     metric_units = pl.DataFrame(metric_unit_rows, infer_schema_length=None)
     return ScenarioBenchmarkResults(

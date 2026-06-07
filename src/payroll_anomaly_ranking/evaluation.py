@@ -24,7 +24,14 @@ from payroll_anomaly_ranking.models import (
     score_featured_employee_pay_cycles_custom_split,
     temporal_split,
 )
-from payroll_anomaly_ranking.progress import ProgressReporter, progress_or_none
+from payroll_anomaly_ranking.progress import (
+    ProgressReporter,
+    SharedStepProgress,
+    progress_or_none,
+)
+
+ROLLING_ORIGIN_SCORING_CALLS_PER_ORIGIN = 2
+EMPLOYEE_CYCLE_SCORING_STAGES = 6
 
 
 @dataclass(frozen=True)
@@ -456,50 +463,60 @@ def employee_cycle_feature_ablation(
         selected.extend(feature_columns)
         cumulative_feature_sets.append((feature_set, tuple(dict.fromkeys(selected))))
 
-    rows: list[dict[str, float | str]] = []
-    for feature_set, feature_columns in progress.iter(
-        cumulative_feature_sets,
+    total_progress_steps = len(cumulative_feature_sets) * EMPLOYEE_CYCLE_SCORING_STAGES
+    progress_steps = progress.iter(
+        range(total_progress_steps),
         desc="Running feature ablation",
-        total=len(cumulative_feature_sets),
-        unit="set",
-    ):
-        scored = score_featured_employee_pay_cycles(
-            featured,
-            config,
-            feature_columns=feature_columns,
-            progress=progress,
-        ).scored
-        for model_name, score_name in _employee_cycle_model_scores(scored):
-            if model_name == "final_active_ranking":
-                continue
-            metrics = employee_cycle_grouped_metrics(
-                scored.with_columns(
-                    pl.col(score_name).alias(ScoreCol.FINAL_ANOMALY_SCORE),
-                ),
-                budget,
-            )
-            rows.append(
-                {
-                    "feature_set": feature_set,
-                    "model": model_name,
-                    MetricCol.K: budget,
-                    MetricCol.RESIDUAL_NDCG_AT_K: float(
-                        metrics[MetricCol.RESIDUAL_NDCG_AT_K],
+        total=total_progress_steps,
+        unit="stage",
+    )
+    scoring_progress = SharedStepProgress(progress_steps)
+    rows: list[dict[str, float | str]] = []
+    try:
+        for feature_set, feature_columns in cumulative_feature_sets:
+            scored = score_featured_employee_pay_cycles(
+                featured,
+                config,
+                feature_columns=feature_columns,
+                progress=scoring_progress,
+            ).scored
+            for model_name, score_name in _employee_cycle_model_scores(scored):
+                if model_name == "final_active_ranking":
+                    continue
+                metrics = employee_cycle_grouped_metrics(
+                    scored.with_columns(
+                        pl.col(score_name).alias(ScoreCol.FINAL_ANOMALY_SCORE),
                     ),
-                    MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(
-                        metrics[MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K],
-                    ),
-                    MetricCol.DOLLARS_CAPTURED_AT_K: float(
-                        metrics[MetricCol.DOLLARS_CAPTURED_AT_K],
-                    ),
-                    MetricCol.REVIEWER_YIELD_AT_K: float(
-                        metrics[MetricCol.REVIEWER_YIELD_AT_K],
-                    ),
-                    MetricCol.INCREMENTAL_UTILITY_AT_K: float(
-                        metrics[MetricCol.INCREMENTAL_UTILITY_AT_K],
-                    ),
-                },
-            )
+                    budget,
+                )
+                rows.append(
+                    {
+                        "feature_set": feature_set,
+                        "model": model_name,
+                        MetricCol.K: budget,
+                        MetricCol.RESIDUAL_NDCG_AT_K: float(
+                            metrics[MetricCol.RESIDUAL_NDCG_AT_K],
+                        ),
+                        MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(
+                            metrics[MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K],
+                        ),
+                        MetricCol.DOLLARS_CAPTURED_AT_K: float(
+                            metrics[MetricCol.DOLLARS_CAPTURED_AT_K],
+                        ),
+                        MetricCol.REVIEWER_YIELD_AT_K: float(
+                            metrics[MetricCol.REVIEWER_YIELD_AT_K],
+                        ),
+                        MetricCol.INCREMENTAL_UTILITY_AT_K: float(
+                            metrics[MetricCol.INCREMENTAL_UTILITY_AT_K],
+                        ),
+                    },
+                )
+        for _ in progress_steps:
+            pass
+    finally:
+        close_progress = getattr(progress_steps, "close", None)
+        if close_progress is not None:
+            close_progress()
     return pl.DataFrame(rows)
 
 
@@ -551,83 +568,97 @@ def employee_cycle_training_universe_ablation(
             "primary_ltr_setup",
         ),
     ]
-    rows: list[dict[str, float | str]] = []
-    for (
-        label,
-        training_universe,
-        include_gate_feature,
-        models,
-        purpose,
-    ) in progress.iter(
-        scenarios,
+    total_progress_steps = len(scenarios) * EMPLOYEE_CYCLE_SCORING_STAGES
+    progress_steps = progress.iter(
+        range(total_progress_steps),
         desc="Running training-universe ablation",
-        total=len(scenarios),
-        unit="scenario",
-    ):
-        train_frame = _employee_cycle_ablation_training_frame(
-            train_reference,
+        total=total_progress_steps,
+        unit="stage",
+    )
+    scoring_progress = SharedStepProgress(progress_steps)
+    rows: list[dict[str, float | str]] = []
+    try:
+        for (
+            label,
             training_universe,
-        )
-        scored = score_featured_employee_pay_cycles_custom_split(
-            featured,
-            train_frame=train_frame,
-            score_frame=split.test,
-            config=config,
-            training_universe=training_universe,
-            include_hard_rule_flag_feature=include_gate_feature,
-            progress=progress,
-        ).scored
-        for model_name, score_col in models:
-            metrics = employee_cycle_grouped_metrics(
-                scored.with_columns(
-                    pl.col(score_col).alias(ScoreCol.FINAL_ANOMALY_SCORE),
-                ),
-                budget,
+            include_gate_feature,
+            models,
+            purpose,
+        ) in scenarios:
+            train_frame = _employee_cycle_ablation_training_frame(
+                train_reference,
+                training_universe,
             )
-            rows.append(
-                {
-                    "training_universe": label,
-                    "scoring_universe": "residual_only",
-                    "model": model_name,
-                    "purpose": purpose,
-                    "holdout_period_start": float(
-                        split.test.select(pl.min(PayrollCol.PAY_PERIOD_INDEX)).item()
-                        or 0,
+            scored = score_featured_employee_pay_cycles_custom_split(
+                featured,
+                train_frame=train_frame,
+                score_frame=split.test,
+                config=config,
+                training_universe=training_universe,
+                include_hard_rule_flag_feature=include_gate_feature,
+                progress=scoring_progress,
+            ).scored
+            for model_name, score_col in models:
+                metrics = employee_cycle_grouped_metrics(
+                    scored.with_columns(
+                        pl.col(score_col).alias(ScoreCol.FINAL_ANOMALY_SCORE),
                     ),
-                    "holdout_period_end": float(
-                        split.test.select(pl.max(PayrollCol.PAY_PERIOD_INDEX)).item()
-                        or 0,
-                    ),
-                    "train_records": float(train_frame.height),
-                    "train_residual_records": float(
-                        train_frame.filter(
-                            pl.col(PayrollCol.RESIDUAL_RECORD) == 1,
-                        ).height,
-                    ),
-                    "train_hard_rule_share": float(
-                        train_frame.select(
-                            pl.mean(PayrollCol.CRITICAL_HARD_RULE_FLAG),
-                        ).item()
-                        or 0.0,
-                    ),
-                    MetricCol.K: budget,
-                    MetricCol.RESIDUAL_NDCG_AT_K: float(
-                        metrics[MetricCol.RESIDUAL_NDCG_AT_K],
-                    ),
-                    MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(
-                        metrics[MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K],
-                    ),
-                    MetricCol.DOLLARS_CAPTURED_AT_K: float(
-                        metrics[MetricCol.DOLLARS_CAPTURED_AT_K],
-                    ),
-                    MetricCol.REVIEWER_YIELD_AT_K: float(
-                        metrics[MetricCol.REVIEWER_YIELD_AT_K],
-                    ),
-                    MetricCol.INCREMENTAL_UTILITY_AT_K: float(
-                        metrics[MetricCol.INCREMENTAL_UTILITY_AT_K],
-                    ),
-                },
-            )
+                    budget,
+                )
+                rows.append(
+                    {
+                        "training_universe": label,
+                        "scoring_universe": "residual_only",
+                        "model": model_name,
+                        "purpose": purpose,
+                        "holdout_period_start": float(
+                            split.test.select(
+                                pl.min(PayrollCol.PAY_PERIOD_INDEX),
+                            ).item()
+                            or 0,
+                        ),
+                        "holdout_period_end": float(
+                            split.test.select(
+                                pl.max(PayrollCol.PAY_PERIOD_INDEX),
+                            ).item()
+                            or 0,
+                        ),
+                        "train_records": float(train_frame.height),
+                        "train_residual_records": float(
+                            train_frame.filter(
+                                pl.col(PayrollCol.RESIDUAL_RECORD) == 1,
+                            ).height,
+                        ),
+                        "train_hard_rule_share": float(
+                            train_frame.select(
+                                pl.mean(PayrollCol.CRITICAL_HARD_RULE_FLAG),
+                            ).item()
+                            or 0.0,
+                        ),
+                        MetricCol.K: budget,
+                        MetricCol.RESIDUAL_NDCG_AT_K: float(
+                            metrics[MetricCol.RESIDUAL_NDCG_AT_K],
+                        ),
+                        MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K: float(
+                            metrics[MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K],
+                        ),
+                        MetricCol.DOLLARS_CAPTURED_AT_K: float(
+                            metrics[MetricCol.DOLLARS_CAPTURED_AT_K],
+                        ),
+                        MetricCol.REVIEWER_YIELD_AT_K: float(
+                            metrics[MetricCol.REVIEWER_YIELD_AT_K],
+                        ),
+                        MetricCol.INCREMENTAL_UTILITY_AT_K: float(
+                            metrics[MetricCol.INCREMENTAL_UTILITY_AT_K],
+                        ),
+                    },
+                )
+        for _ in progress_steps:
+            pass
+    finally:
+        close_progress = getattr(progress_steps, "close", None)
+        if close_progress is not None:
+            close_progress()
     return pl.DataFrame(rows)
 
 
@@ -1268,73 +1299,91 @@ def employee_cycle_rolling_origin_evaluation(
     queue_sets: list[set[str]] = []
     thresholds = [0.35, 0.5, 0.65, 0.8]
     validation_periods = periods[3:-2]
-    for origin, validation_period in progress.iter(
-        enumerate(validation_periods, start=1),
+    total_progress_steps = (
+        len(validation_periods)
+        * ROLLING_ORIGIN_SCORING_CALLS_PER_ORIGIN
+        * EMPLOYEE_CYCLE_SCORING_STAGES
+    )
+    progress_steps = progress.iter(
+        range(total_progress_steps),
         desc="Running rolling-origin evaluation",
-        total=len(validation_periods),
-        unit="origin",
-    ):
-        test_period = periods[periods.index(validation_period) + 1]
-        train_periods = [period for period in periods if period < validation_period]
-        train_frame = featured.filter(
-            pl.col(PayrollCol.PAY_PERIOD_INDEX) < validation_period,
-        )
-        validation = score_featured_employee_pay_cycles_custom_split(
-            featured,
-            train_frame=train_frame,
-            score_frame=featured.filter(
-                pl.col(PayrollCol.PAY_PERIOD_INDEX) == validation_period,
-            ),
-            config=config,
-            progress=progress,
-        ).scored
-        test = score_featured_employee_pay_cycles_custom_split(
-            featured,
-            train_frame=train_frame,
-            score_frame=featured.filter(
-                pl.col(PayrollCol.PAY_PERIOD_INDEX) == test_period,
-            ),
-            config=config,
-            progress=progress,
-        ).scored
-        selected_threshold, validation_f1 = _select_threshold(validation, thresholds)
-        test_at_threshold = test.filter(
-            pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= selected_threshold,
-        )
-        grouped_metrics = employee_cycle_grouped_metrics(test, review_budgets[0])
-        reviewed_ids = set(
-            _employee_cycle_group_ranked(test, review_budgets[0])
-            .filter(pl.col("_employee_cycle_in_budget"))
-            .get_column(PayrollCol.EMPLOYEE_PAY_CYCLE_ID)
-            .to_list(),
-        )
-        queue_sets.append(reviewed_ids)
-        metric_rows.append(
-            {
-                "origin": origin,
-                "train_start_period": min(train_periods),
-                "train_end_period": max(train_periods),
-                "validation_period": validation_period,
-                "test_period": test_period,
-                "selected_threshold": selected_threshold,
-                "validation_f1": validation_f1,
-                "threshold_precision": _precision(test_at_threshold),
-                "threshold_recall": _recall(test, test_at_threshold),
-                **grouped_metrics,
-                "test_score_mean": float(
-                    test.select(pl.mean(ScoreCol.FINAL_ANOMALY_SCORE)).item() or 0.0,
+        total=total_progress_steps,
+        unit="stage",
+    )
+    scoring_progress = SharedStepProgress(progress_steps)
+    try:
+        for origin, validation_period in enumerate(validation_periods, start=1):
+            test_period = periods[periods.index(validation_period) + 1]
+            train_periods = [period for period in periods if period < validation_period]
+            train_frame = featured.filter(
+                pl.col(PayrollCol.PAY_PERIOD_INDEX) < validation_period,
+            )
+            validation = score_featured_employee_pay_cycles_custom_split(
+                featured,
+                train_frame=train_frame,
+                score_frame=featured.filter(
+                    pl.col(PayrollCol.PAY_PERIOD_INDEX) == validation_period,
                 ),
-            },
-        )
-        selected_rows.append(
-            {
-                "origin": origin,
-                "selected_on_period": validation_period,
-                "applied_to_period": test_period,
-                "selected_threshold": selected_threshold,
-                "validation_f1": validation_f1,
-            },
-        )
+                config=config,
+                progress=scoring_progress,
+            ).scored
+            test = score_featured_employee_pay_cycles_custom_split(
+                featured,
+                train_frame=train_frame,
+                score_frame=featured.filter(
+                    pl.col(PayrollCol.PAY_PERIOD_INDEX) == test_period,
+                ),
+                config=config,
+                progress=scoring_progress,
+            ).scored
+            selected_threshold, validation_f1 = _select_threshold(
+                validation,
+                thresholds,
+            )
+            test_at_threshold = test.filter(
+                pl.col(ScoreCol.FINAL_ANOMALY_SCORE) >= selected_threshold,
+            )
+            grouped_metrics = employee_cycle_grouped_metrics(test, review_budgets[0])
+            reviewed_ids = set(
+                _employee_cycle_group_ranked(test, review_budgets[0])
+                .filter(pl.col("_employee_cycle_in_budget"))
+                .get_column(PayrollCol.EMPLOYEE_PAY_CYCLE_ID)
+                .to_list(),
+            )
+            queue_sets.append(reviewed_ids)
+            metric_rows.append(
+                {
+                    "origin": origin,
+                    "train_start_period": min(train_periods),
+                    "train_end_period": max(train_periods),
+                    "validation_period": validation_period,
+                    "test_period": test_period,
+                    "selected_threshold": selected_threshold,
+                    "validation_f1": validation_f1,
+                    "threshold_precision": _precision(test_at_threshold),
+                    "threshold_recall": _recall(test, test_at_threshold),
+                    **grouped_metrics,
+                    "test_score_mean": float(
+                        test.select(pl.mean(ScoreCol.FINAL_ANOMALY_SCORE)).item()
+                        or 0.0,
+                    ),
+                },
+            )
+            selected_rows.append(
+                {
+                    "origin": origin,
+                    "selected_on_period": validation_period,
+                    "applied_to_period": test_period,
+                    "selected_threshold": selected_threshold,
+                    "validation_f1": validation_f1,
+                },
+            )
+        for _ in progress_steps:
+            pass
+    finally:
+        close_progress = getattr(progress_steps, "close", None)
+        if close_progress is not None:
+            close_progress()
 
     metrics = pl.DataFrame(metric_rows)
     settings = pl.DataFrame(selected_rows)

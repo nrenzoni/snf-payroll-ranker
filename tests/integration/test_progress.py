@@ -8,6 +8,7 @@ from payroll_anomaly_ranking.config import PayrollConfig
 from payroll_anomaly_ranking.data import generate_employee_pay_cycles
 from payroll_anomaly_ranking.evaluation import (
     employee_cycle_feature_ablation,
+    employee_cycle_training_universe_ablation,
     evaluate_employee_cycle_scores,
 )
 from payroll_anomaly_ranking.models import score_employee_pay_cycles
@@ -47,7 +48,7 @@ def test_progress_reporter_instruments_generation_scoring_and_evaluation() -> No
     config = PayrollConfig(
         facility_count=3,
         employee_count=40,
-        pay_periods=8,
+        pay_periods=12,
         employee_cycle_review_budget_percents=(0.05,),
         ltr_num_threads=1,
     )
@@ -65,11 +66,17 @@ def test_progress_reporter_instruments_generation_scoring_and_evaluation() -> No
         config,
         progress=progress,
     )
+    training_universe_ablation = employee_cycle_training_universe_ablation(
+        generated.payroll,
+        config,
+        progress=progress,
+    )
 
     assert generated.payroll.height > 0
     assert scored.height > 0
     assert evaluation.model_comparison.height > 0
     assert feature_ablation.height > 0
+    assert training_universe_ablation.height > 0
     assert {
         "Generating payroll data",
         "Building employee cycles",
@@ -78,7 +85,11 @@ def test_progress_reporter_instruments_generation_scoring_and_evaluation() -> No
         "Comparing employee-cycle models",
         "Running rolling-origin evaluation",
         "Running feature ablation",
+        "Running training-universe ablation",
     } <= progress.descriptions()
+    assert ("Running rolling-origin evaluation", 84, 84) in progress.calls
+    assert ("Running feature ablation", 30, 30) in progress.calls
+    assert ("Running training-universe ablation", 24, 24) in progress.calls
 
 
 def test_progress_reporter_instruments_scenario_benchmark_units() -> None:
@@ -100,4 +111,4 @@ def test_progress_reporter_instruments_scenario_benchmark_units() -> None:
     )
 
     assert benchmark.metric_units.height > 0
-    assert ("Running scenario benchmark", 1, 1) in progress.calls
+    assert ("Running scenario benchmark", 16, 16) in progress.calls
