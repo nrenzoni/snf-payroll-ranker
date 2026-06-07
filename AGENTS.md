@@ -9,7 +9,7 @@ Python 3.13 payroll anomaly ranking pipeline using Polars, NumPy, scikit-learn, 
 - Jupytext `.py` files are the notebook source of truth; do not edit `.ipynb` artifacts directly.
 - Run any Python-related project command with `uv run ...`.
 - Use `uv sync --extra notebooks` before executing notebooks or rendering Lets-Plot visuals.
-- After any notebook `.py` source change, default to the validation path because `NOTEBOOK_VALIDATE=1` is much faster than full notebook execution: `NOTEBOOK_VALIDATE=1 uv run jupytext --to ipynb --execute --run-path notebooks --output tmp/notebook-name.validate.ipynb notebook.py`. This uses reduced execution-check workloads where notebooks support validation mode, preserves notebook-local imports, and writes the executed notebook only under the repo-local `tmp/` directory without creating or overwriting paired `.ipynb` artifacts.
+- After any notebook `.py` source change, run formatting/hooks before notebook execution so hook rewrites do not invalidate an already-executed notebook. First run `uv run prek run --all-files`, inspect and keep any hook-applied changes, then run the validation path once on the final formatted notebook source: `NOTEBOOK_VALIDATE=1 uv run jupytext --to ipynb --execute --run-path notebooks --output tmp/notebook-name.validate.ipynb notebook.py`. This uses reduced execution-check workloads where notebooks support validation mode, preserves notebook-local imports, and writes the executed notebook only under the repo-local `tmp/` directory without creating or overwriting paired `.ipynb` artifacts.
 - Use full non-validation notebook execution only when there is an explicit need or the user explicitly requests it, such as a complete rerender, paired `.ipynb` refresh, analyst-visible output sync, or full-workload validation: `uv run jupytext --set-formats ipynb,py:percent --execute notebook.py`. This creates/updates the paired `.ipynb`, executes the full workload, reports failures, and lets you inspect outputs on success.
 - When an AI agent needs to review a notebook's outputs, first ensure the paired `.ipynb` artifact is up to date (run the full Jupytext command above, or use an existing `.ipynb` if the user explicitly requests it). Then convert it to Markdown for readable output, writing the result under `tmp/`:  
   `uv run jupyter nbconvert --config jupyter_nbconvert_config.py --to markdown --output-dir tmp notebooks/<NOTEBOOK_NAME>.ipynb`
@@ -43,6 +43,7 @@ Python 3.13 payroll anomaly ranking pipeline using Polars, NumPy, scikit-learn, 
 ## Verify
 
 - After code or notebook changes, run `uv run prek run --all-files`.
+- For notebook `.py` changes, run `prek` before notebook execution/validation; if `prek` rewrites the notebook source, execute the notebook validation path after those rewrites, not before.
 - After code changes, run the quick smoke suite with `uv run pytest tests/smoke` unless the change is docs-only.
 - Also run targeted tests for the code area you changed when available:
   - Data generation or scenarios: `uv run pytest tests/integration/test_regression.py -k "generation or scenario or drift or anomaly"`
