@@ -429,10 +429,12 @@ funnel.with_columns(
 )
 
 # %% [markdown]
-# ## 4. Simulation Sanity Checks for the Residual Dataset
+# ## 4. Residual Dataset Sanity Check
 #
 # Before comparing models, the notebook checks whether the residual-ranking task
-# changes meaningfully across the DGP suite.
+# changes meaningfully across the DGP suite. The residual queue should not be
+# random cleanup noise; it should vary by issue density, severe tail, dollar
+# exposure, dominant issue family, and historical label bias.
 #
 # `Label-bias strength` measures the gap in observed-correction rates between
 # higher-signal residual positives and lower-signal residual positives. Larger
@@ -459,125 +461,12 @@ scenario_benchmark.scenario_summary.select(
 )
 
 # %% [markdown]
-# The detailed plots below stay focused on the baseline scenario as compact
-# examples. The main experimental evidence comes from cross-scenario aggregation,
-# not from any single residual dataset snapshot.
-
-
-# %%
-def build_residual_issue_rate_plot(facility_issue_rate: pl.DataFrame) -> object:
-    plot_data = facility_issue_rate.with_columns(
-        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
-        pl.col("residual_issue_rate").round(4),
-    ).sort("residual_issue_rate")
-    return (
-        ggplot(
-            plot_data,
-            aes(x="facility_id", y="residual_issue_rate"),
-        )
-        + geom_bar(stat="identity", fill="#2563eb")
-        + coord_flip()
-        + theme_minimal()
-        + labs(
-            x="Facility",
-            y="Residual issue rate",
-        )
-        + ggtitle("Residual Issue Rate by Facility")
-    )
-
-
-def build_severe_residual_heatmap(severe_counts: pl.DataFrame) -> object:
-    plot_data = severe_counts.with_columns(
-        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
-        pl.col(PayrollCol.PAY_PERIOD_INDEX).alias("pay_period"),
-    )
-    return (
-        ggplot(
-            plot_data,
-            aes(
-                x="pay_period",
-                y="facility_id",
-                fill="severe_residual_issues",
-            ),
-        )
-        + geom_tile()
-        + theme_minimal()
-        + labs(
-            x="Pay period",
-            y="Facility",
-            fill="Severe issues",
-        )
-        + scale_fill_gradient(low="#f8fafc", high="#b91c1c")
-        + ggtitle("Severe Residual Issues by Facility-Cycle")
-    )
-
-
-def build_issue_type_mix_plot(issue_type_mix: pl.DataFrame) -> object:
-    plot_data = issue_type_mix.with_columns(
-        pl.col(PayrollCol.ANOMALY_CATEGORY).cast(pl.String).alias("anomaly_category"),
-    ).sort(["population_issue_share", PayrollCol.ANOMALY_CATEGORY])
-    return (
-        ggplot(
-            plot_data,
-            aes(
-                x="anomaly_category",
-                y="population_issue_share",
-                fill="population",
-            ),
-        )
-        + geom_bar(stat="identity", position="dodge")
-        + coord_flip()
-        + theme_minimal()
-        + labs(
-            x="Anomaly family",
-            y="Share of true issue records",
-            fill="Population",
-        )
-        + ggtitle("Issue-Family Mix Among True Issues")
-    )
-
-
-# %% [markdown]
-# ### baseline example: residual issue rate by facility
-
-# %%
-build_residual_issue_rate_plot(residual_diagnostics["facility_residual_issue_rate"])
-
-# %% [markdown]
-# ### baseline example: severe residual issues by facility-cycle
-
-# %%
-build_severe_residual_heatmap(
-    residual_diagnostics["facility_cycle_residual_severe_counts"],
-)
-
-# %% [markdown]
-# ### baseline example: issue-type mix
-
-# %% [markdown]
-# This chart excludes normal records and compares each population's share of
-# true issue records by anomaly family. The companion table keeps raw counts,
-# but the visual uses shares so the large normal residual universe does not hide
-# the issue-family pattern.
-
-# %%
-build_issue_type_mix_plot(residual_diagnostics["issue_type_mix"])
-
-# %%
-residual_diagnostics["issue_type_mix"]
-
-# %% [markdown]
-# ### top residual dollar records
-
-# %% [markdown]
-# Taken together, the scenario summary table and baseline illustrations show
+# Taken together, the scenario summary table and appendix diagnostics show
 # that the residual queue is not random cleanup noise. Residual issue density,
 # severe tails, dominant issue families, and observed-label bias all move across
 # DGP scenarios, which is why the main benchmark aggregates over scenario and
 # seed units instead of picking a winner from one synthetic world.
-
-# %%
-residual_diagnostics["residual_dollar_distribution"].head(10)
+# Detailed baseline residual diagnostics are included in the technical appendix.
 
 # %% [markdown]
 # ## 5. Label Engineering for Residual Ranking
@@ -1573,7 +1462,122 @@ final_recommendation_summary
 # ## 11. Technical Appendix
 
 # %% [markdown]
-# ### A. data dictionary
+# ### A. residual dataset diagnostics
+#
+# These baseline diagnostics support the compact sanity check in section 4. They
+# are useful for auditing the synthetic residual queue, but they are kept out of
+# the main narrative so the model-comparison story stays concise.
+
+
+# %%
+def build_residual_issue_rate_plot(facility_issue_rate: pl.DataFrame) -> object:
+    plot_data = facility_issue_rate.with_columns(
+        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
+        pl.col("residual_issue_rate").round(4),
+    ).sort("residual_issue_rate")
+    return (
+        ggplot(
+            plot_data,
+            aes(x="facility_id", y="residual_issue_rate"),
+        )
+        + geom_bar(stat="identity", fill="#2563eb")
+        + coord_flip()
+        + theme_minimal()
+        + labs(
+            x="Facility",
+            y="Residual issue rate",
+        )
+        + ggtitle("Residual Issue Rate by Facility")
+    )
+
+
+def build_severe_residual_heatmap(severe_counts: pl.DataFrame) -> object:
+    plot_data = severe_counts.with_columns(
+        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
+        pl.col(PayrollCol.PAY_PERIOD_INDEX).alias("pay_period"),
+    )
+    return (
+        ggplot(
+            plot_data,
+            aes(
+                x="pay_period",
+                y="facility_id",
+                fill="severe_residual_issues",
+            ),
+        )
+        + geom_tile()
+        + theme_minimal()
+        + labs(
+            x="Pay period",
+            y="Facility",
+            fill="Severe issues",
+        )
+        + scale_fill_gradient(low="#f8fafc", high="#b91c1c")
+        + ggtitle("Severe Residual Issues by Facility-Cycle")
+    )
+
+
+def build_issue_type_mix_plot(issue_type_mix: pl.DataFrame) -> object:
+    plot_data = issue_type_mix.with_columns(
+        pl.col(PayrollCol.ANOMALY_CATEGORY).cast(pl.String).alias("anomaly_category"),
+    ).sort(["population_issue_share", PayrollCol.ANOMALY_CATEGORY])
+    return (
+        ggplot(
+            plot_data,
+            aes(
+                x="anomaly_category",
+                y="population_issue_share",
+                fill="population",
+            ),
+        )
+        + geom_bar(stat="identity", position="dodge")
+        + coord_flip()
+        + theme_minimal()
+        + labs(
+            x="Anomaly family",
+            y="Share of true issue records",
+            fill="Population",
+        )
+        + ggtitle("Issue-Family Mix Among True Issues")
+    )
+
+
+# %% [markdown]
+# #### residual issue rate by facility
+
+# %%
+build_residual_issue_rate_plot(residual_diagnostics["facility_residual_issue_rate"])
+
+# %% [markdown]
+# #### severe residual issues by facility-cycle
+
+# %%
+build_severe_residual_heatmap(
+    residual_diagnostics["facility_cycle_residual_severe_counts"],
+)
+
+# %% [markdown]
+# #### issue-type mix
+#
+# This chart excludes normal records and compares each population's share of
+# true issue records by anomaly family. The companion table keeps raw counts,
+# but the visual uses shares so the large normal residual universe does not hide
+# the issue-family pattern.
+
+# %%
+build_issue_type_mix_plot(residual_diagnostics["issue_type_mix"])
+
+# %%
+residual_diagnostics["issue_type_mix"]
+
+# %% [markdown]
+# #### top residual dollar records
+
+# %%
+residual_diagnostics["residual_dollar_distribution"].head(10)
+
+# %% [markdown]
+# ### B. data dictionary
 
 
 # %%
@@ -1772,7 +1776,7 @@ appendix_data_dictionary = build_appendix_data_dictionary()
 appendix_data_dictionary
 
 # %% [markdown]
-# ### B. hard rule definitions
+# ### C. hard rule definitions
 
 
 # %%
@@ -1835,7 +1839,7 @@ appendix_hard_rule_definitions = build_appendix_hard_rule_definitions()
 appendix_hard_rule_definitions
 
 # %% [markdown]
-# ### C. metric definitions
+# ### D. metric definitions
 
 
 # %%
@@ -1914,7 +1918,7 @@ appendix_metric_definitions = build_appendix_metric_definitions()
 appendix_metric_definitions
 
 # %% [markdown]
-# ### D. ranking group construction
+# ### E. ranking group construction
 
 
 # %%
@@ -1957,7 +1961,7 @@ appendix_group_construction = build_appendix_group_construction(review_budget_pe
 appendix_group_construction
 
 # %% [markdown]
-# ### E. handling zero-positive residual groups
+# ### F. handling zero-positive residual groups
 
 
 # %%
@@ -1997,7 +2001,7 @@ appendix_zero_positive_policy = build_appendix_zero_positive_policy()
 appendix_zero_positive_policy
 
 # %% [markdown]
-# ### F. model settings and documented tuning space
+# ### G. model settings and documented tuning space
 
 
 # %%
@@ -2048,7 +2052,7 @@ appendix_model_settings = build_appendix_model_settings()
 appendix_model_settings
 
 # %% [markdown]
-# ### G. Appendix: Optional production blend
+# ### H. optional production blend
 #
 # `final_active_ranking` is an optional production-style blend, not a separate
 # modeling family in the primary comparison. It combines the supervised residual
@@ -2083,7 +2087,7 @@ appendix_model_settings.filter(pl.col("model") == "final_active_ranking")
 appendix_optional_production_blend_metrics
 
 # %% [markdown]
-# ### H. score-bucket calibration diagnostics
+# ### I. score-bucket calibration diagnostics
 
 
 # %%
@@ -2161,7 +2165,7 @@ appendix_score_bucket_calibration
 )
 
 # %% [markdown]
-# ### I. stress-test configurations
+# ### J. stress-test configurations
 
 
 # %%
@@ -2242,7 +2246,7 @@ appendix_stress_test_config = build_appendix_stress_test_config(
 appendix_stress_test_config
 
 # %% [markdown]
-# ### J. additional ablation tables
+# ### K. additional ablation tables
 
 # %%
 if feature_ablation is not None:
