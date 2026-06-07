@@ -96,10 +96,15 @@ def run_employee_cycle_scenario_benchmark(
         unit="unit",
     ):
         seed_config = replace(config, seed=seed)
-        generated = generate_employee_pay_cycles(seed_config, scenario=scenario)
+        generated = generate_employee_pay_cycles(
+            seed_config,
+            scenario=scenario,
+            progress=progress,
+        )
         scoring_results = score_employee_pay_cycles_holdout(
             generated.payroll,
             seed_config,
+            progress=progress,
         )
         scored = scoring_results.scored
         split = temporal_split(generated.payroll)

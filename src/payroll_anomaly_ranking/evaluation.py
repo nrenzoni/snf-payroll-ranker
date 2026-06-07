@@ -467,6 +467,7 @@ def employee_cycle_feature_ablation(
             featured,
             config,
             feature_columns=feature_columns,
+            progress=progress,
         ).scored
         metrics = employee_cycle_grouped_metrics(scored, budget)
         rows.append(
@@ -565,6 +566,7 @@ def employee_cycle_training_universe_ablation(
             config=config,
             training_universe=training_universe,
             include_hard_rule_flag_feature=include_gate_feature,
+            progress=progress,
         ).scored
         for model_name, score_col in models:
             metrics = employee_cycle_grouped_metrics(
@@ -1275,6 +1277,7 @@ def employee_cycle_rolling_origin_evaluation(
                 pl.col(PayrollCol.PAY_PERIOD_INDEX) == validation_period,
             ),
             config=config,
+            progress=progress,
         ).scored
         test = score_featured_employee_pay_cycles_custom_split(
             featured,
@@ -1283,6 +1286,7 @@ def employee_cycle_rolling_origin_evaluation(
                 pl.col(PayrollCol.PAY_PERIOD_INDEX) == test_period,
             ),
             config=config,
+            progress=progress,
         ).scored
         selected_threshold, validation_f1 = _select_threshold(validation, thresholds)
         test_at_threshold = test.filter(

@@ -19,10 +19,18 @@ class TqdmProgress:
         total: int | None = None,
         unit: str = "it",
     ) -> Iterator[T]:
-        yield from tqdm(
+        bar = tqdm(
             iterable,
             desc=desc,
             total=total,
             unit=unit,
             disable=self.disable,
+            mininterval=0.25,
+            miniters=1,
         )
+        if not self.disable:
+            bar.refresh()
+        try:
+            yield from bar
+        finally:
+            bar.close()
