@@ -1,14 +1,4 @@
-## Purpose
-Define the notebook-facing scenario-based benchmark contract for employee-pay-cycle residual ranking.
-
-## Requirements
-### Requirement: Scenario-based notebook benchmark study unit
-The system SHALL support a notebook-facing main benchmark whose primary experimental unit is `DGP scenario x seed x model x review budget x metric` for employee-pay-cycle residual ranking evaluation.
-
-#### Scenario: Benchmark units are assembled
-- **WHEN** the active notebook or a supporting benchmark helper runs the main study
-- **THEN** it evaluates employee-pay-cycle model performance across DGP scenarios, seeds, models, and configured review-budget percentages
-- **AND** the resulting outputs can be aggregated by scenario, seed, model, review budget, and metric without redefining the underlying grouped review-budget metrics
+## MODIFIED Requirements
 
 ### Requirement: Notebook-facing benchmark summaries
 The system SHALL produce notebook-ready benchmark summaries that support both reader-facing visual interpretation and appendix-level audit review for the scenario-based employee-pay-cycle benchmark.

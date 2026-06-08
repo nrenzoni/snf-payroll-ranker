@@ -258,15 +258,8 @@ benchmark_recommendation_budget = (
 #
 # The scenario suite varies the synthetic data-generating process. Model
 # objective and review capacity are evaluated later as operating choices, not as
-# scenario definitions.
-
-# %%
-scenario_benchmark.scenario_catalog.select(
-    "scenario",
-    "display_name",
-    "what_changes",
-    "description",
-)
+# scenario definitions. The full scenario catalog is included in the technical
+# appendix so the main narrative can stay focused on the review decision.
 
 # %% [markdown]
 # ## 3. Hard Rule Gate: Defining the Residual Universe
@@ -315,18 +308,20 @@ funnel.select(
 )
 
 # %% [markdown]
-# ## 4. Simulation Sanity Checks for the Residual Dataset
+# ## 4. Residual Benchmark Stress Design
 #
-# Before comparing models, the notebook checks whether the residual-ranking task
-# changes meaningfully across the DGP suite. The residual queue should not be
-# random cleanup noise; it should vary by issue density, severe tail, dollar
-# exposure, dominant issue family, and historical label bias.
+# Before comparing models, the notebook checks one methodological point: the DGP
+# suite should stress different residual-review regimes rather than replaying one
+# synthetic world. The scenarios vary residual issue density, severe-tail rate,
+# dollar exposure, dominant issue family, and historical label bias.
 #
 # `Label-bias strength` measures the gap in observed-correction rates between
 # higher-signal residual positives and lower-signal residual positives. Larger
 # values mean historical review behavior is more selectively concentrated on the
-# obvious end of the residual queue.
+# obvious end of the residual queue. Detailed cross-scenario rows are in the
+# appendix; the main narrative only needs the landscape view below.
 
+# %%
 scenario_summary_compact = scenario_benchmark.scenario_summary.select(
     "display_name",
     "residual_issue_rate",
@@ -380,19 +375,10 @@ def build_scenario_landscape_plot(scenario_summary: pl.DataFrame) -> object:
 build_scenario_landscape_plot(scenario_benchmark.scenario_summary)
 
 # %% [markdown]
-# The compact table below is retained as audit support for the scenario-level
-# sanity check; the plot above is the primary reader-facing summary.
-
-# %%
-scenario_summary_compact
-
-# %% [markdown]
-# Taken together, the scenario summary table and appendix diagnostics show
-# that the residual queue is not random cleanup noise. Residual issue density,
-# severe tails, dominant issue families, and observed-label bias all move across
-# DGP scenarios, which is why the main benchmark aggregates over scenario and
-# seed units instead of picking a winner from one synthetic world.
-# Detailed baseline residual diagnostics are included in the technical appendix.
+# The scenario landscape shows why the main benchmark aggregates over scenario
+# and seed units instead of picking a winner from one synthetic world. Detailed
+# scenario summaries and baseline residual diagnostics are included in the
+# technical appendix.
 
 # %% [markdown]
 # ## 5. Label Engineering for Residual Ranking
@@ -778,15 +764,6 @@ def build_winner_frequency_plot(winner_frequency: pl.DataFrame) -> object:
 
 build_winner_frequency_plot(aggregate_winner_frequency)
 
-# %%
-aggregate_winner_frequency.select(
-    "objective",
-    "review_budget_label",
-    "model",
-    "win_count",
-    "win_frequency",
-)
-
 # %% [markdown]
 # ### median metric table with intervals
 
@@ -831,17 +808,6 @@ def build_metric_interval_plot(metric_summary: pl.DataFrame) -> object:
 
 build_metric_interval_plot(median_metric_summary)
 
-# %%
-median_metric_summary.select(
-    "model",
-    "review_budget_label",
-    "metric",
-    pl.col("median").round(4),
-    pl.col("lower_interval").round(4),
-    pl.col("upper_interval").round(4),
-    "study_units",
-)
-
 # %% [markdown]
 # ### winner map by objective and review budget
 
@@ -873,7 +839,8 @@ build_winner_map_plot(winner_map)
 # incremental utility matter most, while learning-to-rank is a stronger
 # challenger when queue ordering at tight review budgets is the main objective.
 
-# Full winner-map rows and score examples are included in the appendix.
+# Full scenario catalogs, benchmark tables, winner-map rows, and score examples
+# are included in the appendix.
 
 
 # %%
@@ -1217,9 +1184,9 @@ final_recommendation_card
 # %% [markdown]
 # ### A. residual dataset diagnostics
 #
-# These baseline diagnostics support the compact sanity check in section 4. They
-# are useful for auditing the synthetic residual queue, but they are kept out of
-# the main narrative so the model-comparison story stays concise.
+# These baseline diagnostics support the compact stress-design view in section
+# 4. They are useful for auditing the synthetic residual queue, but they are kept
+# out of the main narrative so the model-comparison story stays concise.
 
 # %% [markdown]
 # #### dataset snapshot
@@ -2135,6 +2102,16 @@ appendix_score_bucket_calibration
 
 # %% [markdown]
 # ### J. stress-test configurations
+#
+# These tables support the compact stress-design and benchmark visuals in the
+# main narrative. They are kept here so the main report can stay decision-first
+# while the scenario design remains auditable.
+
+# %% [markdown]
+# #### cross-scenario residual sanity summary
+
+# %%
+scenario_summary_compact
 
 # %% [markdown]
 # #### DGP scenario catalog
@@ -2317,6 +2294,32 @@ if label_ablation is not None:
 
 # %% [markdown]
 # ### L. model diagnostics and examples
+
+# %% [markdown]
+# #### aggregate winner-frequency rows
+
+# %%
+aggregate_winner_frequency.select(
+    "objective",
+    "review_budget_label",
+    "model",
+    "win_count",
+    "win_frequency",
+)
+
+# %% [markdown]
+# #### median metric rows with intervals
+
+# %%
+median_metric_summary.select(
+    "model",
+    "review_budget_label",
+    "metric",
+    pl.col("median").round(4),
+    pl.col("lower_interval").round(4),
+    pl.col("upper_interval").round(4),
+    "study_units",
+)
 
 # %% [markdown]
 # #### full winner map rows
