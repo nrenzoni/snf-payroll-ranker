@@ -838,7 +838,7 @@ build_winner_map_plot(winner_map)
 # winner. Expected value is the strongest default when dollar recovery and
 # incremental utility matter most, while learning-to-rank is a stronger
 # challenger when queue ordering at tight review budgets is the main objective.
-
+#
 # Full scenario catalogs, benchmark tables, winner-map rows, and score examples
 # are included in the appendix.
 
@@ -904,7 +904,7 @@ def build_similarity_heatmap(
 # expected-value better balances issue probability and dollar impact in the
 # holdout benchmark. For payroll loss prevention, direct business-value scoring
 # can matter as much as ranking-specific objectives.
-
+#
 # Model similarity, temporal stability, and severe-tail diagnostics are included
 # in the appendix for audit and robustness review.
 
@@ -2237,32 +2237,37 @@ if feature_lift_endpoint is not None:
 
 # %%
 if feature_lift_endpoint is not None:
-    gggrid(
-        [
-            (
-                ggplot(
-                    feature_lift_endpoint,
-                    aes(x="model", y="residual_ndcg_lift_vs_raw_payroll"),
-                )
-                + geom_bar(stat="identity", fill="#0f766e")
-                + theme_minimal()
-                + rotated_x_labels()
-                + labs(x="Model", y="NDCG lift vs raw payroll")
-                + ggtitle("Feature Ablation Lift by Model")
-            ),
-            (
-                ggplot(
-                    feature_lift_endpoint,
-                    aes(x="model", y="incremental_utility_improvement_vs_raw_payroll"),
-                )
-                + geom_bar(stat="identity", fill="#1d4ed8")
-                + theme_minimal()
-                + rotated_x_labels()
-                + labs(x="Model", y="Utility improvement vs raw payroll")
-                + ggtitle("Feature Ablation Utility Improvement by Model")
-            ),
-        ],
-        ncol=1,
+    display(
+        gggrid(
+            [
+                (
+                    ggplot(
+                        feature_lift_endpoint,
+                        aes(x="model", y="residual_ndcg_lift_vs_raw_payroll"),
+                    )
+                    + geom_bar(stat="identity", fill="#0f766e")
+                    + theme_minimal()
+                    + rotated_x_labels()
+                    + labs(x="Model", y="NDCG lift vs raw payroll")
+                    + ggtitle("Feature Ablation Lift by Model")
+                ),
+                (
+                    ggplot(
+                        feature_lift_endpoint,
+                        aes(
+                            x="model",
+                            y="incremental_utility_improvement_vs_raw_payroll",
+                        ),
+                    )
+                    + geom_bar(stat="identity", fill="#1d4ed8")
+                    + theme_minimal()
+                    + rotated_x_labels()
+                    + labs(x="Model", y="Utility improvement vs raw payroll")
+                    + ggtitle("Feature Ablation Utility Improvement by Model")
+                ),
+            ],
+            ncol=1,
+        ),
     )
 
 # %% [markdown]
