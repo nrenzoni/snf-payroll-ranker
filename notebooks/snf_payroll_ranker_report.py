@@ -42,6 +42,7 @@ from common.plots import (
     aes,
     coord_flip,
     geom_bar,
+    geom_errorbar,
     geom_line,
     geom_point,
     geom_tile,
@@ -99,6 +100,10 @@ NOTEBOOK_LTR_NUM_THREADS = 1 if validation_mode else 8
 # %%
 def format_review_budget_pct(budget: float) -> str:
     return f"{budget:.0%}" if budget <= 1 else str(int(budget))
+
+
+def format_model_name(model_name: str) -> str:
+    return model_name.replace("_", " ")
 
 
 # %% [markdown]
@@ -249,6 +254,21 @@ benchmark_recommendation_budget = (
 # Dataset snapshot and schema examples are included in the technical appendix.
 
 # %% [markdown]
+# **Scenario suite**
+#
+# The scenario suite varies the synthetic data-generating process. Model
+# objective and review capacity are evaluated later as operating choices, not as
+# scenario definitions.
+
+# %%
+scenario_benchmark.scenario_catalog.select(
+    "scenario",
+    "display_name",
+    "what_changes",
+    "description",
+)
+
+# %% [markdown]
 # ## 3. Hard Rule Gate: Defining the Residual Universe
 #
 # Hard rules are an upstream gate, not a competing model. They remove critical
@@ -265,14 +285,37 @@ benchmark_recommendation_budget = (
 # %% [markdown]
 # **Observed funnel summary**
 
+
 # %%
-funnel.with_columns(
+def build_hard_rule_funnel_plot(funnel_frame: pl.DataFrame) -> object:
+    plot_data = funnel_frame.with_columns(
+        pl.col("stage").cast(pl.String),
+        pl.col("records").cast(pl.Float64),
+    )
+    return (
+        ggplot(plot_data, aes(x="stage", y="records", fill="stage"))
+        + geom_bar(stat="identity")
+        + coord_flip()
+        + theme_minimal()
+        + labs(x="Gate stage", y="Employee-pay-cycle records", fill="Stage")
+        + ggtitle("Hard-Rule Gate Narrows the ML Review Universe")
+    )
+
+
+build_hard_rule_funnel_plot(funnel)
+
+# %%
+funnel.select(
+    "stage",
+    "records",
     pl.col("pct_of_total").round(4),
+    pl.col("true_issues"),
+    pl.col("severe_issues"),
     pl.col("dollar_impact").round(2),
 )
 
 # %% [markdown]
-# ## 4. Residual Dataset Sanity Check
+# ## 4. Simulation Sanity Checks for the Residual Dataset
 #
 # Before comparing models, the notebook checks whether the residual-ranking task
 # changes meaningfully across the DGP suite. The residual queue should not be
@@ -284,8 +327,7 @@ funnel.with_columns(
 # values mean historical review behavior is more selectively concentrated on the
 # obvious end of the residual queue.
 
-# %%
-scenario_benchmark.scenario_summary.select(
+scenario_summary_compact = scenario_benchmark.scenario_summary.select(
     "display_name",
     "residual_issue_rate",
     "severe_issue_rate",
@@ -302,6 +344,47 @@ scenario_benchmark.scenario_summary.select(
         "label_bias_strength": "Label-bias strength",
     },
 )
+
+
+# %%
+def build_scenario_landscape_plot(scenario_summary: pl.DataFrame) -> object:
+    plot_data = scenario_summary.with_columns(
+        pl.col("display_name").cast(pl.String).alias("scenario"),
+        pl.col("dominant_issue_family").cast(pl.String),
+        pl.col("residual_issue_rate").round(4),
+        pl.col("severe_issue_rate").round(4),
+        pl.col("residual_dollars").round(2),
+    )
+    return (
+        ggplot(
+            plot_data,
+            aes(
+                x="residual_issue_rate",
+                y="severe_issue_rate",
+                size="residual_dollars",
+                color="dominant_issue_family",
+            ),
+        )
+        + geom_point(alpha=0.75)
+        + theme_minimal()
+        + labs(
+            x="Residual issue rate",
+            y="Severe residual issue rate",
+            size="Residual dollars",
+            color="Dominant issue family",
+        )
+        + ggtitle("Scenario Landscape: Density, Severity, Dollars, and Mix")
+    )
+
+
+build_scenario_landscape_plot(scenario_benchmark.scenario_summary)
+
+# %% [markdown]
+# The compact table below is retained as audit support for the scenario-level
+# sanity check; the plot above is the primary reader-facing summary.
+
+# %%
+scenario_summary_compact
 
 # %% [markdown]
 # Taken together, the scenario summary table and appendix diagnostics show
@@ -398,6 +481,37 @@ def build_residual_family_mix(residual_records: pl.DataFrame) -> pl.DataFrame:
 
 residual_label_diagnostics = build_residual_label_diagnostics(residual_payroll)
 residual_family_mix = build_residual_family_mix(residual_payroll)
+
+
+# %%
+def build_residual_family_pareto_plot(family_mix: pl.DataFrame) -> object:
+    plot_data = family_mix.with_columns(
+        pl.col(PayrollCol.ANOMALY_CATEGORY).cast(pl.String).alias("anomaly_family"),
+        pl.col("share_of_residual_issues").round(4),
+    ).sort("share_of_residual_issues")
+    return (
+        ggplot(
+            plot_data,
+            aes(
+                x="anomaly_family",
+                y="share_of_residual_issues",
+                fill="severe_share",
+            ),
+        )
+        + geom_bar(stat="identity")
+        + coord_flip()
+        + theme_minimal()
+        + scale_fill_gradient(low="#dbeafe", high="#991b1b")
+        + labs(
+            x="Residual anomaly family",
+            y="Share of residual issues",
+            fill="Severe share",
+        )
+        + ggtitle("Residual Issue Mix Is Concentrated but Not One-Dimensional")
+    )
+
+
+build_residual_family_pareto_plot(residual_family_mix)
 
 # %% [markdown]
 # The residual label mix is dominated by material but non-severe issues: grade
@@ -638,30 +752,120 @@ winner_map = scenario_benchmark.winner_map
 # %% [markdown]
 # ### aggregate winner frequency
 
+
 # %%
-aggregate_winner_frequency
+def build_winner_frequency_plot(winner_frequency: pl.DataFrame) -> object:
+    plot_data = winner_frequency.with_columns(
+        pl.col("model").map_elements(format_model_name, return_dtype=pl.String),
+        pl.col("objective").str.replace_all("_", " "),
+    )
+    return (
+        ggplot(
+            plot_data,
+            aes(x="objective", y="win_frequency", fill="model"),
+        )
+        + geom_bar(stat="identity", position="dodge")
+        + coord_flip()
+        + theme_minimal()
+        + labs(
+            x="Operating objective",
+            y="Share of scenario-seed units won",
+            fill="Model",
+        )
+        + ggtitle("Winner Frequency Across Scenario-Seed Holdout Units")
+    )
+
+
+build_winner_frequency_plot(aggregate_winner_frequency)
+
+# %%
+aggregate_winner_frequency.select(
+    "objective",
+    "review_budget_label",
+    "model",
+    "win_count",
+    "win_frequency",
+)
 
 # %% [markdown]
 # ### median metric table with intervals
 
+
 # %%
-median_metric_summary
+def build_metric_interval_plot(metric_summary: pl.DataFrame) -> object:
+    metric_titles = {
+        str(MetricCol.RESIDUAL_NDCG_AT_K): "Queue Quality: Residual NDCG",
+        str(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K): "Severity: Severe Recall",
+        str(MetricCol.DOLLARS_CAPTURED_AT_K): "Dollar Recovery",
+        str(MetricCol.INCREMENTAL_UTILITY_AT_K): "Incremental Utility",
+    }
+    plots = []
+    for metric, title in metric_titles.items():
+        plot_data = metric_summary.filter(pl.col("metric") == metric).with_columns(
+            pl.col("model").map_elements(format_model_name, return_dtype=pl.String),
+        )
+        plots.append(
+            (
+                ggplot(
+                    plot_data,
+                    aes(x="review_budget_label", y="median", color="model"),
+                )
+                + geom_line()
+                + geom_point()
+                + geom_errorbar(
+                    aes(ymin="lower_interval", ymax="upper_interval"),
+                    width=0.15,
+                )
+                + theme_minimal()
+                + rotated_x_labels()
+                + labs(
+                    x="Review budget",
+                    y="Median with 10th-90th interval",
+                    color="Model",
+                )
+                + ggtitle(title)
+            ),
+        )
+    return gggrid(plots, ncol=1)
+
+
+build_metric_interval_plot(median_metric_summary)
+
+# %%
+median_metric_summary.select(
+    "model",
+    "review_budget_label",
+    "metric",
+    pl.col("median").round(4),
+    pl.col("lower_interval").round(4),
+    pl.col("upper_interval").round(4),
+    "study_units",
+)
 
 # %% [markdown]
 # ### winner map by objective and review budget
 
+
 # %%
-(
-    ggplot(
-        winner_map,
-        aes(x="review_budget_label", y="objective", fill="selection_value"),
+def build_winner_map_plot(winner_map_frame: pl.DataFrame) -> object:
+    plot_data = winner_map_frame.with_columns(
+        pl.col("winner").map_elements(format_model_name, return_dtype=pl.String),
+        pl.col("objective").str.replace_all("_", " "),
     )
-    + geom_tile()
-    + theme_minimal()
-    + rotated_x_labels()
-    + labs(x="Review budget", y="Objective", fill="Winner value")
-    + ggtitle("Winner Map by Objective and Review Budget")
-)
+    return (
+        ggplot(
+            plot_data,
+            aes(x="review_budget_label", y="objective", fill="winner"),
+        )
+        + geom_tile()
+        + theme_minimal()
+        + rotated_x_labels()
+        + labs(x="Review budget", y="Objective", fill="Winning model")
+        + ggtitle("Winner Map by Objective and Review Budget")
+    )
+
+
+build_winner_map_plot(winner_map)
 
 # %% [markdown]
 # The aggregated benchmark shows a split leaderboard rather than one universal
@@ -916,27 +1120,53 @@ final_recommendation_summary = pl.DataFrame(
     },
 )
 
+final_recommendation_card = pl.DataFrame(
+    {
+        "decision": [
+            "Default residual ranker",
+            "Primary challenger",
+            "Diagnostic companion",
+            "Required monitoring",
+        ],
+        "recommendation": [
+            winner_map.filter(
+                (pl.col("objective") == "incremental_utility")
+                & (pl.col(MetricCol.K) == benchmark_recommendation_budget),
+            )["winner"][0],
+            winner_map.filter(
+                (pl.col("objective") == "severity_ordering")
+                & (pl.col(MetricCol.K) == benchmark_recommendation_budget),
+            )["winner"][0],
+            comparison_for_summary.top_k(1, by=MetricCol.PR_AUC)["model"][0],
+            "facility x pay period x issue family",
+        ],
+        "reader_takeaway": [
+            "Use for the production queue when the operating goal is net review value.",
+            "Track when the operating goal is tight-budget severe-case ordering.",
+            "Keep issue probability visible for reviewer context and calibration checks.",
+            "Watch drift, severe misses, and issue-family blind spots after deployment.",
+        ],
+    },
+)
+
 # %% [markdown]
 # ### reviewer-facing queue examples
+#
+# The main narrative keeps only a compact reviewer view. Wider queue exports,
+# score columns, and miss examples remain in the appendix for audit review.
 
 # %%
 review_queue_examples.select(
     ReviewCol.RANK,
-    PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
-    PayrollCol.EMPLOYEE_ID,
     PayrollCol.FACILITY_ID,
     PayrollCol.PAY_PERIOD_INDEX,
     ReviewCol.APPROVAL_RISK_CATEGORY,
     ReviewCol.RECOMMENDED_ACTION,
-    ReviewCol.SOURCE_TO_CHECK,
     ReviewCol.PRIMARY_REASON,
-    ReviewCol.SECONDARY_REASON,
     ScoreCol.FINAL_ANOMALY_SCORE,
     ScoreCol.CLASSIFICATION_SCORE,
     ScoreCol.EXPECTED_VALUE_SCORE,
-    ScoreCol.RANKING_SCORE,
-    ReviewCol.EXPLANATION,
-).head(10)
+).head(5)
 
 # Issue-type performance, severe miss examples, and expected-value score
 # examples are included in the appendix.
@@ -960,7 +1190,7 @@ review_queue_examples.select(
 # ### final recommendation
 
 # %%
-final_recommendation_summary
+final_recommendation_card
 
 # %% [markdown]
 # ## Final Recommendation
