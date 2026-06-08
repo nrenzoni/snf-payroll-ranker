@@ -24,6 +24,9 @@ notebooks/**/*.ipynb
 # Generated synthetic data and evaluation outputs
 data/synthetic/*.csv
 outputs/evaluation/*.csv
+outputs/evaluation/*.json
+notebooks/**/*.md
+!notebooks/README.md
 notebooks/data/
 notebooks/outputs/
 tmp/*
