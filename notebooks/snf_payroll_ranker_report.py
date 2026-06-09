@@ -99,10 +99,6 @@ def format_review_budget_pct(budget: float) -> str:
     return f"{budget:.0%}" if budget <= 1 else str(int(budget))
 
 
-def format_model_name(model_name: str) -> str:
-    return model_name.replace("_", " ")
-
-
 # %% [markdown]
 # ## 0. Executive Summary
 #
@@ -689,7 +685,7 @@ winner_map = (
 
 # %%
 winner_frequency_plot_data = aggregate_winner_frequency.with_columns(
-    pl.col("model").map_elements(format_model_name, return_dtype=pl.String),
+    pl.col("model").str.replace_all("_", " "),
     pl.col("objective").str.replace_all("_", " "),
 )
 (
@@ -724,7 +720,7 @@ for metric, title in metric_interval_titles.items():
     metric_interval_plot_data = median_metric_summary.filter(
         pl.col("metric") == metric,
     ).with_columns(
-        pl.col("model").map_elements(format_model_name, return_dtype=pl.String),
+        pl.col("model").str.replace_all("_", " "),
     )
     metric_interval_plots.append(
         (
@@ -756,7 +752,7 @@ gggrid(metric_interval_plots, ncol=1)
 
 # %%
 winner_map_plot_data = winner_map.with_columns(
-    pl.col("winner").map_elements(format_model_name, return_dtype=pl.String),
+    pl.col("winner").str.replace_all("_", " "),
     pl.col("objective").str.replace_all("_", " "),
 )
 (
