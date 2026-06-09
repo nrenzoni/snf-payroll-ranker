@@ -943,58 +943,15 @@ if not validation_mode:
         progress=progress,
     )
 
-# %%
-final_recommendation_summary = pl.DataFrame(
-    {
-        "objective": [
-            "production default",
-            "severity-ordering challenger",
-            "reviewer diagnostic",
-            "monitoring slices",
-        ],
-        "recommended_model": [
-            "expected_value",
-            "learning_to_rank",
-            "classifier",
-            "facility x pay period x issue family",
-        ],
-        "why": [
-            "Best aligns the residual queue with payroll loss prevention.",
-            "Directly targets graded top-of-queue priority.",
-            "Keeps issue probability visible without making it the primary ranker.",
-            "Catches drift, severe misses, and issue-family blind spots.",
-        ],
-    },
-)
-
-final_recommendation_card = pl.DataFrame(
-    {
-        "decision": [
-            "Default residual ranker",
-            "Primary challenger",
-            "Diagnostic companion",
-            "Required monitoring",
-        ],
-        "recommendation": [
-            "Expected value",
-            "Learning to rank",
-            "Classifier",
-            "facility x pay period x issue family",
-        ],
-        "reader_takeaway": [
-            "Use for the production queue when payroll loss prevention is the operating goal.",
-            "Track when severity ordering at tight review budgets becomes the primary goal.",
-            "Show issue probability for reviewer context and calibration checks.",
-            "Monitor drift, severe misses, and issue-family blind spots after deployment.",
-        ],
-    },
-)
-
 # %% [markdown]
 # ### Decision Card
-
-# %%
-final_recommendation_card
+#
+# | decision | recommendation | reader_takeaway |
+# | :--- | :--- | :--- |
+# | Default residual ranker | Expected value | Use for the production queue when payroll loss prevention is the operating goal. |
+# | Primary challenger | Learning to rank | Track when severity ordering at tight review budgets becomes the primary goal. |
+# | Diagnostic companion | Classifier | Show issue probability for reviewer context and calibration checks. |
+# | Required monitoring | facility x pay period x issue family | Monitor drift, severe misses, and issue-family blind spots after deployment. |
 
 # %% [markdown]
 # For residual SNF payroll loss prevention after hard-rule screening, use
@@ -1234,62 +1191,17 @@ residual_diagnostics["residual_dollar_distribution"].head(10)
 
 # %% [markdown]
 # ### C. hard rule definitions
-
-
-# %%
-appendix_hard_rule_definitions = pl.DataFrame(
-    [
-        {
-            "rule_name": "terminated_employee_paid",
-            "code_condition": "employment_status == terminated and gross_pay > 0",
-            "gate_effect": "critical_hard_rule_flag = 1",
-            "why_critical": "Obvious lifecycle violation removed before residual ranking",
-        },
-        {
-            "rule_name": "duplicate_signature",
-            "code_condition": "duplicate employee x shift_date x shift_type x facility x pay_code x gross_pay signature",
-            "gate_effect": "critical_hard_rule_flag = 1",
-            "why_critical": "Obvious duplicate payroll signature should not compete in ML ranking",
-        },
-        {
-            "rule_name": "nonpositive_active_pay",
-            "code_condition": "employment_status == active and gross_pay <= 0",
-            "gate_effect": "critical_hard_rule_flag = 1",
-            "why_critical": "Active paid cycle with nonpositive gross pay is treated as a hard failure",
-        },
-        {
-            "rule_name": "negative_net_pay",
-            "code_condition": "net_pay < 0",
-            "gate_effect": "critical_hard_rule_flag = 1",
-            "why_critical": "Negative net pay is too obvious for residual ranking",
-        },
-        {
-            "rule_name": "net_exceeds_gross",
-            "code_condition": "net_pay > gross_pay * 1.05",
-            "gate_effect": "critical_hard_rule_flag = 1",
-            "why_critical": "Implausible net-to-gross relationship is gated out upstream",
-        },
-        {
-            "rule_name": "physically_impossible_paid_hours",
-            "code_condition": "paid_hours > 24.0",
-            "gate_effect": "critical_hard_rule_flag = 1",
-            "why_critical": "Impossible within-day hours are removed before ML",
-        },
-        {
-            "rule_name": "paid_hours_missing_rate",
-            "code_condition": "paid_hours > 0 and pay_rate <= 0 or missing",
-            "gate_effect": "critical_hard_rule_flag = 1",
-            "why_critical": "Paid work without a valid rate is treated as a hard payroll defect",
-        },
-        {
-            "rule_name": "paid_minus_scheduled_exceeds_threshold",
-            "code_condition": "worked_hours - scheduled_hours > paid_vs_scheduled_threshold",
-            "gate_effect": "critical_hard_rule_flag = 1",
-            "why_critical": "Large schedule mismatch is handled as an upstream gate rather than residual ambiguity",
-        },
-    ],
-)
-appendix_hard_rule_definitions
+#
+# | rule_name | code_condition | gate_effect | why_critical |
+# | :--- | :--- | :--- | :--- |
+# | terminated_employee_paid | employment_status == terminated and gross_pay > 0 | critical_hard_rule_flag = 1 | Obvious lifecycle violation removed before residual ranking |
+# | duplicate_signature | duplicate employee x shift_date x shift_type x facility x pay_code x gross_pay signature | critical_hard_rule_flag = 1 | Obvious duplicate payroll signature should not compete in ML ranking |
+# | nonpositive_active_pay | employment_status == active and gross_pay <= 0 | critical_hard_rule_flag = 1 | Active paid cycle with nonpositive gross pay is treated as a hard failure |
+# | negative_net_pay | net_pay < 0 | critical_hard_rule_flag = 1 | Negative net pay is too obvious for residual ranking |
+# | net_exceeds_gross | net_pay > gross_pay * 1.05 | critical_hard_rule_flag = 1 | Implausible net-to-gross relationship is gated out upstream |
+# | physically_impossible_paid_hours | paid_hours > 24.0 | critical_hard_rule_flag = 1 | Impossible within-day hours are removed before ML |
+# | paid_hours_missing_rate | paid_hours > 0 and pay_rate <= 0 or missing | critical_hard_rule_flag = 1 | Paid work without a valid rate is treated as a hard payroll defect |
+# | paid_minus_scheduled_exceeds_threshold | worked_hours - scheduled_hours > paid_vs_scheduled_threshold | critical_hard_rule_flag = 1 | Large schedule mismatch is handled as an upstream gate rather than residual ambiguity |
 
 # %% [markdown]
 # ### D. metric definitions
@@ -1405,39 +1317,14 @@ appendix_group_construction
 
 # %% [markdown]
 # ### F. handling zero-positive residual groups
-
-
-# %%
-appendix_zero_positive_policy = pl.DataFrame(
-    [
-        {
-            "case": "group recall with zero residual positives",
-            "implemented_behavior": "group_anomalies denominator is clipped to at least 1",
-            "result": "group recall becomes 0 instead of undefined",
-        },
-        {
-            "case": "group NDCG with zero ideal gain",
-            "implemented_behavior": "if ideal DCG is 0, group NDCG is set to 0",
-            "result": "all-negative groups remain in the grouped average",
-        },
-        {
-            "case": "global severe recall with zero severe residual issues",
-            "implemented_behavior": "denominator uses max(total_severe, 1.0)",
-            "result": "reported severe recall is 0 instead of undefined",
-        },
-        {
-            "case": "PR-AUC on degenerate residual labels",
-            "implemented_behavior": "ValueError is caught and PR-AUC is set to 0",
-            "result": "notebook remains executable under degenerate slices",
-        },
-        {
-            "case": "tiny percent budgets on non-empty groups",
-            "implemented_behavior": "review budget count is clipped to a minimum of 1",
-            "result": "every non-empty facility-cycle group contributes at least one reviewed row",
-        },
-    ],
-)
-appendix_zero_positive_policy
+#
+# | case | implemented_behavior | result |
+# | :--- | :--- | :--- |
+# | group recall with zero residual positives | group_anomalies denominator is clipped to at least 1 | group recall becomes 0 instead of undefined |
+# | group NDCG with zero ideal gain | if ideal DCG is 0, group NDCG is set to 0 | all-negative groups remain in the grouped average |
+# | global severe recall with zero severe residual issues | denominator uses max(total_severe, 1.0) | reported severe recall is 0 instead of undefined |
+# | PR-AUC on degenerate residual labels | ValueError is caught and PR-AUC is set to 0 | notebook remains executable under degenerate slices |
+# | tiny percent budgets on non-empty groups | review budget count is clipped to a minimum of 1 | every non-empty facility-cycle group contributes at least one reviewed row |
 
 # %% [markdown]
 # ### G. model settings and documented tuning space
@@ -1508,44 +1395,14 @@ pl.DataFrame(
 
 # %% [markdown]
 # #### model settings
-
-
-# %%
-appendix_model_settings = pl.DataFrame(
-    [
-        {
-            "model": "classifier",
-            "estimator_or_logic": "HistGradientBoostingClassifier",
-            "current_fixed_settings": "max_depth=3, random_state=config.seed",
-            "documented_future_tuning_space": "max_depth, learning_rate, max_leaf_nodes, min_samples_leaf",
-        },
-        {
-            "model": "cost_sensitive_classifier",
-            "estimator_or_logic": "HistGradientBoostingClassifier with sample weights",
-            "current_fixed_settings": "max_depth=3 plus issue-dollar-severity weighting",
-            "documented_future_tuning_space": "classifier settings plus weight multipliers",
-        },
-        {
-            "model": "regressor",
-            "estimator_or_logic": "HistGradientBoostingRegressor",
-            "current_fixed_settings": "max_depth=3, lower_bound=0.0, random_state=config.seed",
-            "documented_future_tuning_space": "max_depth, learning_rate, max_leaf_nodes, min_samples_leaf",
-        },
-        {
-            "model": "learning_to_rank proxy",
-            "estimator_or_logic": "HistGradientBoostingRegressor on relevance_grade",
-            "current_fixed_settings": "max_depth=3, lower_bound=0.0, upper_bound=3.0",
-            "documented_future_tuning_space": "same regressor settings plus alternative graded targets",
-        },
-        {
-            "model": "expected_value",
-            "estimator_or_logic": "minmax(estimated_exposure * clip(classification, 0.05, 1.0))",
-            "current_fixed_settings": "classification floor=0.05 before multiplication",
-            "documented_future_tuning_space": "classification floor, exposure formula, calibration strategy",
-        },
-    ],
-)
-appendix_model_settings
+#
+# | model | estimator_or_logic | current_fixed_settings | documented_future_tuning_space |
+# | :--- | :--- | :--- | :--- |
+# | classifier | HistGradientBoostingClassifier | max_depth=3, random_state=config.seed | max_depth, learning_rate, max_leaf_nodes, min_samples_leaf |
+# | cost_sensitive_classifier | HistGradientBoostingClassifier with sample weights | max_depth=3 plus issue-dollar-severity weighting | classifier settings plus weight multipliers |
+# | regressor | HistGradientBoostingRegressor | max_depth=3, lower_bound=0.0, random_state=config.seed | max_depth, learning_rate, max_leaf_nodes, min_samples_leaf |
+# | learning_to_rank proxy | HistGradientBoostingRegressor on relevance_grade | max_depth=3, lower_bound=0.0, upper_bound=3.0 | same regressor settings plus alternative graded targets |
+# | expected_value | minmax(estimated_exposure * clip(classification, 0.05, 1.0)) | classification floor=0.05 before multiplication | classification floor, exposure formula, calibration strategy |
 
 # %% [markdown]
 # ### H. score-bucket calibration diagnostics
