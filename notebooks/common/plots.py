@@ -93,7 +93,7 @@ class CheckedPlot:
 
         title = plot_dict.get("ggtitle", {}).get("text", "ggplot Output")
 
-        return f"=== DataFrame for: {title} ===\n{df_str}"
+        return f"=== Underlying DataFrame for omitted ggplot: {title} ===\n{df_str}"
 
     def _repr_mimebundle_(self, include=None, exclude=None) -> dict[str, Any]:
         html_content = self._plot._repr_html_()
