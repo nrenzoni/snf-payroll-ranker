@@ -264,22 +264,18 @@ benchmark_recommendation_budget = (
 
 
 # %%
-def build_hard_rule_funnel_plot(funnel_frame: pl.DataFrame) -> object:
-    plot_data = funnel_frame.with_columns(
-        pl.col("stage").cast(pl.String),
-        pl.col("records").cast(pl.Float64),
-    )
-    return (
-        ggplot(plot_data, aes(x="stage", y="records", fill="stage"))
-        + geom_bar(stat="identity")
-        + coord_flip()
-        + theme_minimal()
-        + labs(x="Gate stage", y="Employee-pay-cycle records", fill="Stage")
-        + ggtitle("Hard-Rule Gate Narrows the ML Review Universe")
-    )
-
-
-build_hard_rule_funnel_plot(funnel)
+hard_rule_funnel_plot_data = funnel.with_columns(
+    pl.col("stage").cast(pl.String),
+    pl.col("records").cast(pl.Float64),
+)
+(
+    ggplot(hard_rule_funnel_plot_data, aes(x="stage", y="records", fill="stage"))
+    + geom_bar(stat="identity")
+    + coord_flip()
+    + theme_minimal()
+    + labs(x="Gate stage", y="Employee-pay-cycle records", fill="Stage")
+    + ggtitle("Hard-Rule Gate Narrows the ML Review Universe")
+)
 
 # %% [markdown]
 # ## 4. Residual Ranking Setup
@@ -295,7 +291,18 @@ build_hard_rule_funnel_plot(funnel)
 # - **Learning-to-rank models**: rank records by graded residual review priority within facility x payroll cycle.
 #
 # Historical observed corrections are retained for bias analysis only. They are
-# not treated as ground truth.
+# not treated as ground truth.hard_rule_funnel_plot_data = funnel.with_columns(
+#     pl.col("stage").cast(pl.String),
+#     pl.col("records").cast(pl.Float64),
+# )
+# (
+#     ggplot(hard_rule_funnel_plot_data, aes(x="stage", y="records", fill="stage"))
+#     + geom_bar(stat="identity")
+#     + coord_flip()
+#     + theme_minimal()
+#     + labs(x="Gate stage", y="Employee-pay-cycle records", fill="Stage")
+#     + ggtitle("Hard-Rule Gate Narrows the ML Review Universe")
+# )
 
 # %%
 scenario_summary_compact = scenario_benchmark.scenario_summary.select(
@@ -318,37 +325,33 @@ scenario_summary_compact = scenario_benchmark.scenario_summary.select(
 
 
 # %%
-def build_scenario_landscape_plot(scenario_summary: pl.DataFrame) -> object:
-    plot_data = scenario_summary.with_columns(
-        pl.col("display_name").cast(pl.String).alias("scenario"),
-        pl.col("dominant_issue_family").cast(pl.String),
-        pl.col("residual_issue_rate").round(4),
-        pl.col("severe_issue_rate").round(4),
-        pl.col("residual_dollars").round(2),
+scenario_landscape_plot_data = scenario_benchmark.scenario_summary.with_columns(
+    pl.col("display_name").cast(pl.String).alias("scenario"),
+    pl.col("dominant_issue_family").cast(pl.String),
+    pl.col("residual_issue_rate").round(4),
+    pl.col("severe_issue_rate").round(4),
+    pl.col("residual_dollars").round(2),
+)
+(
+    ggplot(
+        scenario_landscape_plot_data,
+        aes(
+            x="residual_issue_rate",
+            y="severe_issue_rate",
+            size="residual_dollars",
+            color="dominant_issue_family",
+        ),
     )
-    return (
-        ggplot(
-            plot_data,
-            aes(
-                x="residual_issue_rate",
-                y="severe_issue_rate",
-                size="residual_dollars",
-                color="dominant_issue_family",
-            ),
-        )
-        + geom_point(alpha=0.75)
-        + theme_minimal()
-        + labs(
-            x="Residual issue rate",
-            y="Severe residual issue rate",
-            size="Residual dollars",
-            color="Dominant issue family",
-        )
-        + ggtitle("Scenario Landscape: Density, Severity, Dollars, and Mix")
+    + geom_point(alpha=0.75)
+    + theme_minimal()
+    + labs(
+        x="Residual issue rate",
+        y="Severe residual issue rate",
+        size="Residual dollars",
+        color="Dominant issue family",
     )
-
-
-build_scenario_landscape_plot(scenario_benchmark.scenario_summary)
+    + ggtitle("Scenario Landscape: Density, Severity, Dollars, and Mix")
+)
 
 # %% [markdown]
 # The scenario landscape shows why the benchmark aggregates over scenario and
@@ -357,97 +360,82 @@ build_scenario_landscape_plot(scenario_benchmark.scenario_summary)
 
 
 # %%
-def build_residual_label_diagnostics(residual_records: pl.DataFrame) -> pl.DataFrame:
-    positive_residual = residual_records.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
-    residual_issue_count = max(positive_residual.height, 1)
-    grade_counts = {
-        int(row[PayrollCol.RELEVANCE_GRADE]): int(row["records"])
-        for row in positive_residual.group_by(PayrollCol.RELEVANCE_GRADE)
-        .agg(pl.len().alias("records"))
-        .to_dicts()
-    }
-    severe_count = int(
-        positive_residual.select(pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE)).item()
-        or 0,
+positive_residual = residual_payroll.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
+residual_issue_count = max(positive_residual.height, 1)
+grade_counts = {
+    int(row[PayrollCol.RELEVANCE_GRADE]): int(row["records"])
+    for row in positive_residual.group_by(PayrollCol.RELEVANCE_GRADE)
+    .agg(pl.len().alias("records"))
+    .to_dicts()
+}
+severe_count = int(
+    positive_residual.select(pl.sum(PayrollCol.RULE_MISSED_SEVERE_ISSUE)).item() or 0,
+)
+residual_label_diagnostics = pl.DataFrame(
+    {
+        "diagnostic": [
+            "residual issue count",
+            "severe share of residual issues",
+            "grade 1 share of residual issues",
+            "grade 2 share of residual issues",
+            "grade 3 share of residual issues",
+            "distinct residual anomaly families",
+        ],
+        "value": [
+            float(positive_residual.height),
+            round(severe_count / residual_issue_count, 4),
+            round(grade_counts.get(1, 0) / residual_issue_count, 4),
+            round(grade_counts.get(2, 0) / residual_issue_count, 4),
+            round(grade_counts.get(3, 0) / residual_issue_count, 4),
+            float(
+                positive_residual.get_column(
+                    PayrollCol.ANOMALY_CATEGORY,
+                ).n_unique(),
+            ),
+        ],
+    },
+)
+residual_family_mix = (
+    positive_residual.group_by(PayrollCol.ANOMALY_CATEGORY)
+    .agg(
+        pl.len().alias("records"),
+        pl.mean(PayrollCol.Y_DOLLAR).round(2).alias("avg_residual_dollars"),
+        pl.mean(PayrollCol.RULE_MISSED_SEVERE_ISSUE).round(4).alias("severe_share"),
     )
-    return pl.DataFrame(
-        {
-            "diagnostic": [
-                "residual issue count",
-                "severe share of residual issues",
-                "grade 1 share of residual issues",
-                "grade 2 share of residual issues",
-                "grade 3 share of residual issues",
-                "distinct residual anomaly families",
-            ],
-            "value": [
-                float(positive_residual.height),
-                round(severe_count / residual_issue_count, 4),
-                round(grade_counts.get(1, 0) / residual_issue_count, 4),
-                round(grade_counts.get(2, 0) / residual_issue_count, 4),
-                round(grade_counts.get(3, 0) / residual_issue_count, 4),
-                float(
-                    positive_residual.get_column(
-                        PayrollCol.ANOMALY_CATEGORY,
-                    ).n_unique(),
-                ),
-            ],
-        },
+    .with_columns(
+        (pl.col("records") / residual_issue_count)
+        .round(4)
+        .alias("share_of_residual_issues"),
     )
-
-
-def build_residual_family_mix(residual_records: pl.DataFrame) -> pl.DataFrame:
-    positive_residual = residual_records.filter(pl.col(PayrollCol.Y_ISSUE) == 1)
-    issue_count = max(positive_residual.height, 1)
-    return (
-        positive_residual.group_by(PayrollCol.ANOMALY_CATEGORY)
-        .agg(
-            pl.len().alias("records"),
-            pl.mean(PayrollCol.Y_DOLLAR).round(2).alias("avg_residual_dollars"),
-            pl.mean(PayrollCol.RULE_MISSED_SEVERE_ISSUE).round(4).alias("severe_share"),
-        )
-        .with_columns(
-            (pl.col("records") / issue_count)
-            .round(4)
-            .alias("share_of_residual_issues"),
-        )
-        .sort(["records", PayrollCol.ANOMALY_CATEGORY], descending=[True, False])
-    )
-
-
-residual_label_diagnostics = build_residual_label_diagnostics(residual_payroll)
-residual_family_mix = build_residual_family_mix(residual_payroll)
+    .sort(["records", PayrollCol.ANOMALY_CATEGORY], descending=[True, False])
+)
 
 
 # %%
-def build_residual_family_pareto_plot(family_mix: pl.DataFrame) -> object:
-    plot_data = family_mix.with_columns(
-        pl.col(PayrollCol.ANOMALY_CATEGORY).cast(pl.String).alias("anomaly_family"),
-        pl.col("share_of_residual_issues").round(4),
-    ).sort("share_of_residual_issues")
-    return (
-        ggplot(
-            plot_data,
-            aes(
-                x="anomaly_family",
-                y="share_of_residual_issues",
-                fill="severe_share",
-            ),
-        )
-        + geom_bar(stat="identity")
-        + coord_flip()
-        + theme_minimal()
-        + scale_fill_gradient(low="#dbeafe", high="#991b1b")
-        + labs(
-            x="Residual anomaly family",
-            y="Share of residual issues",
-            fill="Severe share",
-        )
-        + ggtitle("Residual Issue Mix Is Concentrated but Not One-Dimensional")
+residual_family_pareto_plot_data = residual_family_mix.with_columns(
+    pl.col(PayrollCol.ANOMALY_CATEGORY).cast(pl.String).alias("anomaly_family"),
+    pl.col("share_of_residual_issues").round(4),
+).sort("share_of_residual_issues")
+(
+    ggplot(
+        residual_family_pareto_plot_data,
+        aes(
+            x="anomaly_family",
+            y="share_of_residual_issues",
+            fill="severe_share",
+        ),
     )
-
-
-build_residual_family_pareto_plot(residual_family_mix)
+    + geom_bar(stat="identity")
+    + coord_flip()
+    + theme_minimal()
+    + scale_fill_gradient(low="#dbeafe", high="#991b1b")
+    + labs(
+        x="Residual anomaly family",
+        y="Share of residual issues",
+        fill="Severe share",
+    )
+    + ggtitle("Residual Issue Mix Is Concentrated but Not One-Dimensional")
+)
 
 # %% [markdown]
 # Most residual issues are material but non-severe; the severe tail is smaller
@@ -483,96 +471,6 @@ residual_scored = scored.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
 
 
 # %%
-def build_model_similarity_diagnostics(
-    scored_frame: pl.DataFrame,
-    review_budgets: tuple[float, ...],
-) -> pl.DataFrame:
-    residual_scored = scored_frame.filter(pl.col(PayrollCol.RESIDUAL_RECORD) == 1)
-    comparison_budget = 0.05 if 0.05 in review_budgets else review_budgets[0]
-    model_scores = [
-        ("classifier", ScoreCol.CLASSIFICATION_SCORE),
-        ("cost_sensitive_classifier", ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE),
-        ("regressor", ScoreCol.REGRESSION_SCORE),
-        ("expected_value", ScoreCol.EXPECTED_VALUE_SCORE),
-        ("learning_to_rank", ScoreCol.RANKING_SCORE),
-    ]
-    group_cols = [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX]
-
-    def reviewed_records(score_col: ScoreCol, budget: float) -> pl.DataFrame:
-        ranked = residual_scored.with_columns(
-            pl.col(score_col)
-            .rank("ordinal", descending=True)
-            .over(group_cols)
-            .alias("_group_rank"),
-            pl.len().over(group_cols).alias("_group_size"),
-        ).with_columns(
-            (pl.col("_group_size") * budget)
-            .ceil()
-            .cast(pl.Int64)
-            .clip(1, None)
-            .alias("_group_budget_count"),
-        )
-        return ranked.filter(
-            pl.col("_group_rank") <= pl.col("_group_budget_count"),
-        ).select(
-            *group_cols,
-            PayrollCol.EMPLOYEE_PAY_CYCLE_ID,
-        )
-
-    top_1_records = {
-        model_name: reviewed_records(score_col, 0.01)
-        for model_name, score_col in model_scores
-    }
-    budget_records = {
-        model_name: reviewed_records(score_col, comparison_budget)
-        for model_name, score_col in model_scores
-    }
-
-    rows: list[dict[str, float | str]] = []
-    for index, (left_name, left_score) in enumerate(model_scores):
-        for right_name, right_score in model_scores[index + 1 :]:
-            top_1_overlap = top_1_records[left_name].join(
-                top_1_records[right_name],
-                on=group_cols + [PayrollCol.EMPLOYEE_PAY_CYCLE_ID],
-                how="inner",
-            ).height / max(top_1_records[left_name].height, 1)
-            budget_overlap = budget_records[left_name].join(
-                budget_records[right_name],
-                on=group_cols + [PayrollCol.EMPLOYEE_PAY_CYCLE_ID],
-                how="inner",
-            ).height / max(budget_records[left_name].height, 1)
-            correlation = float(
-                residual_scored.select(
-                    pl.corr(left_score, right_score).alias("correlation"),
-                ).item()
-                or 0.0,
-            )
-            rows.append(
-                {
-                    "model_a": left_name,
-                    "model_b": right_name,
-                    "score_correlation": round(correlation, 4),
-                    "top_1_overlap": round(top_1_overlap, 4),
-                    f"top_{format_review_budget_pct(comparison_budget)}_overlap": round(
-                        budget_overlap,
-                        4,
-                    ),
-                },
-            )
-    return pl.DataFrame(rows)
-
-
-def notebook_model_label(model_name: str) -> str:
-    return {
-        str(ScoreCol.CLASSIFICATION_SCORE): "classifier",
-        str(ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE): "cost_sensitive_classifier",
-        str(ScoreCol.REGRESSION_SCORE): "regressor",
-        str(ScoreCol.EXPECTED_VALUE_SCORE): "expected_value",
-        str(ScoreCol.RANKING_SCORE): "learning_to_rank",
-    }.get(model_name, model_name)
-
-
-# %%
 # Full employee-cycle evaluation includes rolling-origin and production-readiness
 # diagnostics that are useful for analysis but redundant for CI notebook runtime
 # checks. Validation mode only needs the downstream model-comparison contract.
@@ -583,14 +481,102 @@ else:
     model_comparison = evaluation.model_comparison
 
 # %%
-model_similarity_diagnostics = build_model_similarity_diagnostics(
-    scored,
-    review_budget_percents,
+comparison_budget = (
+    0.05 if 0.05 in review_budget_percents else review_budget_percents[0]
 )
+model_scores = [
+    ("classifier", ScoreCol.CLASSIFICATION_SCORE),
+    ("cost_sensitive_classifier", ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE),
+    ("regressor", ScoreCol.REGRESSION_SCORE),
+    ("expected_value", ScoreCol.EXPECTED_VALUE_SCORE),
+    ("learning_to_rank", ScoreCol.RANKING_SCORE),
+]
+group_cols = [PayrollCol.FACILITY_ID, PayrollCol.PAY_PERIOD_INDEX]
+top_1_records = {
+    model_name: residual_scored.with_columns(
+        pl.col(score_col)
+        .rank("ordinal", descending=True)
+        .over(group_cols)
+        .alias("_group_rank"),
+        pl.len().over(group_cols).alias("_group_size"),
+    )
+    .with_columns(
+        (pl.col("_group_size") * 0.01)
+        .ceil()
+        .cast(pl.Int64)
+        .clip(1, None)
+        .alias("_group_budget_count"),
+    )
+    .filter(pl.col("_group_rank") <= pl.col("_group_budget_count"))
+    .select(*group_cols, PayrollCol.EMPLOYEE_PAY_CYCLE_ID)
+    for model_name, score_col in model_scores
+}
+budget_records = {
+    model_name: residual_scored.with_columns(
+        pl.col(score_col)
+        .rank("ordinal", descending=True)
+        .over(group_cols)
+        .alias("_group_rank"),
+        pl.len().over(group_cols).alias("_group_size"),
+    )
+    .with_columns(
+        (pl.col("_group_size") * comparison_budget)
+        .ceil()
+        .cast(pl.Int64)
+        .clip(1, None)
+        .alias("_group_budget_count"),
+    )
+    .filter(pl.col("_group_rank") <= pl.col("_group_budget_count"))
+    .select(*group_cols, PayrollCol.EMPLOYEE_PAY_CYCLE_ID)
+    for model_name, score_col in model_scores
+}
+similarity_rows: list[dict[str, float | str]] = []
+for index, (left_name, left_score) in enumerate(model_scores):
+    for right_name, right_score in model_scores[index + 1 :]:
+        top_1_overlap = top_1_records[left_name].join(
+            top_1_records[right_name],
+            on=group_cols + [PayrollCol.EMPLOYEE_PAY_CYCLE_ID],
+            how="inner",
+        ).height / max(top_1_records[left_name].height, 1)
+        budget_overlap = budget_records[left_name].join(
+            budget_records[right_name],
+            on=group_cols + [PayrollCol.EMPLOYEE_PAY_CYCLE_ID],
+            how="inner",
+        ).height / max(budget_records[left_name].height, 1)
+        correlation = float(
+            residual_scored.select(
+                pl.corr(left_score, right_score).alias("correlation"),
+            ).item()
+            or 0.0,
+        )
+        similarity_rows.append(
+            {
+                "model_a": left_name,
+                "model_b": right_name,
+                "score_correlation": round(correlation, 4),
+                "top_1_overlap": round(top_1_overlap, 4),
+                f"top_{format_review_budget_pct(comparison_budget)}_overlap": round(
+                    budget_overlap,
+                    4,
+                ),
+            },
+        )
+model_similarity_diagnostics = pl.DataFrame(similarity_rows)
 
 # %%
+notebook_model_labels = {
+    str(ScoreCol.CLASSIFICATION_SCORE): "classifier",
+    str(ScoreCol.COST_SENSITIVE_CLASSIFICATION_SCORE): "cost_sensitive_classifier",
+    str(ScoreCol.REGRESSION_SCORE): "regressor",
+    str(ScoreCol.EXPECTED_VALUE_SCORE): "expected_value",
+    str(ScoreCol.RANKING_SCORE): "learning_to_rank",
+}
 comparison_for_summary = model_comparison.with_columns(
-    pl.col("model").map_elements(notebook_model_label, return_dtype=pl.String),
+    pl.col("model").replace_strict(
+        notebook_model_labels,
+        default=pl.col("model"),
+        return_dtype=pl.String,
+    ),
 ).filter(
     pl.col("model").is_in(
         [
@@ -637,164 +623,153 @@ primary_metric_units = scenario_benchmark.metric_units.filter(
 )
 
 
-def build_primary_winner_frequency(metric_units: pl.DataFrame) -> pl.DataFrame:
-    with_objectives = metric_units.join(primary_objective_map, on="metric", how="inner")
-    winners = (
-        with_objectives.sort(
-            ["objective", MetricCol.K, "unit", "value", "model"],
-            descending=[False, False, False, True, False],
-        )
-        .group_by(["objective", MetricCol.K, "unit"], maintain_order=True)
-        .head(1)
+primary_metric_units_with_objectives = primary_metric_units.join(
+    primary_objective_map,
+    on="metric",
+    how="inner",
+)
+primary_unit_winners = (
+    primary_metric_units_with_objectives.sort(
+        ["objective", MetricCol.K, "unit", "value", "model"],
+        descending=[False, False, False, True, False],
     )
-    total_units = max(winners.select(pl.n_unique("unit")).item() or 0, 1)
-    return (
-        winners.group_by(["objective", MetricCol.K, "review_budget_label", "model"])
-        .agg(
-            pl.len().alias("win_count"),
-            (pl.len() / total_units).round(4).alias("win_frequency"),
-        )
-        .sort(
-            ["objective", MetricCol.K, "win_count", "model"],
-            descending=[False, False, True, False],
-        )
+    .group_by(["objective", MetricCol.K, "unit"], maintain_order=True)
+    .head(1)
+)
+primary_total_units = max(
+    primary_unit_winners.select(pl.n_unique("unit")).item() or 0,
+    1,
+)
+aggregate_winner_frequency = (
+    primary_unit_winners.group_by(
+        ["objective", MetricCol.K, "review_budget_label", "model"],
     )
-
-
-def build_primary_median_metric_summary(metric_units: pl.DataFrame) -> pl.DataFrame:
-    return (
-        metric_units.group_by(["model", MetricCol.K, "review_budget_label", "metric"])
-        .agg(
-            pl.median("value").alias("median"),
-            pl.col("value").quantile(0.10).alias("lower_interval"),
-            pl.col("value").quantile(0.90).alias("upper_interval"),
-            pl.len().alias("study_units"),
-        )
-        .sort(
-            ["metric", MetricCol.K, "median", "model"],
-            descending=[False, False, True, False],
-        )
+    .agg(
+        pl.len().alias("win_count"),
+        (pl.len() / primary_total_units).round(4).alias("win_frequency"),
     )
-
-
-def build_primary_winner_map(metric_summary: pl.DataFrame) -> pl.DataFrame:
-    summary = metric_summary.join(primary_objective_map, on="metric", how="inner")
-    return (
-        summary.sort(
-            ["objective", MetricCol.K, "median", "model"],
-            descending=[False, False, True, False],
-        )
-        .group_by(
-            ["objective", MetricCol.K, "review_budget_label"],
-            maintain_order=True,
-        )
-        .head(1)
-        .rename({"median": "selection_value", "model": "winner"})
-        .sort(["objective", MetricCol.K])
+    .sort(
+        ["objective", MetricCol.K, "win_count", "model"],
+        descending=[False, False, True, False],
     )
-
-
-aggregate_winner_frequency = build_primary_winner_frequency(primary_metric_units)
-median_metric_summary = build_primary_median_metric_summary(primary_metric_units)
-winner_map = build_primary_winner_map(median_metric_summary)
+)
+median_metric_summary = (
+    primary_metric_units.group_by(
+        ["model", MetricCol.K, "review_budget_label", "metric"],
+    )
+    .agg(
+        pl.median("value").alias("median"),
+        pl.col("value").quantile(0.10).alias("lower_interval"),
+        pl.col("value").quantile(0.90).alias("upper_interval"),
+        pl.len().alias("study_units"),
+    )
+    .sort(
+        ["metric", MetricCol.K, "median", "model"],
+        descending=[False, False, True, False],
+    )
+)
+winner_map = (
+    median_metric_summary.join(primary_objective_map, on="metric", how="inner")
+    .sort(
+        ["objective", MetricCol.K, "median", "model"],
+        descending=[False, False, True, False],
+    )
+    .group_by(
+        ["objective", MetricCol.K, "review_budget_label"],
+        maintain_order=True,
+    )
+    .head(1)
+    .rename({"median": "selection_value", "model": "winner"})
+    .sort(["objective", MetricCol.K])
+)
 
 # %% [markdown]
 # ### Winner Frequency
 
 
 # %%
-def build_winner_frequency_plot(winner_frequency: pl.DataFrame) -> object:
-    plot_data = winner_frequency.with_columns(
-        pl.col("model").map_elements(format_model_name, return_dtype=pl.String),
-        pl.col("objective").str.replace_all("_", " "),
+winner_frequency_plot_data = aggregate_winner_frequency.with_columns(
+    pl.col("model").map_elements(format_model_name, return_dtype=pl.String),
+    pl.col("objective").str.replace_all("_", " "),
+)
+(
+    ggplot(
+        winner_frequency_plot_data,
+        aes(x="objective", y="win_frequency", fill="model"),
     )
-    return (
-        ggplot(
-            plot_data,
-            aes(x="objective", y="win_frequency", fill="model"),
-        )
-        + geom_bar(stat="identity", position="dodge")
-        + coord_flip()
-        + theme_minimal()
-        + labs(
-            x="Operating objective",
-            y="Share of scenario-seed units won",
-            fill="Model",
-        )
-        + ggtitle("Winner Frequency Across Scenario-Seed Holdout Units")
+    + geom_bar(stat="identity", position="dodge")
+    + coord_flip()
+    + theme_minimal()
+    + labs(
+        x="Operating objective",
+        y="Share of scenario-seed units won",
+        fill="Model",
     )
-
-
-build_winner_frequency_plot(aggregate_winner_frequency)
+    + ggtitle("Winner Frequency Across Scenario-Seed Holdout Units")
+)
 
 # %% [markdown]
 # ### Median Metrics With Intervals
 
 
 # %%
-def build_metric_interval_plot(metric_summary: pl.DataFrame) -> object:
-    metric_titles = {
-        str(MetricCol.RESIDUAL_NDCG_AT_K): "Queue Quality: Residual NDCG",
-        str(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K): "Severity: Severe Recall",
-        str(MetricCol.DOLLARS_CAPTURED_AT_K): "Dollar Recovery",
-        str(MetricCol.INCREMENTAL_UTILITY_AT_K): "Incremental Utility",
-    }
-    plots = []
-    for metric, title in metric_titles.items():
-        plot_data = metric_summary.filter(pl.col("metric") == metric).with_columns(
-            pl.col("model").map_elements(format_model_name, return_dtype=pl.String),
-        )
-        plots.append(
-            (
-                ggplot(
-                    plot_data,
-                    aes(x="review_budget_label", y="median", color="model"),
-                )
-                + geom_line()
-                + geom_point()
-                + geom_errorbar(
-                    aes(ymin="lower_interval", ymax="upper_interval"),
-                    width=0.15,
-                )
-                + theme_minimal()
-                + rotated_x_labels()
-                + labs(
-                    x="Review budget",
-                    y="Median with 10th-90th interval",
-                    color="Model",
-                )
-                + ggtitle(title)
-            ),
-        )
-    return gggrid(plots, ncol=1)
-
-
-build_metric_interval_plot(median_metric_summary)
+metric_interval_titles = {
+    str(MetricCol.RESIDUAL_NDCG_AT_K): "Queue Quality: Residual NDCG",
+    str(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K): "Severity: Severe Recall",
+    str(MetricCol.DOLLARS_CAPTURED_AT_K): "Dollar Recovery",
+    str(MetricCol.INCREMENTAL_UTILITY_AT_K): "Incremental Utility",
+}
+metric_interval_plots = []
+for metric, title in metric_interval_titles.items():
+    metric_interval_plot_data = median_metric_summary.filter(
+        pl.col("metric") == metric,
+    ).with_columns(
+        pl.col("model").map_elements(format_model_name, return_dtype=pl.String),
+    )
+    metric_interval_plots.append(
+        (
+            ggplot(
+                metric_interval_plot_data,
+                aes(x="review_budget_label", y="median", color="model"),
+            )
+            + geom_line()
+            + geom_point()
+            + geom_errorbar(
+                aes(ymin="lower_interval", ymax="upper_interval"),
+                width=0.15,
+            )
+            + theme_minimal()
+            + rotated_x_labels()
+            + labs(
+                x="Review budget",
+                y="Median with 10th-90th interval",
+                color="Model",
+            )
+            + ggtitle(title)
+        ),
+    )
+gggrid(metric_interval_plots, ncol=1)
 
 # %% [markdown]
 # ### Winner Map By Objective And Review Budget
 
 
 # %%
-def build_winner_map_plot(winner_map_frame: pl.DataFrame) -> object:
-    plot_data = winner_map_frame.with_columns(
-        pl.col("winner").map_elements(format_model_name, return_dtype=pl.String),
-        pl.col("objective").str.replace_all("_", " "),
+winner_map_plot_data = winner_map.with_columns(
+    pl.col("winner").map_elements(format_model_name, return_dtype=pl.String),
+    pl.col("objective").str.replace_all("_", " "),
+)
+(
+    ggplot(
+        winner_map_plot_data,
+        aes(x="review_budget_label", y="objective", fill="winner"),
     )
-    return (
-        ggplot(
-            plot_data,
-            aes(x="review_budget_label", y="objective", fill="winner"),
-        )
-        + geom_tile()
-        + theme_minimal()
-        + rotated_x_labels()
-        + labs(x="Review budget", y="Objective", fill="Winning model")
-        + ggtitle("Winner Map by Objective and Review Budget")
-    )
-
-
-build_winner_map_plot(winner_map)
+    + geom_tile()
+    + theme_minimal()
+    + rotated_x_labels()
+    + labs(x="Review budget", y="Objective", fill="Winning model")
+    + ggtitle("Winner Map by Objective and Review Budget")
+)
 
 # %% [markdown]
 # The benchmark shows a split leaderboard rather than one universal winner.
@@ -805,10 +780,11 @@ build_winner_map_plot(winner_map)
 
 
 # %%
-def build_similarity_matrix(
+def build_similarity_heatmap(
     similarity_diagnostics: pl.DataFrame,
     value_col: str,
-) -> pl.DataFrame:
+    title: str,
+) -> object:
     models = sorted(
         {
             *similarity_diagnostics.get_column("model_a").to_list(),
@@ -823,27 +799,19 @@ def build_similarity_matrix(
             value_col,
         ).to_dicts()
     }
-    rows: list[dict[str, float | str]] = []
-    for left_model in models:
-        for right_model in models:
-            rows.append(
-                {
-                    "model_x": left_model,
-                    "model_y": right_model,
-                    value_col: 1.0
-                    if left_model == right_model
-                    else pair_values.get(frozenset((left_model, right_model)), 0.0),
-                },
-            )
-    return pl.DataFrame(rows)
-
-
-def build_similarity_heatmap(
-    similarity_diagnostics: pl.DataFrame,
-    value_col: str,
-    title: str,
-) -> object:
-    plot_data = build_similarity_matrix(similarity_diagnostics, value_col)
+    plot_data = pl.DataFrame(
+        [
+            {
+                "model_x": left_model,
+                "model_y": right_model,
+                value_col: 1.0
+                if left_model == right_model
+                else pair_values.get(frozenset((left_model, right_model)), 0.0),
+            }
+            for left_model in models
+            for right_model in models
+        ],
+    )
     return (
         ggplot(
             plot_data,
@@ -1133,91 +1101,61 @@ residual_label_diagnostics
 residual_family_mix
 
 
-# %%
-def build_residual_issue_rate_plot(facility_issue_rate: pl.DataFrame) -> object:
-    plot_data = facility_issue_rate.with_columns(
-        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
-        pl.col("residual_issue_rate").round(4),
-    ).sort("residual_issue_rate")
-    return (
-        ggplot(
-            plot_data,
-            aes(x="facility_id", y="residual_issue_rate"),
-        )
-        + geom_bar(stat="identity", fill="#2563eb")
-        + coord_flip()
-        + theme_minimal()
-        + labs(
-            x="Facility",
-            y="Residual issue rate",
-        )
-        + ggtitle("Residual Issue Rate by Facility")
-    )
-
-
-def build_severe_residual_heatmap(severe_counts: pl.DataFrame) -> object:
-    plot_data = severe_counts.with_columns(
-        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
-        pl.col(PayrollCol.PAY_PERIOD_INDEX).alias("pay_period"),
-    )
-    return (
-        ggplot(
-            plot_data,
-            aes(
-                x="pay_period",
-                y="facility_id",
-                fill="severe_residual_issues",
-            ),
-        )
-        + geom_tile()
-        + theme_minimal()
-        + labs(
-            x="Pay period",
-            y="Facility",
-            fill="Severe issues",
-        )
-        + scale_fill_gradient(low="#f8fafc", high="#b91c1c")
-        + ggtitle("Severe Residual Issues by Facility-Cycle")
-    )
-
-
-def build_issue_type_mix_plot(issue_type_mix: pl.DataFrame) -> object:
-    plot_data = issue_type_mix.with_columns(
-        pl.col(PayrollCol.ANOMALY_CATEGORY).cast(pl.String).alias("anomaly_category"),
-    ).sort(["population_issue_share", PayrollCol.ANOMALY_CATEGORY])
-    return (
-        ggplot(
-            plot_data,
-            aes(
-                x="anomaly_category",
-                y="population_issue_share",
-                fill="population",
-            ),
-        )
-        + geom_bar(stat="identity", position="dodge")
-        + coord_flip()
-        + theme_minimal()
-        + labs(
-            x="Anomaly family",
-            y="Share of true issue records",
-            fill="Population",
-        )
-        + ggtitle("Issue-Family Mix Among True Issues")
-    )
-
-
 # %% [markdown]
 # #### residual issue rate by facility
 
 # %%
-build_residual_issue_rate_plot(residual_diagnostics["facility_residual_issue_rate"])
+residual_issue_rate_plot_data = (
+    residual_diagnostics["facility_residual_issue_rate"]
+    .with_columns(
+        pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
+        pl.col("residual_issue_rate").round(4),
+    )
+    .sort("residual_issue_rate")
+)
+(
+    ggplot(
+        residual_issue_rate_plot_data,
+        aes(x="facility_id", y="residual_issue_rate"),
+    )
+    + geom_bar(stat="identity", fill="#2563eb")
+    + coord_flip()
+    + theme_minimal()
+    + labs(
+        x="Facility",
+        y="Residual issue rate",
+    )
+    + ggtitle("Residual Issue Rate by Facility")
+)
 
 # %% [markdown]
 # #### severe residual issues by facility-cycle
 
 # %%
-build_severe_residual_heatmap(
-    residual_diagnostics["facility_cycle_residual_severe_counts"],
+severe_residual_heatmap_data = residual_diagnostics[
+    "facility_cycle_residual_severe_counts"
+].with_columns(
+    pl.col(PayrollCol.FACILITY_ID).cast(pl.String).alias("facility_id"),
+    pl.col(PayrollCol.PAY_PERIOD_INDEX).alias("pay_period"),
+)
+(
+    ggplot(
+        severe_residual_heatmap_data,
+        aes(
+            x="pay_period",
+            y="facility_id",
+            fill="severe_residual_issues",
+        ),
+    )
+    + geom_tile()
+    + theme_minimal()
+    + labs(
+        x="Pay period",
+        y="Facility",
+        fill="Severe issues",
+    )
+    + scale_fill_gradient(low="#f8fafc", high="#b91c1c")
+    + ggtitle("Severe Residual Issues by Facility-Cycle")
 )
 
 # %% [markdown]
@@ -1229,7 +1167,32 @@ build_severe_residual_heatmap(
 # the issue-family pattern.
 
 # %%
-build_issue_type_mix_plot(residual_diagnostics["issue_type_mix"])
+issue_type_mix_plot_data = (
+    residual_diagnostics["issue_type_mix"]
+    .with_columns(
+        pl.col(PayrollCol.ANOMALY_CATEGORY).cast(pl.String).alias("anomaly_category"),
+    )
+    .sort(["population_issue_share", PayrollCol.ANOMALY_CATEGORY])
+)
+(
+    ggplot(
+        issue_type_mix_plot_data,
+        aes(
+            x="anomaly_category",
+            y="population_issue_share",
+            fill="population",
+        ),
+    )
+    + geom_bar(stat="identity", position="dodge")
+    + coord_flip()
+    + theme_minimal()
+    + labs(
+        x="Anomaly family",
+        y="Share of true issue records",
+        fill="Population",
+    )
+    + ggtitle("Issue-Family Mix Among True Issues")
+)
 
 # %%
 residual_diagnostics["issue_type_mix"]
@@ -1274,62 +1237,58 @@ residual_diagnostics["residual_dollar_distribution"].head(10)
 
 
 # %%
-def build_appendix_hard_rule_definitions() -> pl.DataFrame:
-    return pl.DataFrame(
-        [
-            {
-                "rule_name": "terminated_employee_paid",
-                "code_condition": "employment_status == terminated and gross_pay > 0",
-                "gate_effect": "critical_hard_rule_flag = 1",
-                "why_critical": "Obvious lifecycle violation removed before residual ranking",
-            },
-            {
-                "rule_name": "duplicate_signature",
-                "code_condition": "duplicate employee x shift_date x shift_type x facility x pay_code x gross_pay signature",
-                "gate_effect": "critical_hard_rule_flag = 1",
-                "why_critical": "Obvious duplicate payroll signature should not compete in ML ranking",
-            },
-            {
-                "rule_name": "nonpositive_active_pay",
-                "code_condition": "employment_status == active and gross_pay <= 0",
-                "gate_effect": "critical_hard_rule_flag = 1",
-                "why_critical": "Active paid cycle with nonpositive gross pay is treated as a hard failure",
-            },
-            {
-                "rule_name": "negative_net_pay",
-                "code_condition": "net_pay < 0",
-                "gate_effect": "critical_hard_rule_flag = 1",
-                "why_critical": "Negative net pay is too obvious for residual ranking",
-            },
-            {
-                "rule_name": "net_exceeds_gross",
-                "code_condition": "net_pay > gross_pay * 1.05",
-                "gate_effect": "critical_hard_rule_flag = 1",
-                "why_critical": "Implausible net-to-gross relationship is gated out upstream",
-            },
-            {
-                "rule_name": "physically_impossible_paid_hours",
-                "code_condition": "paid_hours > 24.0",
-                "gate_effect": "critical_hard_rule_flag = 1",
-                "why_critical": "Impossible within-day hours are removed before ML",
-            },
-            {
-                "rule_name": "paid_hours_missing_rate",
-                "code_condition": "paid_hours > 0 and pay_rate <= 0 or missing",
-                "gate_effect": "critical_hard_rule_flag = 1",
-                "why_critical": "Paid work without a valid rate is treated as a hard payroll defect",
-            },
-            {
-                "rule_name": "paid_minus_scheduled_exceeds_threshold",
-                "code_condition": "worked_hours - scheduled_hours > paid_vs_scheduled_threshold",
-                "gate_effect": "critical_hard_rule_flag = 1",
-                "why_critical": "Large schedule mismatch is handled as an upstream gate rather than residual ambiguity",
-            },
-        ],
-    )
-
-
-appendix_hard_rule_definitions = build_appendix_hard_rule_definitions()
+appendix_hard_rule_definitions = pl.DataFrame(
+    [
+        {
+            "rule_name": "terminated_employee_paid",
+            "code_condition": "employment_status == terminated and gross_pay > 0",
+            "gate_effect": "critical_hard_rule_flag = 1",
+            "why_critical": "Obvious lifecycle violation removed before residual ranking",
+        },
+        {
+            "rule_name": "duplicate_signature",
+            "code_condition": "duplicate employee x shift_date x shift_type x facility x pay_code x gross_pay signature",
+            "gate_effect": "critical_hard_rule_flag = 1",
+            "why_critical": "Obvious duplicate payroll signature should not compete in ML ranking",
+        },
+        {
+            "rule_name": "nonpositive_active_pay",
+            "code_condition": "employment_status == active and gross_pay <= 0",
+            "gate_effect": "critical_hard_rule_flag = 1",
+            "why_critical": "Active paid cycle with nonpositive gross pay is treated as a hard failure",
+        },
+        {
+            "rule_name": "negative_net_pay",
+            "code_condition": "net_pay < 0",
+            "gate_effect": "critical_hard_rule_flag = 1",
+            "why_critical": "Negative net pay is too obvious for residual ranking",
+        },
+        {
+            "rule_name": "net_exceeds_gross",
+            "code_condition": "net_pay > gross_pay * 1.05",
+            "gate_effect": "critical_hard_rule_flag = 1",
+            "why_critical": "Implausible net-to-gross relationship is gated out upstream",
+        },
+        {
+            "rule_name": "physically_impossible_paid_hours",
+            "code_condition": "paid_hours > 24.0",
+            "gate_effect": "critical_hard_rule_flag = 1",
+            "why_critical": "Impossible within-day hours are removed before ML",
+        },
+        {
+            "rule_name": "paid_hours_missing_rate",
+            "code_condition": "paid_hours > 0 and pay_rate <= 0 or missing",
+            "gate_effect": "critical_hard_rule_flag = 1",
+            "why_critical": "Paid work without a valid rate is treated as a hard payroll defect",
+        },
+        {
+            "rule_name": "paid_minus_scheduled_exceeds_threshold",
+            "code_condition": "worked_hours - scheduled_hours > paid_vs_scheduled_threshold",
+            "gate_effect": "critical_hard_rule_flag = 1",
+            "why_critical": "Large schedule mismatch is handled as an upstream gate rather than residual ambiguity",
+        },
+    ],
+)
 appendix_hard_rule_definitions
 
 # %% [markdown]
@@ -1337,78 +1296,74 @@ appendix_hard_rule_definitions
 
 
 # %%
-def build_appendix_metric_definitions() -> pl.DataFrame:
-    return pl.DataFrame(
-        [
-            {
-                "metric": str(MetricCol.RESIDUAL_NDCG_AT_K),
-                "scope": "residual only",
-                "aggregation": "mean across facility x pay_period groups",
-                "numerator_or_gain": "DCG of ranked relevance_grade values within each group budget",
-                "denominator_or_reference": "ideal DCG for the same group budget",
-                "zero_positive_behavior": "group contributes 0 when ideal DCG is 0",
-            },
-            {
-                "metric": str(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
-                "scope": "residual only",
-                "aggregation": "global over reviewed residual rows",
-                "numerator_or_gain": "reviewed rule_missed_severe_issue count",
-                "denominator_or_reference": "all rule_missed_severe_issue count in residual evaluation frame",
-                "zero_positive_behavior": "returns 0 when total severe count is 0",
-            },
-            {
-                "metric": str(MetricCol.DOLLARS_CAPTURED_AT_K),
-                "scope": "residual positives only",
-                "aggregation": "global sum over reviewed residual rows",
-                "numerator_or_gain": "sum of y_dollar on reviewed residual issue rows",
-                "denominator_or_reference": "reported directly; capture rate uses total residual y_dollar",
-                "zero_positive_behavior": "returns 0 when no residual dollars exist",
-            },
-            {
-                "metric": str(MetricCol.REVIEWER_YIELD_AT_K),
-                "scope": "residual only",
-                "aggregation": "global reviewed share",
-                "numerator_or_gain": "reviewed residual rows with y_issue == 1",
-                "denominator_or_reference": "all reviewed residual rows",
-                "zero_positive_behavior": "returns 0 when no rows are reviewed",
-            },
-            {
-                "metric": str(MetricCol.INCREMENTAL_UTILITY_AT_K),
-                "scope": "residual only",
-                "aggregation": "global sum over reviewed residual rows",
-                "numerator_or_gain": "sum of net_utility on reviewed rows",
-                "denominator_or_reference": "reported directly rather than normalized",
-                "zero_positive_behavior": "returns 0 when no rows are reviewed",
-            },
-            {
-                "metric": str(MetricCol.PRECISION_AT_K),
-                "scope": "residual only",
-                "aggregation": "mean across facility x pay_period groups",
-                "numerator_or_gain": "group true positives",
-                "denominator_or_reference": "group reviewed rows",
-                "zero_positive_behavior": "group denominator clipped to at least 1",
-            },
-            {
-                "metric": str(MetricCol.RECALL_AT_K),
-                "scope": "residual only",
-                "aggregation": "mean across facility x pay_period groups",
-                "numerator_or_gain": "group true positives",
-                "denominator_or_reference": "group residual positives",
-                "zero_positive_behavior": "group denominator clipped to at least 1",
-            },
-            {
-                "metric": str(MetricCol.PR_AUC),
-                "scope": "residual only",
-                "aggregation": "single residual-frame summary",
-                "numerator_or_gain": "average_precision_score over y_issue and final score",
-                "denominator_or_reference": "not a ratio table metric",
-                "zero_positive_behavior": "falls back to 0 on degenerate label cases",
-            },
-        ],
-    )
-
-
-appendix_metric_definitions = build_appendix_metric_definitions()
+appendix_metric_definitions = pl.DataFrame(
+    [
+        {
+            "metric": str(MetricCol.RESIDUAL_NDCG_AT_K),
+            "scope": "residual only",
+            "aggregation": "mean across facility x pay_period groups",
+            "numerator_or_gain": "DCG of ranked relevance_grade values within each group budget",
+            "denominator_or_reference": "ideal DCG for the same group budget",
+            "zero_positive_behavior": "group contributes 0 when ideal DCG is 0",
+        },
+        {
+            "metric": str(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
+            "scope": "residual only",
+            "aggregation": "global over reviewed residual rows",
+            "numerator_or_gain": "reviewed rule_missed_severe_issue count",
+            "denominator_or_reference": "all rule_missed_severe_issue count in residual evaluation frame",
+            "zero_positive_behavior": "returns 0 when total severe count is 0",
+        },
+        {
+            "metric": str(MetricCol.DOLLARS_CAPTURED_AT_K),
+            "scope": "residual positives only",
+            "aggregation": "global sum over reviewed residual rows",
+            "numerator_or_gain": "sum of y_dollar on reviewed residual issue rows",
+            "denominator_or_reference": "reported directly; capture rate uses total residual y_dollar",
+            "zero_positive_behavior": "returns 0 when no residual dollars exist",
+        },
+        {
+            "metric": str(MetricCol.REVIEWER_YIELD_AT_K),
+            "scope": "residual only",
+            "aggregation": "global reviewed share",
+            "numerator_or_gain": "reviewed residual rows with y_issue == 1",
+            "denominator_or_reference": "all reviewed residual rows",
+            "zero_positive_behavior": "returns 0 when no rows are reviewed",
+        },
+        {
+            "metric": str(MetricCol.INCREMENTAL_UTILITY_AT_K),
+            "scope": "residual only",
+            "aggregation": "global sum over reviewed residual rows",
+            "numerator_or_gain": "sum of net_utility on reviewed rows",
+            "denominator_or_reference": "reported directly rather than normalized",
+            "zero_positive_behavior": "returns 0 when no rows are reviewed",
+        },
+        {
+            "metric": str(MetricCol.PRECISION_AT_K),
+            "scope": "residual only",
+            "aggregation": "mean across facility x pay_period groups",
+            "numerator_or_gain": "group true positives",
+            "denominator_or_reference": "group reviewed rows",
+            "zero_positive_behavior": "group denominator clipped to at least 1",
+        },
+        {
+            "metric": str(MetricCol.RECALL_AT_K),
+            "scope": "residual only",
+            "aggregation": "mean across facility x pay_period groups",
+            "numerator_or_gain": "group true positives",
+            "denominator_or_reference": "group residual positives",
+            "zero_positive_behavior": "group denominator clipped to at least 1",
+        },
+        {
+            "metric": str(MetricCol.PR_AUC),
+            "scope": "residual only",
+            "aggregation": "single residual-frame summary",
+            "numerator_or_gain": "average_precision_score over y_issue and final score",
+            "denominator_or_reference": "not a ratio table metric",
+            "zero_positive_behavior": "falls back to 0 on degenerate label cases",
+        },
+    ],
+)
 appendix_metric_definitions
 
 # %% [markdown]
@@ -1416,42 +1371,36 @@ appendix_metric_definitions
 
 
 # %%
-def build_appendix_group_construction(
-    review_budgets: tuple[float, ...],
-) -> pl.DataFrame:
-    return pl.DataFrame(
-        [
-            {
-                "component": "ranking item",
-                "active_definition": str(PayrollCol.EMPLOYEE_PAY_CYCLE_ID),
-            },
-            {
-                "component": "ranking group",
-                "active_definition": f"{PayrollCol.FACILITY_ID} x {PayrollCol.PAY_PERIOD_INDEX}",
-            },
-            {
-                "component": "evaluation scope",
-                "active_definition": f"{PayrollCol.RESIDUAL_RECORD} == 1 only",
-            },
-            {
-                "component": "default budget framing",
-                "active_definition": ", ".join(
-                    format_review_budget_pct(budget) for budget in review_budgets
-                ),
-            },
-            {
-                "component": "percent budget conversion",
-                "active_definition": "ceil(group_size * budget) with minimum 1 reviewed row per non-empty group",
-            },
-            {
-                "component": "score ordering",
-                "active_definition": f"descending {ScoreCol.FINAL_ANOMALY_SCORE} within each group",
-            },
-        ],
-    )
-
-
-appendix_group_construction = build_appendix_group_construction(review_budget_percents)
+appendix_group_construction = pl.DataFrame(
+    [
+        {
+            "component": "ranking item",
+            "active_definition": str(PayrollCol.EMPLOYEE_PAY_CYCLE_ID),
+        },
+        {
+            "component": "ranking group",
+            "active_definition": f"{PayrollCol.FACILITY_ID} x {PayrollCol.PAY_PERIOD_INDEX}",
+        },
+        {
+            "component": "evaluation scope",
+            "active_definition": f"{PayrollCol.RESIDUAL_RECORD} == 1 only",
+        },
+        {
+            "component": "default budget framing",
+            "active_definition": ", ".join(
+                format_review_budget_pct(budget) for budget in review_budget_percents
+            ),
+        },
+        {
+            "component": "percent budget conversion",
+            "active_definition": "ceil(group_size * budget) with minimum 1 reviewed row per non-empty group",
+        },
+        {
+            "component": "score ordering",
+            "active_definition": f"descending {ScoreCol.FINAL_ANOMALY_SCORE} within each group",
+        },
+    ],
+)
 appendix_group_construction
 
 # %% [markdown]
@@ -1459,39 +1408,35 @@ appendix_group_construction
 
 
 # %%
-def build_appendix_zero_positive_policy() -> pl.DataFrame:
-    return pl.DataFrame(
-        [
-            {
-                "case": "group recall with zero residual positives",
-                "implemented_behavior": "group_anomalies denominator is clipped to at least 1",
-                "result": "group recall becomes 0 instead of undefined",
-            },
-            {
-                "case": "group NDCG with zero ideal gain",
-                "implemented_behavior": "if ideal DCG is 0, group NDCG is set to 0",
-                "result": "all-negative groups remain in the grouped average",
-            },
-            {
-                "case": "global severe recall with zero severe residual issues",
-                "implemented_behavior": "denominator uses max(total_severe, 1.0)",
-                "result": "reported severe recall is 0 instead of undefined",
-            },
-            {
-                "case": "PR-AUC on degenerate residual labels",
-                "implemented_behavior": "ValueError is caught and PR-AUC is set to 0",
-                "result": "notebook remains executable under degenerate slices",
-            },
-            {
-                "case": "tiny percent budgets on non-empty groups",
-                "implemented_behavior": "review budget count is clipped to a minimum of 1",
-                "result": "every non-empty facility-cycle group contributes at least one reviewed row",
-            },
-        ],
-    )
-
-
-appendix_zero_positive_policy = build_appendix_zero_positive_policy()
+appendix_zero_positive_policy = pl.DataFrame(
+    [
+        {
+            "case": "group recall with zero residual positives",
+            "implemented_behavior": "group_anomalies denominator is clipped to at least 1",
+            "result": "group recall becomes 0 instead of undefined",
+        },
+        {
+            "case": "group NDCG with zero ideal gain",
+            "implemented_behavior": "if ideal DCG is 0, group NDCG is set to 0",
+            "result": "all-negative groups remain in the grouped average",
+        },
+        {
+            "case": "global severe recall with zero severe residual issues",
+            "implemented_behavior": "denominator uses max(total_severe, 1.0)",
+            "result": "reported severe recall is 0 instead of undefined",
+        },
+        {
+            "case": "PR-AUC on degenerate residual labels",
+            "implemented_behavior": "ValueError is caught and PR-AUC is set to 0",
+            "result": "notebook remains executable under degenerate slices",
+        },
+        {
+            "case": "tiny percent budgets on non-empty groups",
+            "implemented_behavior": "review budget count is clipped to a minimum of 1",
+            "result": "every non-empty facility-cycle group contributes at least one reviewed row",
+        },
+    ],
+)
 appendix_zero_positive_policy
 
 # %% [markdown]
@@ -1566,44 +1511,40 @@ pl.DataFrame(
 
 
 # %%
-def build_appendix_model_settings() -> pl.DataFrame:
-    return pl.DataFrame(
-        [
-            {
-                "model": "classifier",
-                "estimator_or_logic": "HistGradientBoostingClassifier",
-                "current_fixed_settings": "max_depth=3, random_state=config.seed",
-                "documented_future_tuning_space": "max_depth, learning_rate, max_leaf_nodes, min_samples_leaf",
-            },
-            {
-                "model": "cost_sensitive_classifier",
-                "estimator_or_logic": "HistGradientBoostingClassifier with sample weights",
-                "current_fixed_settings": "max_depth=3 plus issue-dollar-severity weighting",
-                "documented_future_tuning_space": "classifier settings plus weight multipliers",
-            },
-            {
-                "model": "regressor",
-                "estimator_or_logic": "HistGradientBoostingRegressor",
-                "current_fixed_settings": "max_depth=3, lower_bound=0.0, random_state=config.seed",
-                "documented_future_tuning_space": "max_depth, learning_rate, max_leaf_nodes, min_samples_leaf",
-            },
-            {
-                "model": "learning_to_rank proxy",
-                "estimator_or_logic": "HistGradientBoostingRegressor on relevance_grade",
-                "current_fixed_settings": "max_depth=3, lower_bound=0.0, upper_bound=3.0",
-                "documented_future_tuning_space": "same regressor settings plus alternative graded targets",
-            },
-            {
-                "model": "expected_value",
-                "estimator_or_logic": "minmax(estimated_exposure * clip(classification, 0.05, 1.0))",
-                "current_fixed_settings": "classification floor=0.05 before multiplication",
-                "documented_future_tuning_space": "classification floor, exposure formula, calibration strategy",
-            },
-        ],
-    )
-
-
-appendix_model_settings = build_appendix_model_settings()
+appendix_model_settings = pl.DataFrame(
+    [
+        {
+            "model": "classifier",
+            "estimator_or_logic": "HistGradientBoostingClassifier",
+            "current_fixed_settings": "max_depth=3, random_state=config.seed",
+            "documented_future_tuning_space": "max_depth, learning_rate, max_leaf_nodes, min_samples_leaf",
+        },
+        {
+            "model": "cost_sensitive_classifier",
+            "estimator_or_logic": "HistGradientBoostingClassifier with sample weights",
+            "current_fixed_settings": "max_depth=3 plus issue-dollar-severity weighting",
+            "documented_future_tuning_space": "classifier settings plus weight multipliers",
+        },
+        {
+            "model": "regressor",
+            "estimator_or_logic": "HistGradientBoostingRegressor",
+            "current_fixed_settings": "max_depth=3, lower_bound=0.0, random_state=config.seed",
+            "documented_future_tuning_space": "max_depth, learning_rate, max_leaf_nodes, min_samples_leaf",
+        },
+        {
+            "model": "learning_to_rank proxy",
+            "estimator_or_logic": "HistGradientBoostingRegressor on relevance_grade",
+            "current_fixed_settings": "max_depth=3, lower_bound=0.0, upper_bound=3.0",
+            "documented_future_tuning_space": "same regressor settings plus alternative graded targets",
+        },
+        {
+            "model": "expected_value",
+            "estimator_or_logic": "minmax(estimated_exposure * clip(classification, 0.05, 1.0))",
+            "current_fixed_settings": "classification floor=0.05 before multiplication",
+            "documented_future_tuning_space": "classification floor, exposure formula, calibration strategy",
+        },
+    ],
+)
 appendix_model_settings
 
 # %% [markdown]
@@ -1611,38 +1552,29 @@ appendix_model_settings
 
 
 # %%
-def build_appendix_score_bucket_calibration(
-    scored_frame: pl.DataFrame,
-    bucket_count: int = 10,
-) -> pl.DataFrame:
-    residual_frame = scored_frame.filter(
-        pl.col(PayrollCol.RESIDUAL_RECORD) == 1,
-    ).with_columns(
-        pl.col(ScoreCol.FINAL_ANOMALY_SCORE)
-        .qcut(bucket_count, allow_duplicates=True)
-        .alias("score_bucket"),
-        (
-            pl.col(PayrollCol.TOTAL_GROSS_PAY)
-            - pl.col(PayrollCol.TOTAL_EXPECTED_GROSS_PAY)
-        ).alias("gross_gap"),
+score_bucket_count = 10
+score_bucket_residual_frame = scored.filter(
+    pl.col(PayrollCol.RESIDUAL_RECORD) == 1,
+).with_columns(
+    pl.col(ScoreCol.FINAL_ANOMALY_SCORE)
+    .qcut(score_bucket_count, allow_duplicates=True)
+    .alias("score_bucket"),
+    (
+        pl.col(PayrollCol.TOTAL_GROSS_PAY) - pl.col(PayrollCol.TOTAL_EXPECTED_GROSS_PAY)
+    ).alias("gross_gap"),
+)
+appendix_score_bucket_calibration = (
+    score_bucket_residual_frame.group_by("score_bucket", maintain_order=True)
+    .agg(
+        pl.len().alias("records"),
+        pl.mean(ScoreCol.FINAL_ANOMALY_SCORE).round(4).alias("avg_score"),
+        pl.mean(PayrollCol.Y_ISSUE).round(4).alias("issue_rate"),
+        pl.mean(PayrollCol.Y_DOLLAR).round(2).alias("avg_residual_dollars"),
+        pl.mean("gross_gap").round(2).alias("avg_gross_gap"),
+        pl.mean(ScoreCol.ESTIMATED_EXPOSURE).round(2).alias("avg_estimated_exposure"),
     )
-    return (
-        residual_frame.group_by("score_bucket", maintain_order=True)
-        .agg(
-            pl.len().alias("records"),
-            pl.mean(ScoreCol.FINAL_ANOMALY_SCORE).round(4).alias("avg_score"),
-            pl.mean(PayrollCol.Y_ISSUE).round(4).alias("issue_rate"),
-            pl.mean(PayrollCol.Y_DOLLAR).round(2).alias("avg_residual_dollars"),
-            pl.mean("gross_gap").round(2).alias("avg_gross_gap"),
-            pl.mean(ScoreCol.ESTIMATED_EXPOSURE)
-            .round(2)
-            .alias("avg_estimated_exposure"),
-        )
-        .with_row_index("bucket_rank", offset=1)
-    )
-
-
-appendix_score_bucket_calibration = build_appendix_score_bucket_calibration(scored)
+    .with_row_index("bucket_rank", offset=1)
+)
 appendix_score_bucket_calibration
 
 # %%
@@ -1714,79 +1646,68 @@ scenario_benchmark.scenario_seed_design
 
 
 # %%
-def build_appendix_stress_test_config(
-    config: PayrollConfig,
-    review_budgets: tuple[float, ...],
-    validation_mode: bool,
-) -> pl.DataFrame:
-    scenario_catalog = diagnostic_scenario_catalog()
-    scenario_rows = [
-        {
-            "artifact": "scenario_catalog",
-            "name": scenario.name,
-            "status": str(scenario.metadata.get("status", "unknown")),
-            "detail": str(scenario.metadata.get("description", "")),
-        }
-        for scenario in scenario_catalog.values()
-    ]
-    config_rows = [
-        {
-            "artifact": "runtime_config",
-            "name": "validation_mode",
-            "status": "enabled" if validation_mode else "disabled",
-            "detail": "Reduced workload for notebook execution checks"
-            if validation_mode
-            else "Full notebook research workload",
-        },
-        {
-            "artifact": "runtime_config",
-            "name": "facility_count",
-            "status": str(config.facility_count),
-            "detail": "Synthetic facility count for this notebook run",
-        },
-        {
-            "artifact": "runtime_config",
-            "name": "employee_count",
-            "status": str(config.employee_count),
-            "detail": "Synthetic employee population for this notebook run",
-        },
-        {
-            "artifact": "runtime_config",
-            "name": "pay_periods",
-            "status": str(config.pay_periods),
-            "detail": "Synthetic payroll cycles used for temporal evaluation",
-        },
-        {
-            "artifact": "runtime_config",
-            "name": "review_budget_percents",
-            "status": ", ".join(
-                format_review_budget_pct(budget) for budget in review_budgets
-            ),
-            "detail": "Grouped review budgets for the scenario-based residual ranking benchmark",
-        },
-        {
-            "artifact": "runtime_config",
-            "name": "scenario_seed_design",
-            "status": (
-                f"{len(scenario_benchmark_seeds)} seeds x "
-                f"{scenario_benchmark.scenario_catalog.height} scenarios"
-            ),
-            "detail": "Configured scenario-seed benchmark design",
-        },
-        {
-            "artifact": "runtime_config",
-            "name": "reference_window_periods",
-            "status": str(config.reference_window_periods),
-            "detail": "Prior periods used for scoring-time context",
-        },
-    ]
-    return pl.DataFrame(config_rows + scenario_rows)
-
-
-appendix_stress_test_config = build_appendix_stress_test_config(
-    sim_config,
-    review_budget_percents,
-    validation_mode,
+diagnostic_scenario_rows = [
+    {
+        "artifact": "scenario_catalog",
+        "name": scenario.name,
+        "status": str(scenario.metadata.get("status", "unknown")),
+        "detail": str(scenario.metadata.get("description", "")),
+    }
+    for scenario in diagnostic_scenario_catalog().values()
+]
+runtime_config_rows = [
+    {
+        "artifact": "runtime_config",
+        "name": "validation_mode",
+        "status": "enabled" if validation_mode else "disabled",
+        "detail": "Reduced workload for notebook execution checks"
+        if validation_mode
+        else "Full notebook research workload",
+    },
+    {
+        "artifact": "runtime_config",
+        "name": "facility_count",
+        "status": str(sim_config.facility_count),
+        "detail": "Synthetic facility count for this notebook run",
+    },
+    {
+        "artifact": "runtime_config",
+        "name": "employee_count",
+        "status": str(sim_config.employee_count),
+        "detail": "Synthetic employee population for this notebook run",
+    },
+    {
+        "artifact": "runtime_config",
+        "name": "pay_periods",
+        "status": str(sim_config.pay_periods),
+        "detail": "Synthetic payroll cycles used for temporal evaluation",
+    },
+    {
+        "artifact": "runtime_config",
+        "name": "review_budget_percents",
+        "status": ", ".join(
+            format_review_budget_pct(budget) for budget in review_budget_percents
+        ),
+        "detail": "Grouped review budgets for the scenario-based residual ranking benchmark",
+    },
+    {
+        "artifact": "runtime_config",
+        "name": "scenario_seed_design",
+        "status": (
+            f"{len(scenario_benchmark_seeds)} seeds x "
+            f"{scenario_benchmark.scenario_catalog.height} scenarios"
+        ),
+        "detail": "Configured scenario-seed benchmark design",
+    },
+    {
+        "artifact": "runtime_config",
+        "name": "reference_window_periods",
+        "status": str(sim_config.reference_window_periods),
+        "detail": "Prior periods used for scoring-time context",
+    },
+]
+appendix_stress_test_config = pl.DataFrame(
+    runtime_config_rows + diagnostic_scenario_rows,
 )
 appendix_stress_test_config
 
