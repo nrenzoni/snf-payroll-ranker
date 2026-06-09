@@ -18,6 +18,10 @@ notebooks/**/*.ipynb
 # Ignore Jupyter autosave checkpoints
 **/.ipynb_checkpoints/
 
+# Jupyter runtime artifacts
+.jupyter_ystore.db
+notebooks/.jupyter/
+
 # vi temp
 *.swp
 
