@@ -16,6 +16,7 @@ def setup_polars_display() -> None:
     pl.Config(
         tbl_formatting="MARKDOWN",
         tbl_hide_column_data_types=False,
+        tbl_rows=50,
         tbl_cols=30,
         tbl_width_chars=300,
         fmt_str_lengths=300,
