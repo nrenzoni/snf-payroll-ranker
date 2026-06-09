@@ -30,7 +30,11 @@ class TqdmProgress:
         )
         if not self.disable:
             bar.refresh()
-        try:
-            yield from bar
-        finally:
-            bar.close()
+
+        def iterate() -> Iterator[T]:
+            try:
+                yield from bar
+            finally:
+                bar.close()
+
+        return iterate()

@@ -1701,7 +1701,10 @@ scenario_summary_compact
 # #### DGP scenario catalog
 
 # %%
-scenario_benchmark.scenario_catalog
+scenario_benchmark.scenario_catalog.drop(
+    "scenario",
+    "status",
+)
 
 # %% [markdown]
 # #### scenario x seed design
