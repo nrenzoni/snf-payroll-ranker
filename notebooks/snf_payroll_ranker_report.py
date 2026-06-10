@@ -757,8 +757,92 @@ winner_map = (
     .sort(["objective", MetricCol.K])
 )
 
+pairwise_lift_specs = pl.DataFrame(
+    [
+        {
+            "Comparison": "cost-sensitive - expected_value",
+            "Objective": "utility",
+            "Budget": "5%",
+            "challenger_model": "cost_sensitive_classifier",
+            "metric": str(MetricCol.INCREMENTAL_UTILITY_AT_K),
+            "k": 0.05,
+        },
+        {
+            "Comparison": "classifier - expected_value",
+            "Objective": "dollars",
+            "Budget": "5%",
+            "challenger_model": "classifier",
+            "metric": str(MetricCol.DOLLARS_CAPTURED_AT_K),
+            "k": 0.05,
+        },
+        {
+            "Comparison": "LTR - expected_value",
+            "Objective": "severe recall",
+            "Budget": "1%",
+            "challenger_model": "learning_to_rank",
+            "metric": str(MetricCol.RULE_MISSED_SEVERE_RECALL_AT_K),
+            "k": 0.01,
+        },
+    ],
+)
+pairwise_lift_values = (
+    pairwise_lift_specs.join(
+        primary_metric_units.select(
+            "unit",
+            "model",
+            "metric",
+            MetricCol.K,
+            "review_budget_label",
+            pl.col("value").alias("challenger_value"),
+        ),
+        left_on=["challenger_model", "metric", "k", "Budget"],
+        right_on=["model", "metric", MetricCol.K, "review_budget_label"],
+        how="left",
+    )
+    .join(
+        primary_metric_units.filter(pl.col("model") == "expected_value").select(
+            "unit",
+            "metric",
+            MetricCol.K,
+            "review_budget_label",
+            pl.col("value").alias("expected_value"),
+        ),
+        left_on=["unit", "metric", "k", "Budget"],
+        right_on=["unit", "metric", MetricCol.K, "review_budget_label"],
+        how="left",
+    )
+    .with_columns((pl.col("challenger_value") - pl.col("expected_value")).alias("lift"))
+)
+pairwise_lift_summary = (
+    pairwise_lift_values.group_by(
+        "Comparison",
+        "Objective",
+        "Budget",
+        maintain_order=True,
+    )
+    .agg(
+        pl.median("lift").alias("Median lift"),
+        pl.col("lift").quantile(0.10).alias("P10"),
+        pl.col("lift").quantile(0.90).alias("P90"),
+        (pl.col("lift") > 0).mean().alias("P(lift > 0)"),
+    )
+    .with_columns(
+        pl.col("Median lift").round(4),
+        pl.col("P10").round(4),
+        pl.col("P90").round(4),
+        pl.col("P(lift > 0)").round(4),
+    )
+)
+
 # %% [markdown]
 # ### Winner Frequency
+#
+# Pairwise lifts compare challenger performance against expected value on the
+# same scenario-seed units, making winner-frequency gaps easier to size.
+
+
+# %%
+pairwise_lift_summary
 
 
 # %%
