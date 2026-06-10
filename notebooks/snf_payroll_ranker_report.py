@@ -1475,7 +1475,7 @@ pl.DataFrame(
 # | classifier | HistGradientBoostingClassifier | max_depth=3, random_state=config.seed | max_depth, learning_rate, max_leaf_nodes, min_samples_leaf |
 # | cost_sensitive_classifier | HistGradientBoostingClassifier with sample weights | max_depth=3 plus issue-dollar-severity weighting | classifier settings plus weight multipliers |
 # | regressor | HistGradientBoostingRegressor | max_depth=3, lower_bound=0.0, random_state=config.seed | max_depth, learning_rate, max_leaf_nodes, min_samples_leaf |
-# | learning_to_rank proxy | HistGradientBoostingRegressor on relevance_grade | max_depth=3, lower_bound=0.0, upper_bound=3.0 | same regressor settings plus alternative graded targets |
+# | learning_to_rank | LightGBM LambdaRank on relevance_grade, grouped by facility x pay period | objective=lambdarank, metric=ndcg, num_iterations=80, learning_rate=0.05, max_depth=3, min_child_samples=5, num_threads=config.ltr_num_threads, seed=config.seed | num_iterations, learning_rate, max_depth, min_child_samples, num_leaves, LambdaRank objective or NDCG settings |
 # | expected_value | minmax(estimated_exposure * clip(classification, 0.05, 1.0)) | classification floor=0.05 before multiplication | classification floor, exposure formula, calibration strategy |
 
 # %% [markdown]
