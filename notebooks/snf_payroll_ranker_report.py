@@ -173,12 +173,13 @@ def write_scenario_benchmark_cache(
 # violations, which model should rank the remaining SNF payroll records for
 # limited human review?
 #
-# Use **expected value** as the default residual ranker for payroll loss
-# prevention. It best matches the operating goal: find records that are both
-# likely wrong and financially material. Keep **learning to rank** as the
-# challenger when the goal shifts toward tight-budget severity ordering.
-# Classifier scores are useful as reviewer context, not as the primary queue
-# ordering.
+# Across the current scenario benchmark, probability-based models -- especially
+# the cost-sensitive classifier -- are the most robust winners for queue quality
+# and utility under the implemented DGPs. Expected-value scoring remains the
+# most conceptually aligned model for payroll loss prevention, but its current
+# implementation does not consistently beat the classifier family across
+# scenario-seed results. The next modeling iteration should focus on improving
+# expected-value calibration and exposure estimation.
 
 # %% [markdown]
 # ## 1. Decision Context: Residual Review After Hard Rules
