@@ -365,18 +365,7 @@ hard_rule_funnel_plot_data = funnel.with_columns(
 # - **Learning-to-rank models**: rank records by graded residual review priority within facility x payroll cycle.
 #
 # Historical observed corrections are retained for bias analysis only. They are
-# not treated as ground truth.hard_rule_funnel_plot_data = funnel.with_columns(
-#     pl.col("stage").cast(pl.String),
-#     pl.col("records").cast(pl.Float64),
-# )
-# (
-#     ggplot(hard_rule_funnel_plot_data, aes(x="stage", y="records", fill="stage"))
-#     + geom_bar(stat="identity")
-#     + coord_flip()
-#     + theme_minimal()
-#     + labs(x="Gate stage", y="Employee-pay-cycle records", fill="Stage")
-#     + ggtitle("Hard-Rule Gate Narrows the ML Review Universe")
-# )
+# not treated as ground truth.
 
 # %%
 scenario_summary_compact = scenario_benchmark.scenario_summary.select(
@@ -932,9 +921,10 @@ winner_map_plot_data = winner_map.with_columns(
 # %% [markdown]
 # The benchmark shows a split leaderboard rather than one universal winner.
 # That is expected: issue probability, dollar recovery, utility, and severity
-# ordering reward different queue behavior. For the production loss-prevention
-# decision, value-aware ranking is the best default because wasted review time
-# and missed dollars both matter.
+# ordering reward different queue behavior. Under the implemented DGPs, the
+# empirical production default should come from the classifier family: the
+# cost-sensitive classifier is strongest at tight budgets and for queue quality,
+# while the standard classifier often catches up at broader review budgets.
 
 
 # %%
@@ -985,11 +975,13 @@ def build_similarity_heatmap(
 
 
 # %% [markdown]
-# Expected value is the production default because the residual task is
+# Expected value remains the conceptual target because the residual task is
 # financial: high-priority records are not merely likely to be wrong, they are
-# costly when ignored. Learning to rank remains the challenger for operating
-# modes that prioritize severe top-of-queue ordering over dollar-weighted net
-# value.
+# costly when ignored. The current implementation should be treated as a model
+# improvement track rather than the empirical default until exposure estimation
+# and calibration consistently improve scenario-seed results. Learning to rank
+# remains a severity-oriented challenger for operating modes that prioritize
+# top-of-queue ordering over dollar-weighted net value.
 
 # %% [markdown]
 # ## 6. Why Results Differ By Objective
@@ -998,7 +990,7 @@ def build_similarity_heatmap(
 #
 # - Timekeeping and soft-warning context drive most of the feature lift after hard rules remove obvious defects.
 # - Residual-only training remains preferable because the deployed model scores the residual review queue, not all payroll records.
-# - Label choice changes the winner: classifiers are strongest for pure issue probability, expected value wins dollar/utility views, and learning to rank is the clearest graded queue-ordering challenger.
+# - Label choice changes the winner: single-run label ablations show why expected value is conceptually attractive for dollar/utility targets, but the cross-scenario benchmark favors the classifier family as the more robust empirical default.
 
 # %%
 feature_ablation: pl.DataFrame | None = None
@@ -1065,9 +1057,9 @@ if feature_ablation_lift is not None:
 
 # %% [markdown]
 # Detailed ablation rows stay in the appendix; the main implication is simple:
-# expected value is not winning because it sees obvious hard-rule failures. It
-# wins because value-aware ranking remains useful inside the ambiguous residual
-# queue.
+# expected value remains useful because value-aware ranking is aligned with the
+# residual payroll-loss objective, but the current implementation is not robust
+# enough across scenario-seed results to displace the classifier family.
 
 # %% [markdown]
 # ## 7. Recommended Deployment Pattern
@@ -1106,24 +1098,26 @@ if not validation_mode:
 #
 # | decision | recommendation | reader_takeaway |
 # | :--- | :--- | :--- |
-# | Default residual ranker | Expected value | Use for the production queue when payroll loss prevention is the operating goal. |
-# | Primary challenger | Learning to rank | Track when severity ordering at tight review budgets becomes the primary goal. |
-# | Diagnostic companion | Classifier | Show issue probability for reviewer context and calibration checks. |
+# | Default residual ranker | Cost-sensitive classifier | Use as the empirical default, especially for tight review budgets and queue-quality robustness. |
+# | Broad-budget fallback | Classifier | Consider when review budgets are less constrained and median winner-map results favor pure probability ranking. |
+# | Model-improvement target | Expected value | Keep as the conceptually aligned payroll-loss objective, but improve calibration and exposure estimation before promoting it. |
+# | Severity challenger | Learning to rank | Track when severe top-of-queue ordering becomes the primary goal. |
 # | Required monitoring | facility x pay period x issue family | Monitor drift, severe misses, and issue-family blind spots after deployment. |
 
 # %% [markdown]
-# For residual SNF payroll loss prevention after hard-rule screening, use
-# expected-value scoring as the default residual queue ranker. Keep learning to
-# rank as the challenger for severe-case ordering, and keep classifier
-# probability visible for reviewer context rather than primary ordering.
+# For residual SNF payroll loss prevention after hard-rule screening, use the
+# cost-sensitive classifier as the current empirical default and keep the
+# standard classifier as the broad-budget fallback. Keep expected-value scoring
+# on the model-improvement path until its exposure component consistently beats
+# the classifier family across scenario-seed results.
 #
 # Deployment pattern:
 #
 # 1. Keep critical hard rules upstream as deterministic controls.
 # 2. Score only the residual review queue with ML.
-# 3. Use expected-value scoring as the default residual queue ranker.
-# 4. Track learning-to-rank as a challenger for top-of-queue severity ordering.
-# 5. Display reviewer-facing reason codes, issue probability, and expected dollar impact.
+# 3. Use the cost-sensitive classifier as the default residual queue ranker.
+# 4. Track the standard classifier, expected value, and learning-to-rank as challengers.
+# 5. Display reviewer-facing reason codes, issue probability, and estimated dollar exposure.
 # 6. Monitor performance by facility, pay period, and issue family.
 # 7. Periodically audit random residual records to reduce label bias.
 
@@ -1588,6 +1582,7 @@ appendix_score_bucket_calibration = (
         pl.mean("gross_gap").round(2).alias("avg_gross_gap"),
         pl.mean(ScoreCol.ESTIMATED_EXPOSURE).round(2).alias("avg_estimated_exposure"),
     )
+    .sort("avg_score")
     .with_row_index("bucket_rank", offset=1)
 )
 appendix_score_bucket_calibration
