@@ -32,11 +32,14 @@
 # %autoreload 2
 
 # %%
+import json
+import shutil
 from dataclasses import replace
+from pathlib import Path
 
 import polars as pl
 from common.display import setup_notebook_html, setup_polars_display
-from common.execution import notebook_validation_mode
+from common.execution import load_cached_or_calc, notebook_validation_mode
 from common.plots import (
     aes,
     coord_flip,
@@ -76,6 +79,7 @@ from payroll_anomaly_ranking.evaluation import (
 from payroll_anomaly_ranking.explainability import build_employee_cycle_review_queue
 from payroll_anomaly_ranking.models import score_employee_pay_cycles
 from payroll_anomaly_ranking.scenario_benchmark import (
+    ScenarioBenchmarkResults,
     run_employee_cycle_scenario_benchmark,
 )
 from payroll_anomaly_ranking.scenarios import (
@@ -97,6 +101,69 @@ NOTEBOOK_LTR_NUM_THREADS = 1 if validation_mode else 8
 # %%
 def format_review_budget_pct(budget: float) -> str:
     return f"{budget:.0%}" if budget <= 1 else str(int(budget))
+
+
+NOTEBOOK_DIR = (
+    Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+)
+CACHE_DIR = NOTEBOOK_DIR / "data" / "cache"
+
+
+SCENARIO_BENCHMARK_CACHE_FRAMES = (
+    "scenario_catalog",
+    "scenario_seed_design",
+    "scenario_summary",
+    "metric_units",
+    "winner_frequency",
+    "median_metric_summary",
+    "winner_map",
+)
+
+
+def read_scenario_benchmark_cache(cache_path: Path) -> ScenarioBenchmarkResults:
+    missing_frames = [
+        frame_name
+        for frame_name in SCENARIO_BENCHMARK_CACHE_FRAMES
+        if not (cache_path / f"{frame_name}.parquet").exists()
+    ]
+    if missing_frames:
+        missing = ", ".join(missing_frames)
+        raise FileNotFoundError(
+            f"Incomplete scenario benchmark cache at {cache_path}; missing {missing}",
+        )
+
+    frames = {
+        frame_name: pl.read_parquet(cache_path / f"{frame_name}.parquet")
+        for frame_name in SCENARIO_BENCHMARK_CACHE_FRAMES
+    }
+    return ScenarioBenchmarkResults(**frames)
+
+
+def write_scenario_benchmark_cache(
+    cache_path: Path,
+    result: ScenarioBenchmarkResults,
+) -> None:
+    tmp_path = cache_path.with_name(f".{cache_path.name}.tmp")
+    if tmp_path.exists():
+        shutil.rmtree(tmp_path)
+    tmp_path.mkdir(parents=True)
+
+    for frame_name in SCENARIO_BENCHMARK_CACHE_FRAMES:
+        frame = getattr(result, frame_name)
+        frame.write_parquet(tmp_path / f"{frame_name}.parquet")
+
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "cache_type": "ScenarioBenchmarkResults",
+                "format": "polars-parquet-directory",
+                "frames": list(SCENARIO_BENCHMARK_CACHE_FRAMES),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    tmp_path.replace(cache_path)
 
 
 # %% [markdown]
@@ -230,11 +297,21 @@ if validation_mode:
     }
 
 # %%
-scenario_benchmark = run_employee_cycle_scenario_benchmark(
-    scenario_benchmark_config,
-    scenarios=scenario_benchmark_scenarios,
-    seeds=scenario_benchmark_seeds,
-    progress=progress,
+scenario_benchmark = load_cached_or_calc(
+    CACHE_DIR
+    / (
+        "scenario_benchmark_validation"
+        if validation_mode
+        else "scenario_benchmark_full"
+    ),
+    lambda: run_employee_cycle_scenario_benchmark(
+        scenario_benchmark_config,
+        scenarios=scenario_benchmark_scenarios,
+        seeds=scenario_benchmark_seeds,
+        progress=progress,
+    ),
+    read=read_scenario_benchmark_cache,
+    write=write_scenario_benchmark_cache,
 )
 
 # %%
